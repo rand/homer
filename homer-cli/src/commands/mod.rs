@@ -1,3 +1,4 @@
+pub mod diff;
 pub mod graph;
 pub mod init;
 pub mod query;
@@ -18,6 +19,8 @@ pub enum Command {
     Query(query::QueryArgs),
     /// Explore graph analysis results
     Graph(graph::GraphArgs),
+    /// Compare architectural state between two git refs
+    Diff(diff::DiffArgs),
 }
 
 pub async fn run(cmd: Command) -> anyhow::Result<()> {
@@ -27,5 +30,6 @@ pub async fn run(cmd: Command) -> anyhow::Result<()> {
         Command::Status(args) => status::run(args).await,
         Command::Query(args) => query::run(args).await,
         Command::Graph(args) => graph::run(args).await,
+        Command::Diff(args) => diff::run(args).await,
     }
 }

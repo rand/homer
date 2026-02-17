@@ -480,7 +480,29 @@ async fn render_conventions(out: &mut String, store: &dyn HomerStore) -> crate::
     writeln!(out, "## Conventions").unwrap();
     writeln!(out).unwrap();
 
-    // Detect language distribution
+    // Language distribution
+    render_language_distribution(out, store).await?;
+
+    // Dependency counts
+    render_dependency_count(out, store).await?;
+
+    // Convention analysis results (stored on root module by ConventionAnalyzer)
+    let root_id = find_convention_root(store).await?;
+    if let Some(root_id) = root_id {
+        render_naming_conventions(out, store, root_id).await?;
+        render_testing_conventions(out, store, root_id).await?;
+        render_error_conventions(out, store, root_id).await?;
+        render_doc_conventions(out, store, root_id).await?;
+        render_agent_rules(out, store, root_id).await?;
+    }
+
+    Ok(())
+}
+
+async fn render_language_distribution(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
     let file_filter = crate::types::NodeFilter {
         kind: Some(NodeKind::File),
         ..Default::default()
@@ -505,7 +527,13 @@ async fn render_conventions(out: &mut String, store: &dyn HomerStore) -> crate::
         writeln!(out).unwrap();
     }
 
-    // Detect dependency counts
+    Ok(())
+}
+
+async fn render_dependency_count(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
     let dep_filter = crate::types::NodeFilter {
         kind: Some(NodeKind::ExternalDep),
         ..Default::default()
@@ -515,6 +543,270 @@ async fn render_conventions(out: &mut String, store: &dyn HomerStore) -> crate::
         writeln!(out, "**Dependencies:** {} external packages", deps.len()).unwrap();
         writeln!(out).unwrap();
     }
+    Ok(())
+}
+
+async fn find_convention_root(
+    store: &dyn HomerStore,
+) -> crate::error::Result<Option<crate::types::NodeId>> {
+    let mod_filter = crate::types::NodeFilter {
+        kind: Some(NodeKind::Module),
+        ..Default::default()
+    };
+    let modules = store.find_nodes(&mod_filter).await?;
+    Ok(modules.iter().min_by_key(|m| m.name.len()).map(|m| m.id))
+}
+
+async fn render_naming_conventions(
+    out: &mut String,
+    store: &dyn HomerStore,
+    root_id: crate::types::NodeId,
+) -> crate::error::Result<()> {
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::NamingPattern)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let dominant = result
+        .data
+        .get("dominant")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let adherence = result
+        .data
+        .get("adherence_rate")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+
+    writeln!(
+        out,
+        "**Naming:** {dominant} ({:.0}% adherence)",
+        adherence * 100.0
+    )
+    .unwrap();
+
+    // Show convention breakdown if multiple styles detected
+    if let Some(conventions) = result.data.get("conventions").and_then(|v| v.as_array()) {
+        if conventions.len() > 1 {
+            for conv in conventions.iter().take(4) {
+                let name = conv
+                    .get("convention")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("?");
+                let pct = conv
+                    .get("percentage")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0);
+                let count = conv
+                    .get("count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                if count > 0 {
+                    writeln!(out, "- {name}: {count} ({pct:.0}%)").unwrap();
+                }
+            }
+        }
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+async fn render_testing_conventions(
+    out: &mut String,
+    store: &dyn HomerStore,
+    root_id: crate::types::NodeId,
+) -> crate::error::Result<()> {
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::TestingPattern)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let framework = result
+        .data
+        .get("framework")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let pattern = result
+        .data
+        .get("test_file_pattern")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let co_located = result
+        .data
+        .get("co_located")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let test_count = result
+        .data
+        .get("test_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let source_count = result
+        .data
+        .get("source_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    writeln!(out, "**Testing:** {framework}").unwrap();
+    writeln!(
+        out,
+        "- Pattern: {pattern}{}",
+        if co_located { " (co-located)" } else { "" }
+    )
+    .unwrap();
+    if source_count > 0 {
+        writeln!(out, "- {test_count} test files / {source_count} source files").unwrap();
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+async fn render_error_conventions(
+    out: &mut String,
+    store: &dyn HomerStore,
+    root_id: crate::types::NodeId,
+) -> crate::error::Result<()> {
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::ErrorHandlingPattern)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let approach = result
+        .data
+        .get("approach")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+
+    writeln!(out, "**Error handling:** {approach}").unwrap();
+
+    if let Some(patterns) = result.data.get("patterns").and_then(|v| v.as_array()) {
+        for pat in patterns.iter().take(5) {
+            let name = pat
+                .get("pattern")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            let count = pat
+                .get("count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            if count > 0 {
+                writeln!(out, "- `{name}`: {count} occurrences").unwrap();
+            }
+        }
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+async fn render_doc_conventions(
+    out: &mut String,
+    store: &dyn HomerStore,
+    root_id: crate::types::NodeId,
+) -> crate::error::Result<()> {
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::DocumentationStylePattern)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let coverage = result
+        .data
+        .get("coverage_rate")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+    let documented = result
+        .data
+        .get("documented_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let total = result
+        .data
+        .get("total_entities")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let dominant = result
+        .data
+        .get("dominant_style")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("none");
+
+    writeln!(
+        out,
+        "**Documentation:** {:.0}% coverage ({documented}/{total} entities)",
+        coverage * 100.0
+    )
+    .unwrap();
+    if dominant != "none" {
+        writeln!(out, "- Dominant style: {dominant}").unwrap();
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+async fn render_agent_rules(
+    out: &mut String,
+    store: &dyn HomerStore,
+    root_id: crate::types::NodeId,
+) -> crate::error::Result<()> {
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::AgentRuleValidation)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let rule_files = result
+        .data
+        .get("rule_files_found")
+        .and_then(|v| v.as_array());
+
+    if let Some(files) = rule_files {
+        if !files.is_empty() {
+            let names: Vec<_> = files
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect();
+            writeln!(out, "**Agent rules:** {}", names.join(", ")).unwrap();
+        }
+    }
+
+    // Show drifted rules as warnings
+    if let Some(drifted) = result.data.get("drifted").and_then(|v| v.as_array()) {
+        for drift in drifted {
+            let stated = drift
+                .get("stated_convention")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            let actual = drift
+                .get("actual_pattern")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            writeln!(out, "- **Drift:** states `{stated}` but {actual}").unwrap();
+        }
+    }
+
+    // Show validated rules
+    if let Some(validated) = result.data.get("validated").and_then(|v| v.as_array()) {
+        for rule in validated {
+            let desc = rule
+                .get("rule")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("?");
+            writeln!(out, "- {desc}").unwrap();
+        }
+    }
+    writeln!(out).unwrap();
 
     Ok(())
 }

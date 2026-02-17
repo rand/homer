@@ -2,6 +2,7 @@ pub mod behavioral;
 pub mod centrality;
 pub mod community;
 pub mod convention;
+pub mod semantic;
 pub mod traits;
 
 use std::time::Duration;
