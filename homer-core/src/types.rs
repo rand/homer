@@ -593,4 +593,150 @@ mod tests {
         let back: DiffStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
     }
+
+    // ── Property-based serde round-trip tests ─────────────────────
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_node_kind() -> impl Strategy<Value = NodeKind> {
+            prop_oneof![
+                Just(NodeKind::File),
+                Just(NodeKind::Function),
+                Just(NodeKind::Type),
+                Just(NodeKind::Module),
+                Just(NodeKind::Commit),
+                Just(NodeKind::PullRequest),
+                Just(NodeKind::Issue),
+                Just(NodeKind::Contributor),
+                Just(NodeKind::Release),
+                Just(NodeKind::Concept),
+                Just(NodeKind::ExternalDep),
+                Just(NodeKind::Document),
+                Just(NodeKind::Prompt),
+                Just(NodeKind::AgentRule),
+                Just(NodeKind::AgentSession),
+            ]
+        }
+
+        fn arb_edge_kind() -> impl Strategy<Value = HyperedgeKind> {
+            prop_oneof![
+                Just(HyperedgeKind::Modifies),
+                Just(HyperedgeKind::Imports),
+                Just(HyperedgeKind::Calls),
+                Just(HyperedgeKind::Inherits),
+                Just(HyperedgeKind::Resolves),
+                Just(HyperedgeKind::Authored),
+                Just(HyperedgeKind::Reviewed),
+                Just(HyperedgeKind::Includes),
+                Just(HyperedgeKind::BelongsTo),
+                Just(HyperedgeKind::DependsOn),
+                Just(HyperedgeKind::Aliases),
+                Just(HyperedgeKind::Documents),
+                Just(HyperedgeKind::PromptReferences),
+                Just(HyperedgeKind::PromptModifiedFiles),
+                Just(HyperedgeKind::RelatedPrompts),
+                Just(HyperedgeKind::CoChanges),
+                Just(HyperedgeKind::ClusterMembers),
+                Just(HyperedgeKind::Encompasses),
+            ]
+        }
+
+        fn arb_analysis_kind() -> impl Strategy<Value = AnalysisKind> {
+            prop_oneof![
+                Just(AnalysisKind::ChangeFrequency),
+                Just(AnalysisKind::ChurnVelocity),
+                Just(AnalysisKind::ContributorConcentration),
+                Just(AnalysisKind::DocumentationCoverage),
+                Just(AnalysisKind::PageRank),
+                Just(AnalysisKind::BetweennessCentrality),
+                Just(AnalysisKind::HITSScore),
+                Just(AnalysisKind::CompositeSalience),
+                Just(AnalysisKind::CommunityAssignment),
+                Just(AnalysisKind::NamingPattern),
+                Just(AnalysisKind::TaskPattern),
+                Just(AnalysisKind::SemanticSummary),
+            ]
+        }
+
+        fn arb_salience() -> impl Strategy<Value = SalienceClass> {
+            prop_oneof![
+                Just(SalienceClass::ActiveHotspot),
+                Just(SalienceClass::FoundationalStable),
+                Just(SalienceClass::PeripheralActive),
+                Just(SalienceClass::QuietLeaf),
+            ]
+        }
+
+        fn arb_stability() -> impl Strategy<Value = StabilityClass> {
+            prop_oneof![
+                Just(StabilityClass::StableCore),
+                Just(StabilityClass::ActiveCore),
+                Just(StabilityClass::StableLeaf),
+                Just(StabilityClass::ActiveLeaf),
+            ]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(100))]
+
+            #[test]
+            fn node_kind_serde_roundtrip(kind in arb_node_kind()) {
+                let json = serde_json::to_string(&kind).unwrap();
+                let back: NodeKind = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(back, kind);
+            }
+
+            #[test]
+            fn edge_kind_serde_roundtrip(kind in arb_edge_kind()) {
+                let json = serde_json::to_string(&kind).unwrap();
+                let back: HyperedgeKind = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(back, kind);
+            }
+
+            #[test]
+            fn analysis_kind_serde_roundtrip(kind in arb_analysis_kind()) {
+                let json = serde_json::to_string(&kind).unwrap();
+                let back: AnalysisKind = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(back, kind);
+            }
+
+            #[test]
+            fn salience_serde_roundtrip(s in arb_salience()) {
+                let json = serde_json::to_string(&s).unwrap();
+                let back: SalienceClass = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(back, s);
+            }
+
+            #[test]
+            fn stability_serde_roundtrip(s in arb_stability()) {
+                let json = serde_json::to_string(&s).unwrap();
+                let back: StabilityClass = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(back, s);
+            }
+
+            #[test]
+            fn node_kind_as_str_stable(kind in arb_node_kind()) {
+                let s = kind.as_str();
+                prop_assert!(!s.is_empty());
+                prop_assert_eq!(kind.to_string(), s);
+            }
+
+            #[test]
+            fn edge_kind_as_str_stable(kind in arb_edge_kind()) {
+                let s = kind.as_str();
+                prop_assert!(!s.is_empty());
+                prop_assert_eq!(kind.to_string(), s);
+            }
+
+            #[test]
+            fn typed_id_roundtrip(id in any::<i64>()) {
+                let node_id = NodeId(id);
+                let json = serde_json::to_string(&node_id).unwrap();
+                let back: NodeId = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(back, node_id);
+            }
+        }
+    }
 }

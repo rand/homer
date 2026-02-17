@@ -73,17 +73,17 @@ pub async fn run(args: StatusArgs) -> anyhow::Result<()> {
     println!();
 
     // Checkpoints
-    let git_checkpoint = store.get_checkpoint("git_head").await?;
-    let graph_checkpoint = store.get_checkpoint("graph_head_sha").await?;
+    let git_checkpoint = store.get_checkpoint("git_last_sha").await?;
+    let graph_checkpoint = store.get_checkpoint("graph_last_sha").await?;
 
     println!("  Checkpoints:");
     match &git_checkpoint {
-        Some(sha) => println!("    git_head:       {}", &sha[..sha.len().min(12)]),
-        None => println!("    git_head:       (none)"),
+        Some(sha) => println!("    git_last_sha:   {}", &sha[..sha.len().min(12)]),
+        None => println!("    git_last_sha:   (none)"),
     }
     match &graph_checkpoint {
-        Some(sha) => println!("    graph_head_sha: {}", &sha[..sha.len().min(12)]),
-        None => println!("    graph_head_sha: (none)"),
+        Some(sha) => println!("    graph_last_sha: {}", &sha[..sha.len().min(12)]),
+        None => println!("    graph_last_sha: (none)"),
     }
 
     // Check for AGENTS.md

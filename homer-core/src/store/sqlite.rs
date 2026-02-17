@@ -897,3 +897,244 @@ mod tests {
         assert!(rate > 1000.0, "Insert rate too slow: {rate:.0} nodes/sec");
     }
 }
+
+// ── Property-based tests ──────────────────────────────────────────────
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Strategy for generating arbitrary `NodeKind`.
+    fn arb_node_kind() -> impl Strategy<Value = NodeKind> {
+        prop_oneof![
+            Just(NodeKind::File),
+            Just(NodeKind::Function),
+            Just(NodeKind::Type),
+            Just(NodeKind::Module),
+            Just(NodeKind::Commit),
+            Just(NodeKind::Contributor),
+            Just(NodeKind::Document),
+            Just(NodeKind::ExternalDep),
+        ]
+    }
+
+    /// Strategy for generating arbitrary `HyperedgeKind`.
+    fn arb_edge_kind() -> impl Strategy<Value = HyperedgeKind> {
+        prop_oneof![
+            Just(HyperedgeKind::Calls),
+            Just(HyperedgeKind::Imports),
+            Just(HyperedgeKind::Modifies),
+            Just(HyperedgeKind::BelongsTo),
+            Just(HyperedgeKind::DependsOn),
+            Just(HyperedgeKind::Authored),
+            Just(HyperedgeKind::CoChanges),
+            Just(HyperedgeKind::Documents),
+        ]
+    }
+
+    /// Strategy for generating arbitrary `AnalysisKind`.
+    fn arb_analysis_kind() -> impl Strategy<Value = AnalysisKind> {
+        prop_oneof![
+            Just(AnalysisKind::ChangeFrequency),
+            Just(AnalysisKind::PageRank),
+            Just(AnalysisKind::BetweennessCentrality),
+            Just(AnalysisKind::CompositeSalience),
+            Just(AnalysisKind::CommunityAssignment),
+            Just(AnalysisKind::ContributorConcentration),
+        ]
+    }
+
+    /// Strategy for generating valid node names (non-empty, no NUL bytes).
+    fn arb_node_name() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9_/.:]{1,100}"
+    }
+
+    /// Strategy for JSON-safe metadata values.
+    fn arb_metadata() -> impl Strategy<Value = HashMap<String, serde_json::Value>> {
+        proptest::collection::hash_map(
+            "[a-z_]{1,20}",
+            prop_oneof![
+                any::<i64>().prop_map(serde_json::Value::from),
+                any::<bool>().prop_map(serde_json::Value::from),
+                "[a-zA-Z0-9 ]{0,50}".prop_map(serde_json::Value::from),
+            ],
+            0..5,
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(50))]
+
+        /// Node round-trip: upsert then retrieve preserves kind, name, and metadata.
+        #[test]
+        fn node_roundtrip(kind in arb_node_kind(), name in arb_node_name(), metadata in arb_metadata()) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+                let node = Node {
+                    id: NodeId(0),
+                    kind: kind.clone(),
+                    name: name.clone(),
+                    content_hash: Some(42),
+                    last_extracted: Utc::now(),
+                    metadata: metadata.clone(),
+                };
+
+                let id = store.upsert_node(&node).await.unwrap();
+                let fetched = store.get_node(id).await.unwrap().expect("node should exist");
+
+                prop_assert_eq!(&fetched.kind, &kind);
+                prop_assert_eq!(fetched.name, name);
+                prop_assert_eq!(fetched.content_hash, Some(42));
+                // Verify metadata values round-trip (keys and types preserved)
+                for (k, v) in &metadata {
+                    let fetched_v = fetched.metadata.get(k).expect("metadata key should exist");
+                    prop_assert_eq!(fetched_v, v, "metadata mismatch for key {}", k);
+                }
+                Ok(())
+            })?;
+        }
+
+        /// Hyperedge round-trip: upsert then retrieve preserves kind, members, and confidence.
+        #[test]
+        fn edge_roundtrip(
+            kind in arb_edge_kind(),
+            confidence in 0.0..=1.0_f64,
+            role_a in "[a-z]{1,10}",
+            role_b in "[a-z]{1,10}",
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+
+                // Create two nodes first
+                let id_a = store.upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::File,
+                    name: "a.rs".to_string(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                }).await.unwrap();
+
+                let id_b = store.upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::File,
+                    name: "b.rs".to_string(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                }).await.unwrap();
+
+                let edge = Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: kind.clone(),
+                    members: vec![
+                        HyperedgeMember { node_id: id_a, role: role_a.clone(), position: 0 },
+                        HyperedgeMember { node_id: id_b, role: role_b.clone(), position: 1 },
+                    ],
+                    confidence,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                };
+
+                store.upsert_hyperedge(&edge).await.unwrap();
+                let edges = store.get_edges_by_kind(kind.clone()).await.unwrap();
+                prop_assert_eq!(edges.len(), 1);
+                let fetched = &edges[0];
+
+                prop_assert_eq!(&fetched.kind, &kind);
+                prop_assert_eq!(fetched.members.len(), 2);
+                prop_assert!((fetched.confidence - confidence).abs() < 1e-10);
+                prop_assert_eq!(&fetched.members[0].role, &role_a);
+                prop_assert_eq!(&fetched.members[1].role, &role_b);
+                Ok(())
+            })?;
+        }
+
+        /// Analysis result round-trip: store then retrieve by kind.
+        #[test]
+        fn analysis_roundtrip(
+            kind in arb_analysis_kind(),
+            score in -1e15_f64..1e15_f64,
+            input_hash in 0..=(i64::MAX as u64),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+
+                let node_id = store.upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::File,
+                    name: "test.rs".to_string(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                }).await.unwrap();
+
+                let result = AnalysisResult {
+                    id: AnalysisResultId(0),
+                    node_id,
+                    kind: kind.clone(),
+                    data: serde_json::json!({"score": score}),
+                    input_hash,
+                    computed_at: Utc::now(),
+                };
+
+                store.store_analysis(&result).await.unwrap();
+
+                let results = store.get_analyses_by_kind(kind.clone()).await.unwrap();
+                prop_assert_eq!(results.len(), 1);
+                let r = &results[0];
+                prop_assert_eq!(r.node_id, node_id);
+                prop_assert_eq!(&r.kind, &kind);
+                prop_assert_eq!(r.input_hash, input_hash);
+
+                let stored_score = r.data.get("score")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap();
+                // JSON round-trip can lose precision for large values.
+                // Use relative tolerance: |diff| / max(|a|, |b|, 1) < epsilon.
+                let denom = score.abs().max(stored_score.abs()).max(1.0);
+                prop_assert!((stored_score - score).abs() / denom < 1e-10,
+                    "score mismatch: stored={} vs original={}", stored_score, score);
+                Ok(())
+            })?;
+        }
+
+        /// Node upsert is idempotent: same name+kind → same ID.
+        #[test]
+        fn node_upsert_idempotent(kind in arb_node_kind(), name in arb_node_name()) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+                let node = Node {
+                    id: NodeId(0),
+                    kind: kind.clone(),
+                    name: name.clone(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                };
+
+                let id1 = store.upsert_node(&node).await.unwrap();
+                let id2 = store.upsert_node(&node).await.unwrap();
+                prop_assert_eq!(id1, id2, "Upsert should return same ID for same name+kind");
+                Ok(())
+            })?;
+        }
+
+        /// Checkpoint round-trip: set then get returns same value.
+        #[test]
+        fn checkpoint_roundtrip(key in "[a-z_]{1,20}", value in "[a-f0-9]{8,40}") {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+                store.set_checkpoint(&key, &value).await.unwrap();
+                let fetched = store.get_checkpoint(&key).await.unwrap();
+                prop_assert_eq!(fetched, Some(value));
+                Ok(())
+            })?;
+        }
+    }
+}

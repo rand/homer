@@ -54,19 +54,33 @@ impl GraphExtractor {
                 continue;
             };
 
-            // Check language is enabled in config
-            if !config
+            // Check if this file's extension is included in configured patterns
+            let file_ext = file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            let is_included = config
                 .extraction
                 .structure
                 .include_patterns
                 .iter()
-                .any(|p| {
-                    lang.extensions()
-                        .iter()
-                        .any(|ext| p.contains(&format!("*.{ext}")))
-                })
-            {
-                continue;
+                .any(|p| p.contains(&format!("*.{file_ext}")));
+            if !is_included && !file_ext.is_empty() {
+                // Also check if a language-supported extension is in the patterns
+                let lang_included = lang
+                    .extensions()
+                    .iter()
+                    .any(|ext| {
+                        config
+                            .extraction
+                            .structure
+                            .include_patterns
+                            .iter()
+                            .any(|p| p.contains(&format!("*.{ext}")))
+                    });
+                if !lang_included {
+                    continue;
+                }
             }
 
             match self
@@ -80,6 +94,11 @@ impl GraphExtractor {
                     stats.errors.push((path_str, e));
                 }
             }
+        }
+
+        // Save graph checkpoint using the git HEAD sha
+        if let Ok(Some(git_sha)) = store.get_checkpoint("git_last_sha").await {
+            store.set_checkpoint("graph_last_sha", &git_sha).await?;
         }
 
         stats.duration = start.elapsed();
@@ -314,17 +333,43 @@ impl GraphExtractor {
                 );
             }
 
-            // Create Imports edge from file → import target (if resolvable)
-            // For now, store as a self-referencing edge on the file with import metadata
+            // Resolve import target to a file node for proper directed edges.
+            // Try target_path first, then fall back to heuristic name matching.
+            let target_node_id = self
+                .resolve_import_target(store, import, file_node)
+                .await;
+
+            let members = if let Some(target_id) = target_node_id {
+                // Skip self-imports
+                if target_id == file_node.id {
+                    continue;
+                }
+                vec![
+                    HyperedgeMember {
+                        node_id: file_node.id,
+                        role: "importer".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: target_id,
+                        role: "imported".to_string(),
+                        position: 1,
+                    },
+                ]
+            } else {
+                // Unresolved import — store as single-member edge with metadata
+                vec![HyperedgeMember {
+                    node_id: file_node.id,
+                    role: "importer".to_string(),
+                    position: 0,
+                }]
+            };
+
             store
                 .upsert_hyperedge(&Hyperedge {
                     id: HyperedgeId(0),
                     kind: HyperedgeKind::Imports,
-                    members: vec![HyperedgeMember {
-                        node_id: file_node.id,
-                        role: "importer".to_string(),
-                        position: 0,
-                    }],
+                    members,
                     confidence: import.confidence,
                     last_updated: Utc::now(),
                     metadata,
@@ -334,6 +379,151 @@ impl GraphExtractor {
         }
 
         Ok(())
+    }
+
+    /// Resolve an import to a target file `NodeId` in the store.
+    async fn resolve_import_target(
+        &self,
+        store: &dyn HomerStore,
+        import: &homer_graphs::HeuristicImport,
+        file_node: &Node,
+    ) -> Option<NodeId> {
+        // 1. Try explicit target_path from the heuristic extractor
+        if let Some(target_path) = &import.target_path {
+            let rel = target_path
+                .strip_prefix(&self.repo_path)
+                .unwrap_or(target_path);
+            let rel_str = rel.to_string_lossy();
+            if let Ok(Some(node)) = store
+                .get_node_by_name(NodeKind::File, &rel_str)
+                .await
+            {
+                return Some(node.id);
+            }
+        }
+
+        let import_name = &import.imported_name;
+
+        // 2. Rust crate-relative imports: crate::module::path::Type → module/path.rs
+        if let Some(path) = import_name.strip_prefix("crate::") {
+            return self.resolve_rust_crate_import(store, path, file_node).await;
+        }
+
+        // 3. Rust super imports: super::foo → parent module
+        if import_name.starts_with("super::") {
+            return self.resolve_rust_super_import(store, import_name, file_node).await;
+        }
+
+        // 4. Python/JS style: dotted or slash paths
+        let last_component = import_name
+            .rsplit("::")
+            .next()
+            .or_else(|| import_name.rsplit('.').next())
+            .or_else(|| import_name.rsplit('/').next())
+            .unwrap_or(import_name);
+
+        if last_component.is_empty() || last_component == "*" {
+            return None;
+        }
+
+        // Search for files whose name contains this component
+        let file_filter = crate::types::NodeFilter {
+            kind: Some(NodeKind::File),
+            name_contains: Some(last_component.to_string()),
+            ..Default::default()
+        };
+
+        if let Ok(matches) = store.find_nodes(&file_filter).await {
+            if matches.len() == 1 {
+                return Some(matches[0].id);
+            }
+        }
+
+        None
+    }
+
+    /// Resolve Rust `crate::` import paths to file nodes.
+    /// `crate::store::HomerStore` → look for `<crate>/src/store/mod.rs` or `<crate>/src/store.rs`
+    async fn resolve_rust_crate_import(
+        &self,
+        store: &dyn HomerStore,
+        path: &str,
+        file_node: &Node,
+    ) -> Option<NodeId> {
+        // Split path into module segments (drop the final type/item name if PascalCase)
+        let segments: Vec<&str> = path.split("::").collect();
+        if segments.is_empty() {
+            return None;
+        }
+
+        // Determine the crate root from the file's path (e.g., "homer-core/src/...")
+        let file_name = &file_node.name;
+        let crate_prefix = file_name
+            .find("/src/")
+            .map(|i| &file_name[..i])?;
+
+        // Try progressively fewer segments (last segment might be a type name, not a module)
+        for take in (1..=segments.len()).rev() {
+            let module_path = segments[..take].join("/");
+
+            // Try: crate_prefix/src/module_path.rs
+            let candidate = format!("{crate_prefix}/src/{module_path}.rs");
+            if let Ok(Some(node)) = store.get_node_by_name(NodeKind::File, &candidate).await {
+                return Some(node.id);
+            }
+
+            // Try: crate_prefix/src/module_path/mod.rs
+            let candidate_mod = format!("{crate_prefix}/src/{module_path}/mod.rs");
+            if let Ok(Some(node)) = store.get_node_by_name(NodeKind::File, &candidate_mod).await {
+                return Some(node.id);
+            }
+        }
+
+        None
+    }
+
+    /// Resolve Rust `super::` imports relative to the current file's parent.
+    async fn resolve_rust_super_import(
+        &self,
+        store: &dyn HomerStore,
+        import_name: &str,
+        file_node: &Node,
+    ) -> Option<NodeId> {
+        let file_name = &file_node.name;
+        // Get parent directory
+        let parent = std::path::Path::new(file_name).parent()?;
+
+        // Strip "super::" prefix(es) and walk up
+        let mut current = parent.to_path_buf();
+        let mut rest = import_name;
+        while let Some(stripped) = rest.strip_prefix("super::") {
+            current = current.parent()?.to_path_buf();
+            rest = stripped;
+        }
+
+        // rest is now the remaining module path (or "*")
+        if rest == "*" {
+            // super::* → parent mod.rs
+            let mod_path = current.join("mod.rs");
+            let mod_str = mod_path.to_string_lossy();
+            if let Ok(Some(node)) = store.get_node_by_name(NodeKind::File, &mod_str).await {
+                return Some(node.id);
+            }
+            return None;
+        }
+
+        // Try rest as a file
+        let segments: Vec<&str> = rest.split("::").collect();
+        for take in (1..=segments.len()).rev() {
+            let module_path = segments[..take].join("/");
+            let candidate = current.join(format!("{module_path}.rs"));
+            let candidate_str = candidate.to_string_lossy();
+            if let Ok(Some(node)) = store.get_node_by_name(NodeKind::File, &candidate_str).await {
+                return Some(node.id);
+            }
+        }
+
+        None
     }
 }
 

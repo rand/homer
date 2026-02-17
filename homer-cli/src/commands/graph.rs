@@ -114,8 +114,12 @@ fn print_ranking_text(entries: &[(String, f64, String)], metric: &str) {
     println!("{:-<80}", "");
 
     for (i, (name, val, cls)) in entries.iter().enumerate() {
-        let short = if name.len() > 50 { &name[name.len() - 48..] } else { name };
-        println!("{:<4} {:<50} {:>10.4} {cls}", i + 1, short, val);
+        let display_name = if name.len() > 50 {
+            format!("..{}", &name[name.len() - 48..])
+        } else {
+            name.clone()
+        };
+        println!("{:<4} {:<50} {:>10.4} {cls}", i + 1, display_name, val);
     }
 }
 
