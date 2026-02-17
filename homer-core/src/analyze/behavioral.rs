@@ -353,11 +353,11 @@ async fn compute_bus_factor(
             continue;
         }
 
-        // Bus factor: minimum number of authors controlling >50% of changes
+        // Bus factor: minimum number of authors controlling >80% of changes (per spec)
         let mut sorted_counts: Vec<u64> = author_counts.values().copied().collect();
         sorted_counts.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
-        let threshold = total_commits * 0.5;
+        let threshold = total_commits * 0.8;
         let mut cumulative = 0.0;
         let mut bus_factor = 0u32;
         for count in &sorted_counts {
@@ -798,5 +798,139 @@ mod tests {
         let (slope, intercept) = linear_regression(&points);
         assert!((slope - 2.0).abs() < 0.001);
         assert!(intercept.abs() < 0.001);
+    }
+
+    #[tokio::test]
+    async fn bus_factor_80_threshold() {
+        // 3 authors: A=60%, B=25%, C=15% of 20 commits
+        // With 80% threshold: need A+B (85%) → bus_factor = 2
+        // With old 50% threshold: A alone (60%) → bus_factor would be 1
+        let store = SqliteStore::in_memory().unwrap();
+        let now = Utc::now();
+
+        let file = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/core.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let authors: Vec<NodeId> = {
+            let mut ids = Vec::new();
+            for email in &["alice@test.com", "bob@test.com", "carol@test.com"] {
+                let id = store
+                    .upsert_node(&Node {
+                        id: NodeId(0),
+                        kind: NodeKind::Contributor,
+                        name: (*email).to_string(),
+                        content_hash: None,
+                        last_extracted: now,
+                        metadata: HashMap::new(),
+                    })
+                    .await
+                    .unwrap();
+                ids.push(id);
+            }
+            ids
+        };
+
+        // Create 20 commits: 12 by Alice, 5 by Bob, 3 by Carol
+        let commit_counts = [12u32, 5, 3];
+        for (author_idx, &count) in commit_counts.iter().enumerate() {
+            for i in 0..count {
+                let commit = store
+                    .upsert_node(&Node {
+                        id: NodeId(0),
+                        kind: NodeKind::Commit,
+                        name: format!("commit-{author_idx}-{i}"),
+                        content_hash: None,
+                        last_extracted: now,
+                        metadata: HashMap::new(),
+                    })
+                    .await
+                    .unwrap();
+
+                store
+                    .upsert_hyperedge(&Hyperedge {
+                        id: HyperedgeId(0),
+                        kind: HyperedgeKind::Authored,
+                        members: vec![
+                            HyperedgeMember {
+                                node_id: authors[author_idx],
+                                role: "author".to_string(),
+                                position: 0,
+                            },
+                            HyperedgeMember {
+                                node_id: commit,
+                                role: "commit".to_string(),
+                                position: 1,
+                            },
+                        ],
+                        confidence: 1.0,
+                        last_updated: now - chrono::Duration::days(i64::from(i)),
+                        metadata: HashMap::new(),
+                    })
+                    .await
+                    .unwrap();
+
+                let mut meta = HashMap::new();
+                meta.insert(
+                    "files".to_string(),
+                    serde_json::json!([{
+                        "path": "src/core.rs",
+                        "status": "modified",
+                        "lines_added": 5,
+                        "lines_deleted": 2,
+                    }]),
+                );
+
+                store
+                    .upsert_hyperedge(&Hyperedge {
+                        id: HyperedgeId(0),
+                        kind: HyperedgeKind::Modifies,
+                        members: vec![
+                            HyperedgeMember {
+                                node_id: commit,
+                                role: "commit".to_string(),
+                                position: 0,
+                            },
+                            HyperedgeMember {
+                                node_id: file,
+                                role: "file".to_string(),
+                                position: 1,
+                            },
+                        ],
+                        confidence: 1.0,
+                        last_updated: now - chrono::Duration::days(i64::from(i)),
+                        metadata: meta,
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let analyzer = BehavioralAnalyzer;
+        let config = HomerConfig::default();
+        analyzer.analyze(&store, &config).await.unwrap();
+
+        let bus = store
+            .get_analysis(file, AnalysisKind::ContributorConcentration)
+            .await
+            .unwrap()
+            .expect("Should have bus factor result");
+
+        let bf = bus
+            .data
+            .get("bus_factor")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap();
+
+        // With 80% threshold: Alice (60%) not enough, Alice+Bob (85%) ≥ 80% → bus_factor = 2
+        assert_eq!(bf, 2, "Bus factor should be 2 with 80% threshold");
     }
 }

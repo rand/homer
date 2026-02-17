@@ -18,7 +18,7 @@ use tracing::info;
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
 use crate::types::{
-    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId,
+    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeFilter, NodeId, NodeKind,
 };
 
 use super::AnalyzeStats;
@@ -617,6 +617,9 @@ async fn compute_and_store_salience(
         }
     }
 
+    // Enrich with code_size and test_presence from file nodes
+    enrich_code_size_and_test_presence(store, &mut all_nodes).await?;
+
     // Enrich with behavioral data from store
     let freq_results = store
         .get_analyses_by_kind(AnalysisKind::ChangeFrequency)
@@ -663,7 +666,11 @@ async fn compute_and_store_salience(
             + inputs.code_size * W_CODE_SIZE
             + inputs.test_presence * W_TEST_PRESENCE;
 
-        let classification = classify_salience(inputs.pagerank, inputs.change_frequency);
+        let classification = classify_salience(
+            inputs.pagerank,
+            inputs.change_frequency,
+            inputs.bus_factor_risk,
+        );
 
         let data = serde_json::json!({
             "score": salience,
@@ -694,6 +701,172 @@ async fn compute_and_store_salience(
     Ok(count)
 }
 
+/// Enrich salience inputs with `code_size` (normalized file size) and `test_presence`.
+async fn enrich_code_size_and_test_presence(
+    store: &dyn HomerStore,
+    all_nodes: &mut HashMap<NodeId, SalienceInputs>,
+) -> crate::error::Result<()> {
+    // Load all File nodes to build lookup tables
+    let file_filter = NodeFilter {
+        kind: Some(NodeKind::File),
+        ..Default::default()
+    };
+    let files = store.find_nodes(&file_filter).await?;
+
+    // Build: file_name → size_bytes, and set of test file paths
+    let mut file_sizes: HashMap<String, u64> = HashMap::new();
+    let mut test_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut max_size = 1u64; // avoid division by zero
+
+    for file in &files {
+        let size = file
+            .metadata
+            .get("size_bytes")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        file_sizes.insert(file.name.clone(), size);
+        max_size = max_size.max(size);
+
+        if is_test_file(&file.name) {
+            test_files.insert(file.name.clone());
+        }
+    }
+
+    // Build set of "tested" source files: files that have a corresponding test file
+    let mut tested_source_files: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for test_path in &test_files {
+        // Mark the test file itself
+        tested_source_files.insert(test_path.clone());
+        // Infer source file from test file name
+        if let Some(source) = infer_source_from_test(test_path) {
+            tested_source_files.insert(source);
+        }
+    }
+
+    // For each salience node, resolve its file path and enrich
+    let node_ids: Vec<NodeId> = all_nodes.keys().copied().collect();
+    for node_id in node_ids {
+        let node = store.get_node(node_id).await?;
+        let Some(node) = node else { continue };
+
+        // Extract file path from node name:
+        // Function nodes: "path/to/file.rs::func_name" → "path/to/file.rs"
+        // Module/File nodes: use name directly
+        let file_path = match node.kind {
+            NodeKind::Function => node
+                .name
+                .rsplit_once("::")
+                .map_or(node.name.as_str(), |(path, _)| path),
+            _ => &node.name,
+        };
+
+        if let Some(inputs) = all_nodes.get_mut(&node_id) {
+            // code_size: normalized to [0, 1] by dividing by max file size
+            if let Some(&size) = file_sizes.get(file_path) {
+                inputs.code_size = size as f64 / max_size as f64;
+            }
+
+            // test_presence: 1.0 if covered by tests, 0.0 otherwise
+            if tested_source_files.contains(file_path) {
+                inputs.test_presence = 1.0;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if a file path matches common test file naming patterns.
+fn is_test_file(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let name_lower = name.to_lowercase();
+
+    // Rust: *_test.rs, tests/*.rs
+    // Python: test_*.py, *_test.py
+    // TypeScript/JavaScript: *.test.ts, *.spec.ts, *.test.js, *.spec.js
+    // Java: *Test.java, *Tests.java
+    // Go: *_test.go
+    name_lower.ends_with("_test.rs")
+        || name_lower.starts_with("test_")
+        || name_lower.ends_with("_test.py")
+        || name_lower.ends_with(".test.ts")
+        || name_lower.ends_with(".spec.ts")
+        || name_lower.ends_with(".test.js")
+        || name_lower.ends_with(".spec.js")
+        || name_lower.ends_with(".test.tsx")
+        || name_lower.ends_with(".spec.tsx")
+        || name_lower.ends_with("_test.go")
+        || (name_lower.ends_with("test.java") || name_lower.ends_with("tests.java"))
+        || path.contains("/tests/") || path.starts_with("tests/")
+        || path.contains("/test/") || path.starts_with("test/")
+        || path.contains("/__tests__/") || path.starts_with("__tests__/")
+}
+
+/// Infer the source file that a test file covers.
+fn infer_source_from_test(test_path: &str) -> Option<String> {
+    let name = test_path.rsplit('/').next().unwrap_or(test_path);
+    let dir = test_path
+        .rsplit_once('/')
+        .map_or("", |(dir, _)| dir);
+
+    // *_test.rs → *.rs (same dir or parent src/)
+    if let Some(base) = name.strip_suffix("_test.rs") {
+        let source = format!("{base}.rs");
+        return if dir.is_empty() {
+            Some(source)
+        } else {
+            Some(format!("{dir}/{source}"))
+        };
+    }
+    // test_*.py → *.py
+    if let Some(base) = name.strip_prefix("test_") {
+        return if dir.is_empty() {
+            Some(base.to_string())
+        } else {
+            Some(format!("{dir}/{base}"))
+        };
+    }
+    // *_test.py → *.py
+    if let Some(base) = name.strip_suffix("_test.py") {
+        let source = format!("{base}.py");
+        return if dir.is_empty() {
+            Some(source)
+        } else {
+            Some(format!("{dir}/{source}"))
+        };
+    }
+    // *.test.ts → *.ts, *.spec.ts → *.ts (and .js/.tsx variants)
+    for (test_ext, src_ext) in [
+        (".test.ts", ".ts"),
+        (".spec.ts", ".ts"),
+        (".test.js", ".js"),
+        (".spec.js", ".js"),
+        (".test.tsx", ".tsx"),
+        (".spec.tsx", ".tsx"),
+    ] {
+        if let Some(base) = name.strip_suffix(test_ext) {
+            let source = format!("{base}{src_ext}");
+            return if dir.is_empty() {
+                Some(source)
+            } else {
+                Some(format!("{dir}/{source}"))
+            };
+        }
+    }
+    // *_test.go → *.go
+    if let Some(base) = name.strip_suffix("_test.go") {
+        let source = format!("{base}.go");
+        return if dir.is_empty() {
+            Some(source)
+        } else {
+            Some(format!("{dir}/{source}"))
+        };
+    }
+
+    None
+}
+
 #[derive(Debug, Default)]
 struct SalienceInputs {
     pagerank: f64,
@@ -705,15 +878,24 @@ struct SalienceInputs {
     test_presence: f64,
 }
 
-fn classify_salience(centrality: f64, churn: f64) -> &'static str {
+/// Classify a node into one of 5 salience classes per spec.
+///
+/// - `HotCritical`: high centrality + high churn (active hotspot)
+/// - `CriticalSilo`: high centrality + single-author risk (`bus_factor_risk` ≈ 1.0)
+/// - `FoundationalStable`: high centrality + low churn
+/// - `ActiveLocalized`: low centrality + high churn (peripheral active)
+/// - `Background`: low centrality + low churn (quiet leaf)
+fn classify_salience(centrality: f64, churn: f64, bus_factor_risk: f64) -> &'static str {
     let high_centrality = centrality > 0.5;
     let high_churn = churn > 0.5;
+    let single_owner = bus_factor_risk >= 0.99; // bus_factor == 1
 
-    match (high_centrality, high_churn) {
-        (true, true) => "ActiveHotspot",
-        (true, false) => "FoundationalStable",
-        (false, true) => "PeripheralActive",
-        (false, false) => "QuietLeaf",
+    match (high_centrality, high_churn, single_owner) {
+        (true, _, true) => "CriticalSilo",
+        (true, true, _) => "HotCritical",
+        (true, false, _) => "FoundationalStable",
+        (false, true, _) => "ActiveLocalized",
+        (false, false, _) => "Background",
     }
 }
 
@@ -1116,10 +1298,185 @@ mod tests {
     }
 
     #[test]
-    fn salience_classification() {
-        assert_eq!(classify_salience(0.8, 0.8), "ActiveHotspot");
-        assert_eq!(classify_salience(0.8, 0.2), "FoundationalStable");
-        assert_eq!(classify_salience(0.2, 0.8), "PeripheralActive");
-        assert_eq!(classify_salience(0.2, 0.2), "QuietLeaf");
+    fn salience_classification_5_classes() {
+        // HotCritical: high centrality + high churn + not single-owner
+        assert_eq!(classify_salience(0.8, 0.8, 0.5), "HotCritical");
+        // FoundationalStable: high centrality + low churn
+        assert_eq!(classify_salience(0.8, 0.2, 0.5), "FoundationalStable");
+        // ActiveLocalized: low centrality + high churn
+        assert_eq!(classify_salience(0.2, 0.8, 0.5), "ActiveLocalized");
+        // Background: low centrality + low churn
+        assert_eq!(classify_salience(0.2, 0.2, 0.5), "Background");
+        // CriticalSilo: high centrality + single owner (bus_factor_risk ≈ 1.0)
+        assert_eq!(classify_salience(0.8, 0.2, 1.0), "CriticalSilo");
+        // CriticalSilo takes priority over HotCritical when single-owner
+        assert_eq!(classify_salience(0.8, 0.8, 1.0), "CriticalSilo");
+        // Low centrality + single owner is still Background (not critical)
+        assert_eq!(classify_salience(0.2, 0.2, 1.0), "Background");
+    }
+
+    #[test]
+    fn test_file_detection() {
+        assert!(is_test_file("src/auth_test.rs"));
+        assert!(is_test_file("tests/integration.rs"));
+        assert!(is_test_file("test_utils.py"));
+        assert!(is_test_file("utils_test.py"));
+        assert!(is_test_file("App.test.tsx"));
+        assert!(is_test_file("App.spec.ts"));
+        assert!(is_test_file("handler_test.go"));
+        assert!(is_test_file("src/__tests__/App.js"));
+        assert!(is_test_file("UserTest.java"));
+
+        assert!(!is_test_file("src/auth.rs"));
+        assert!(!is_test_file("utils.py"));
+        assert!(!is_test_file("App.tsx"));
+        assert!(!is_test_file("handler.go"));
+    }
+
+    #[test]
+    fn test_infer_source_from_test() {
+        assert_eq!(
+            infer_source_from_test("src/auth_test.rs"),
+            Some("src/auth.rs".to_string())
+        );
+        assert_eq!(
+            infer_source_from_test("test_utils.py"),
+            Some("utils.py".to_string())
+        );
+        assert_eq!(
+            infer_source_from_test("src/utils_test.py"),
+            Some("src/utils.py".to_string())
+        );
+        assert_eq!(
+            infer_source_from_test("src/App.test.tsx"),
+            Some("src/App.tsx".to_string())
+        );
+        assert_eq!(
+            infer_source_from_test("src/App.spec.ts"),
+            Some("src/App.ts".to_string())
+        );
+        assert_eq!(
+            infer_source_from_test("pkg/handler_test.go"),
+            Some("pkg/handler.go".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn salience_includes_code_size_and_test_presence() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        // Create File nodes with size_bytes metadata
+        let now = Utc::now();
+        let _src_file = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/auth.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: {
+                    let mut m = HashMap::new();
+                    m.insert("size_bytes".to_string(), serde_json::json!(5000));
+                    m
+                },
+            })
+            .await
+            .unwrap();
+
+        let _test_file = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/auth_test.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: {
+                    let mut m = HashMap::new();
+                    m.insert("size_bytes".to_string(), serde_json::json!(2000));
+                    m
+                },
+            })
+            .await
+            .unwrap();
+
+        // Create Function nodes scoped to the file
+        let validate = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Function,
+                name: "src/auth.rs::validate_token".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let hash_pw = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Function,
+                name: "src/auth.rs::hash_password".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Create a call edge: validate_token → hash_password
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::Calls,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: validate,
+                        role: "caller".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: hash_pw,
+                        role: "callee".to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: 0.9,
+                last_updated: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Run centrality analysis
+        let analyzer = CentralityAnalyzer::default();
+        let config = HomerConfig::default();
+        analyzer.analyze(&store, &config).await.unwrap();
+
+        // Check salience result includes non-zero code_size and test_presence
+        let salience = store
+            .get_analysis(validate, AnalysisKind::CompositeSalience)
+            .await
+            .unwrap()
+            .expect("Should have salience for validate_token");
+
+        let components = salience.data.get("components").unwrap();
+        let code_size = components
+            .get("code_size")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
+        let test_presence = components
+            .get("test_presence")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
+
+        assert!(
+            code_size > 0.0,
+            "code_size should be > 0 for file with size_bytes, got {code_size}"
+        );
+        assert_eq!(
+            test_presence, 1.0,
+            "test_presence should be 1.0 since auth_test.rs covers auth.rs"
+        );
     }
 }

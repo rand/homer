@@ -243,10 +243,11 @@ async fn minimal_rust_has_centrality_analysis() {
             .unwrap();
         assert!(
             [
-                "ActiveHotspot",
+                "HotCritical",
+                "CriticalSilo",
                 "FoundationalStable",
-                "PeripheralActive",
-                "QuietLeaf"
+                "ActiveLocalized",
+                "Background"
             ]
             .contains(&classification),
             "Invalid salience classification: {classification}"

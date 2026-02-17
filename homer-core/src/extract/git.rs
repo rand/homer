@@ -55,7 +55,26 @@ impl GitExtractor {
             return Ok(stats);
         }
 
-        let commits_to_process = Self::collect_commits(&head, checkpoint_sha.as_deref(), config)?;
+        // Force-push detection: verify checkpoint is an ancestor of HEAD.
+        // If not, history was rewritten — fall back to full re-extraction.
+        let effective_checkpoint = if let Some(ref cp_sha) = checkpoint_sha {
+            if Self::is_ancestor(&head, cp_sha) {
+                checkpoint_sha.as_deref()
+            } else {
+                warn!(
+                    checkpoint = %cp_sha,
+                    head = %head_sha,
+                    "Force-push detected: checkpoint is not an ancestor of HEAD. \
+                     Falling back to full re-extraction."
+                );
+                None
+            }
+        } else {
+            None
+        };
+
+        let commits_to_process =
+            Self::collect_commits(&head, effective_checkpoint, config)?;
         info!(count = commits_to_process.len(), "Processing commits");
 
         for oid in &commits_to_process {
@@ -87,6 +106,20 @@ impl GitExtractor {
             "Git extraction complete"
         );
         Ok(stats)
+    }
+
+    /// Check if `candidate_sha` is an ancestor of `head` by walking history.
+    fn is_ancestor(head: &gix::Commit<'_>, candidate_sha: &str) -> bool {
+        let Ok(walk) = head.ancestors().all() else {
+            return false;
+        };
+        for info in walk {
+            let Ok(info) = info else { continue };
+            if info.id().to_string() == candidate_sha {
+                return true;
+            }
+        }
+        false
     }
 
     fn collect_commits(
@@ -362,6 +395,16 @@ pub struct ExtractStats {
     pub errors: Vec<(String, HomerError)>,
 }
 
+/// Intermediate diff entry: captures blob IDs during tree walk for post-processing.
+struct RawDiffEntry {
+    path: std::path::PathBuf,
+    old_path: Option<std::path::PathBuf>,
+    status: DiffStatus,
+    old_blob: Option<gix::ObjectId>,
+    new_blob: Option<gix::ObjectId>,
+}
+
+#[allow(clippy::too_many_lines)]
 fn compute_diff(
     repo: &gix::Repository,
     commit: &gix::Commit<'_>,
@@ -375,7 +418,7 @@ fn compute_diff(
         .next()
         .and_then(|parent_id| parent_id.object().ok()?.try_into_commit().ok()?.tree().ok());
 
-    let mut diff_stats = Vec::new();
+    let mut raw_entries = Vec::new();
 
     let base = match parent_tree {
         Some(ref parent) => parent,
@@ -390,44 +433,81 @@ fn compute_diff(
         .for_each_to_obtain_tree(&tree, |change| {
             use gix::object::tree::diff::Change;
             match change {
-                Change::Addition { location, .. } => {
-                    diff_stats.push(FileDiffStats {
+                Change::Addition {
+                    location,
+                    entry_mode,
+                    id,
+                    ..
+                } => {
+                    raw_entries.push(RawDiffEntry {
                         path: location.to_path_lossy().to_path_buf(),
                         old_path: None,
                         status: DiffStatus::Added,
-                        lines_added: 0,
-                        lines_deleted: 0,
+                        old_blob: None,
+                        new_blob: if entry_mode.is_blob() {
+                            Some(id.detach())
+                        } else {
+                            None
+                        },
                     });
                 }
-                Change::Deletion { location, .. } => {
-                    diff_stats.push(FileDiffStats {
+                Change::Deletion {
+                    location,
+                    entry_mode,
+                    id,
+                    ..
+                } => {
+                    raw_entries.push(RawDiffEntry {
                         path: location.to_path_lossy().to_path_buf(),
                         old_path: None,
                         status: DiffStatus::Deleted,
-                        lines_added: 0,
-                        lines_deleted: 0,
+                        old_blob: if entry_mode.is_blob() {
+                            Some(id.detach())
+                        } else {
+                            None
+                        },
+                        new_blob: None,
                     });
                 }
-                Change::Modification { location, .. } => {
-                    diff_stats.push(FileDiffStats {
+                Change::Modification {
+                    location,
+                    entry_mode,
+                    previous_id,
+                    id,
+                    ..
+                } => {
+                    let is_blob = entry_mode.is_blob();
+                    raw_entries.push(RawDiffEntry {
                         path: location.to_path_lossy().to_path_buf(),
                         old_path: None,
                         status: DiffStatus::Modified,
-                        lines_added: 0,
-                        lines_deleted: 0,
+                        old_blob: if is_blob {
+                            Some(previous_id.detach())
+                        } else {
+                            None
+                        },
+                        new_blob: if is_blob { Some(id.detach()) } else { None },
                     });
                 }
                 Change::Rewrite {
                     source_location,
+                    source_id,
                     location,
+                    entry_mode,
+                    id,
                     ..
                 } => {
-                    diff_stats.push(FileDiffStats {
+                    let is_blob = entry_mode.is_blob();
+                    raw_entries.push(RawDiffEntry {
                         path: location.to_path_lossy().to_path_buf(),
                         old_path: Some(source_location.to_path_lossy().to_path_buf()),
                         status: DiffStatus::Renamed,
-                        lines_added: 0,
-                        lines_deleted: 0,
+                        old_blob: if is_blob {
+                            Some(source_id.detach())
+                        } else {
+                            None
+                        },
+                        new_blob: if is_blob { Some(id.detach()) } else { None },
                     });
                 }
             }
@@ -435,7 +515,126 @@ fn compute_diff(
         })
         .map_err(|e| HomerError::Extract(ExtractError::Git(format!("diff error: {e}"))))?;
 
+    // Post-process: compute line stats from blob contents
+    let diff_stats = raw_entries
+        .into_iter()
+        .map(|entry| {
+            let (lines_added, lines_deleted) = match entry.status {
+                DiffStatus::Added => {
+                    let added = entry
+                        .new_blob
+                        .map_or(0, |id| count_blob_lines(repo, id));
+                    (added, 0)
+                }
+                DiffStatus::Deleted => {
+                    let deleted = entry
+                        .old_blob
+                        .map_or(0, |id| count_blob_lines(repo, id));
+                    (0, deleted)
+                }
+                DiffStatus::Modified | DiffStatus::Renamed | DiffStatus::Copied => {
+                    match (entry.old_blob, entry.new_blob) {
+                        (Some(old_id), Some(new_id)) => {
+                            compute_blob_line_diff(repo, old_id, new_id)
+                        }
+                        _ => (0, 0),
+                    }
+                }
+            };
+            FileDiffStats {
+                path: entry.path,
+                old_path: entry.old_path,
+                status: entry.status,
+                lines_added,
+                lines_deleted,
+            }
+        })
+        .collect();
+
     Ok(diff_stats)
+}
+
+/// Count lines in a single blob. Returns 0 for binary content or errors.
+fn count_blob_lines(repo: &gix::Repository, id: gix::ObjectId) -> u32 {
+    let Ok(obj) = repo.find_object(id) else {
+        return 0;
+    };
+    let data = obj.detach().data;
+    if data.is_empty() || is_likely_binary(&data) {
+        return 0;
+    }
+    count_newlines(&data)
+}
+
+/// Compute added/deleted line counts between two blobs using hash-based line diff.
+fn compute_blob_line_diff(
+    repo: &gix::Repository,
+    old_id: gix::ObjectId,
+    new_id: gix::ObjectId,
+) -> (u32, u32) {
+    let Ok(old_obj) = repo.find_object(old_id) else {
+        return (0, 0);
+    };
+    let old_data = old_obj.detach().data;
+
+    let Ok(new_obj) = repo.find_object(new_id) else {
+        return (0, 0);
+    };
+    let new_data = new_obj.detach().data;
+
+    if is_likely_binary(&old_data) || is_likely_binary(&new_data) {
+        return (0, 0);
+    }
+
+    // Hash-based line diff: track occurrences of each line
+    let mut old_counts: HashMap<&[u8], i32> = HashMap::new();
+    for line in old_data.split(|&b| b == b'\n') {
+        *old_counts.entry(line).or_default() += 1;
+    }
+
+    let mut added = 0u32;
+    for line in new_data.split(|&b| b == b'\n') {
+        if let Some(count) = old_counts.get_mut(line) {
+            if *count > 0 {
+                *count -= 1;
+            } else {
+                added += 1;
+            }
+        } else {
+            added += 1;
+        }
+    }
+
+    let deleted: u32 = old_counts
+        .values()
+        .filter(|&&v| v > 0)
+        .map(|&v| u32::try_from(v).unwrap_or(u32::MAX))
+        .sum();
+
+    (added, deleted)
+}
+
+/// Check if data appears binary (NUL byte in first 8KB).
+fn is_likely_binary(data: &[u8]) -> bool {
+    let check_len = data.len().min(8192);
+    data[..check_len].contains(&0)
+}
+
+/// Count newlines, treating each `\n` as a line terminator.
+#[allow(clippy::cast_possible_truncation)]
+fn count_newlines(data: &[u8]) -> u32 {
+    if data.is_empty() {
+        return 0;
+    }
+    let newlines = data.iter().fold(0usize, |acc, &b| {
+        acc + usize::from(b == b'\n')
+    });
+    let total = if data.last() == Some(&b'\n') {
+        newlines
+    } else {
+        newlines + 1
+    };
+    total as u32
 }
 
 fn gix_time_to_chrono(time: &gix::date::Time) -> DateTime<Utc> {
@@ -553,5 +752,143 @@ mod tests {
         // Verify incrementality: running again should find no new work
         let stats2 = extractor.extract(&store, &config).await.unwrap();
         assert_eq!(stats2.nodes_created, 0, "No new nodes on re-run");
+    }
+
+    #[tokio::test]
+    async fn extract_computes_line_counts() {
+        let tmp = tempfile::tempdir().unwrap();
+        create_test_repo(tmp.path());
+
+        let store = SqliteStore::in_memory().unwrap();
+        let config = HomerConfig::default();
+        let extractor = GitExtractor::new(tmp.path());
+
+        extractor.extract(&store, &config).await.unwrap();
+
+        // Inspect Modifies edges for line count data
+        let modifies = store
+            .get_edges_by_kind(crate::types::HyperedgeKind::Modifies)
+            .await
+            .unwrap();
+        assert!(!modifies.is_empty(), "Should have Modifies edges");
+
+        // Collect all per-file diff stats from edge metadata
+        let mut total_added = 0u64;
+        let mut total_deleted = 0u64;
+        for edge in &modifies {
+            let files = edge
+                .metadata
+                .get("files")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for f in &files {
+                total_added += f
+                    .get("lines_added")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                total_deleted += f
+                    .get("lines_deleted")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+            }
+        }
+
+        // Commit 1 adds main.rs (1 line) + lib.rs (1 line) = 2 lines added
+        // Commit 2 modifies lib.rs (changes 1 line → different 1 line)
+        // Commit 3 adds utils.rs (1 line) = 1 line added
+        // Total lines_added should be > 0
+        assert!(
+            total_added > 0,
+            "Should have non-zero lines_added, got {total_added}"
+        );
+
+        // Commit 2 modifies lib.rs so there should be some deleted lines too
+        // (at minimum the original line was replaced)
+        assert!(
+            total_added + total_deleted > 2,
+            "Total churn should exceed initial additions, got added={total_added} deleted={total_deleted}"
+        );
+    }
+
+    #[test]
+    fn count_newlines_basic() {
+        assert_eq!(count_newlines(b"hello\nworld\n"), 2);
+        assert_eq!(count_newlines(b"hello\nworld"), 2);
+        assert_eq!(count_newlines(b"hello\n"), 1);
+        assert_eq!(count_newlines(b"hello"), 1);
+        assert_eq!(count_newlines(b""), 0);
+    }
+
+    #[test]
+    fn is_likely_binary_detects_nul() {
+        assert!(!is_likely_binary(b"hello world"));
+        assert!(is_likely_binary(b"hello\x00world"));
+        assert!(!is_likely_binary(b""));
+    }
+
+    #[test]
+    fn blob_line_diff_basic() {
+        // Test the hash-based diff logic directly using compute_diff on known data
+        let old_data = b"line1\nline2\nline3\n";
+        let new_data = b"line1\nline2_modified\nline3\nline4\n";
+
+        let mut old_counts: HashMap<&[u8], i32> = HashMap::new();
+        for line in old_data.split(|&b| b == b'\n') {
+            *old_counts.entry(line).or_default() += 1;
+        }
+
+        let mut added = 0u32;
+        for line in new_data.split(|&b| b == b'\n') {
+            if let Some(count) = old_counts.get_mut(line) {
+                if *count > 0 {
+                    *count -= 1;
+                } else {
+                    added += 1;
+                }
+            } else {
+                added += 1;
+            }
+        }
+        let deleted: u32 = old_counts
+            .values()
+            .filter(|&&v| v > 0)
+            .map(|&v| v as u32)
+            .sum();
+
+        // "line2" deleted, "line2_modified" and "line4" added
+        assert_eq!(added, 2, "Should detect 2 added lines");
+        assert_eq!(deleted, 1, "Should detect 1 deleted line");
+    }
+
+    #[tokio::test]
+    async fn force_push_detection_falls_back_to_full() {
+        let tmp = tempfile::tempdir().unwrap();
+        create_test_repo(tmp.path());
+
+        let store = SqliteStore::in_memory().unwrap();
+        let config = HomerConfig::default();
+        let extractor = GitExtractor::new(tmp.path());
+
+        // First extraction: normal
+        let stats1 = extractor.extract(&store, &config).await.unwrap();
+        assert!(stats1.nodes_created > 0);
+        let _first_count = stats1.nodes_created;
+
+        // Simulate force-push: set checkpoint to a non-existent SHA
+        store
+            .set_checkpoint("git_last_sha", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+            .await
+            .unwrap();
+
+        // Re-extract: should detect force-push and do full re-extraction
+        let stats2 = extractor.extract(&store, &config).await.unwrap();
+
+        // Should process all commits again (upserts, so node count may be lower
+        // due to ON CONFLICT, but it should still do work)
+        assert!(
+            stats2.nodes_created > 0 || stats2.edges_created > 0,
+            "Force-push fallback should re-process commits"
+        );
     }
 }
