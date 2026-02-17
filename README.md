@@ -137,6 +137,12 @@ cargo test --workspace
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
 | [Specification](homer-spec/README.md) | Full design specification (12 documents) |
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
+
+This project is maintained by a queer developer. Everyone who shares our values of kindness and respect is welcome here. Bigotry is not tolerated.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
