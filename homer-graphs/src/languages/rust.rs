@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::scope_graph::FileScopeGraph;
 use crate::{
     DocStyle, HeuristicCall, HeuristicDef, HeuristicGraph, HeuristicImport, ResolutionTier, Result,
     SymbolKind,
@@ -7,7 +8,8 @@ use crate::{
 
 use super::LanguageSupport;
 use super::helpers::{
-    child_by_field, extract_doc_comment_above, node_range, node_text, qualified_name,
+    ScopeGraphBuilder, child_by_field, extract_doc_comment_above, find_child_by_kind, node_range,
+    node_text, qualified_name,
 };
 
 #[derive(Debug)]
@@ -23,11 +25,30 @@ impl LanguageSupport for RustSupport {
     }
 
     fn tier(&self) -> ResolutionTier {
-        ResolutionTier::Heuristic
+        ResolutionTier::Precise
     }
 
     fn tree_sitter_language(&self) -> tree_sitter::Language {
         tree_sitter_rust::LANGUAGE.into()
+    }
+
+    fn build_scope_graph(
+        &self,
+        tree: &tree_sitter::Tree,
+        source: &str,
+        path: &Path,
+    ) -> Result<Option<FileScopeGraph>> {
+        let mut builder = ScopeGraphBuilder::new(path);
+        let root = builder.root();
+        let mut pub_defs = Vec::new();
+
+        scope_walk(tree.root_node(), source, root, &mut builder, &mut pub_defs, true);
+
+        for def_id in &pub_defs {
+            builder.mark_exported(*def_id);
+        }
+
+        Ok(Some(builder.build()))
     }
 
     fn extract_heuristic(
@@ -242,6 +263,341 @@ fn extract_rust_use(
     });
 }
 
+// ── Scope graph construction ─────────────────────────────────────────
+
+use crate::scope_graph::ScopeNodeId;
+
+fn scope_walk(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        scope_dispatch(child, source, scope, builder, pub_defs, is_module_level);
+    }
+}
+
+fn scope_dispatch(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    match node.kind() {
+        "function_item" | "function_signature_item" => {
+            scope_function(node, source, scope, builder, pub_defs, is_module_level);
+        }
+        "struct_item" | "enum_item" | "trait_item" | "type_item" | "union_item" => {
+            scope_type_def(node, source, scope, builder, pub_defs, is_module_level);
+        }
+        "impl_item" => {
+            scope_impl(node, source, scope, builder, pub_defs);
+        }
+        "mod_item" => {
+            scope_mod(node, source, scope, builder, pub_defs, is_module_level);
+        }
+        "use_declaration" => {
+            scope_use(node, source, scope, builder, pub_defs, is_module_level);
+        }
+        "const_item" | "static_item" => {
+            scope_const(node, source, scope, builder, pub_defs, is_module_level);
+        }
+        "call_expression" => {
+            scope_call(node, source, scope, builder);
+            scope_walk(node, source, scope, builder, pub_defs, false);
+        }
+        _ => {
+            scope_walk(node, source, scope, builder, pub_defs, is_module_level);
+        }
+    }
+}
+
+fn has_pub(node: tree_sitter::Node<'_>) -> bool {
+    find_child_by_kind(node, "visibility_modifier").is_some()
+}
+
+fn scope_function(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    let Some(name_node) = child_by_field(node, "name") else {
+        return;
+    };
+    let name = node_text(name_node, source);
+    let def_id = builder.add_definition(
+        scope, name, Some(node_range(name_node)), Some(SymbolKind::Function),
+    );
+    if is_module_level && has_pub(node) {
+        pub_defs.push(def_id);
+    }
+
+    let func_scope = builder.add_scope(scope, Some(node_range(node)));
+    if let Some(params) = child_by_field(node, "parameters") {
+        scope_params(params, source, func_scope, builder);
+    }
+    if let Some(body) = child_by_field(node, "body") {
+        scope_walk(body, source, func_scope, builder, pub_defs, false);
+    }
+}
+
+fn scope_type_def(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    let Some(name_node) = child_by_field(node, "name") else {
+        return;
+    };
+    let name = node_text(name_node, source);
+    let def_id = builder.add_definition(
+        scope, name, Some(node_range(name_node)), Some(SymbolKind::Type),
+    );
+    if is_module_level && has_pub(node) {
+        pub_defs.push(def_id);
+    }
+
+    // For traits, create a child scope for associated items
+    if node.kind() == "trait_item" {
+        if let Some(body) = child_by_field(node, "body") {
+            let trait_scope = builder.add_scope(scope, Some(node_range(node)));
+            scope_walk(body, source, trait_scope, builder, pub_defs, false);
+        }
+    }
+}
+
+fn scope_impl(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+) {
+    // `impl Foo` or `impl Trait for Foo`
+    // Reference the type being implemented
+    if let Some(type_node) = child_by_field(node, "type") {
+        let type_name = node_text(type_node, source);
+        builder.add_reference(
+            scope, type_name, Some(node_range(type_node)), Some(SymbolKind::Type),
+        );
+    }
+
+    // Reference the trait if `impl Trait for Type`
+    if let Some(trait_node) = child_by_field(node, "trait") {
+        let trait_name = node_text(trait_node, source);
+        builder.add_reference(
+            scope, trait_name, Some(node_range(trait_node)), Some(SymbolKind::Type),
+        );
+    }
+
+    // Methods in impl block get their own scope linked to parent
+    let impl_scope = builder.add_scope(scope, Some(node_range(node)));
+    if let Some(body) = child_by_field(node, "body") {
+        scope_walk(body, source, impl_scope, builder, pub_defs, false);
+    }
+}
+
+fn scope_mod(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    let Some(name_node) = child_by_field(node, "name") else {
+        return;
+    };
+    let name = node_text(name_node, source);
+    let def_id = builder.add_definition(
+        scope, name, Some(node_range(name_node)), Some(SymbolKind::Module),
+    );
+    if is_module_level && has_pub(node) {
+        pub_defs.push(def_id);
+    }
+
+    // Inline mod body gets its own scope
+    if let Some(body) = child_by_field(node, "body") {
+        let mod_scope = builder.add_scope(scope, Some(node_range(body)));
+        scope_walk(body, source, mod_scope, builder, pub_defs, true);
+    }
+}
+
+fn scope_use(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    let is_pub = has_pub(node);
+    let import_scope = builder.add_import_scope();
+
+    // Find the use argument (the path/tree after `use`)
+    if let Some(arg) = child_by_field(node, "argument") {
+        collect_use_bindings(arg, source, scope, import_scope, builder, pub_defs, is_module_level && is_pub);
+    }
+}
+
+fn collect_use_bindings(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    import_scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_pub: bool,
+) {
+    match node.kind() {
+        "use_as_clause" => {
+            // use foo::bar as baz
+            let original = child_by_field(node, "path")
+                .map(|n| use_leaf_name(n, source))
+                .unwrap_or_default();
+            let alias = child_by_field(node, "alias")
+                .map_or_else(|| original.clone(), |n| node_text(n, source).to_string());
+
+            if !original.is_empty() {
+                builder.add_import_reference(import_scope, &original, Some(node_range(node)));
+                let def_id = builder.add_definition(scope, &alias, Some(node_range(node)), None);
+                if is_pub {
+                    pub_defs.push(def_id);
+                }
+            }
+        }
+        "use_list" => {
+            // use foo::{bar, baz}
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_use_bindings(child, source, scope, import_scope, builder, pub_defs, is_pub);
+            }
+        }
+        "use_wildcard" => {
+            // use foo::*
+            builder.add_import_reference(import_scope, "*", Some(node_range(node)));
+        }
+        "scoped_use_list" => {
+            // use foo::{bar, baz} — the scoped_use_list wraps the path + use_list
+            if let Some(list) = find_child_by_kind(node, "use_list") {
+                let mut cursor = list.walk();
+                for child in list.children(&mut cursor) {
+                    collect_use_bindings(child, source, scope, import_scope, builder, pub_defs, is_pub);
+                }
+            }
+        }
+        "scoped_identifier" | "identifier" => {
+            // use foo::bar (simple path)
+            let name = use_leaf_name(node, source);
+            if !name.is_empty() {
+                builder.add_import_reference(import_scope, &name, Some(node_range(node)));
+                let def_id = builder.add_definition(scope, &name, Some(node_range(node)), None);
+                if is_pub {
+                    pub_defs.push(def_id);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Extract the leaf name from a use path (last segment of `scoped_identifier`).
+fn use_leaf_name(node: tree_sitter::Node<'_>, source: &str) -> String {
+    match node.kind() {
+        "identifier" => node_text(node, source).to_string(),
+        "scoped_identifier" => {
+            child_by_field(node, "name")
+                .map_or_else(String::new, |n| node_text(n, source).to_string())
+        }
+        _ => String::new(),
+    }
+}
+
+fn scope_const(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+    pub_defs: &mut Vec<ScopeNodeId>,
+    is_module_level: bool,
+) {
+    let Some(name_node) = child_by_field(node, "name") else {
+        return;
+    };
+    let name = node_text(name_node, source);
+    let def_id = builder.add_definition(
+        scope, name, Some(node_range(name_node)), Some(SymbolKind::Constant),
+    );
+    if is_module_level && has_pub(node) {
+        pub_defs.push(def_id);
+    }
+}
+
+fn scope_call(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+) {
+    let Some(func) = child_by_field(node, "function") else {
+        return;
+    };
+    let target = match func.kind() {
+        "identifier" => Some(node_text(func, source).to_string()),
+        "scoped_identifier" => {
+            child_by_field(func, "name").map(|n| node_text(n, source).to_string())
+        }
+        "field_expression" => {
+            child_by_field(func, "field").map(|n| node_text(n, source).to_string())
+        }
+        _ => None,
+    };
+    if let Some(name) = target {
+        builder.add_reference(scope, &name, Some(node_range(func)), Some(SymbolKind::Function));
+    }
+}
+
+fn scope_params(
+    params_node: tree_sitter::Node<'_>,
+    source: &str,
+    func_scope: ScopeNodeId,
+    builder: &mut ScopeGraphBuilder,
+) {
+    let mut cursor = params_node.walk();
+    for child in params_node.children(&mut cursor) {
+        match child.kind() {
+            "parameter" => {
+                if let Some(pattern) = child_by_field(child, "pattern") {
+                    if pattern.kind() == "identifier" {
+                        let name = node_text(pattern, source);
+                        builder.add_definition(
+                            func_scope, name, Some(node_range(pattern)), Some(SymbolKind::Variable),
+                        );
+                    }
+                }
+            }
+            "self_parameter" => {
+                builder.add_definition(
+                    func_scope, "self", Some(node_range(child)), Some(SymbolKind::Variable),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +688,192 @@ use crate::types::{Node, NodeKind};
 
         assert_eq!(graph.imports.len(), 2);
         assert_eq!(graph.imports[0].imported_name, "std::collections::HashMap");
+    }
+
+    // ── Scope graph tests ──────────────────────────────────────────
+
+    use crate::scope_graph::{ScopeGraph, ScopeNodeKind};
+
+    fn build_scope(source: &str) -> FileScopeGraph {
+        let tree = parse_rust(source);
+        RustSupport
+            .build_scope_graph(&tree, source, Path::new("test.rs"))
+            .unwrap()
+            .expect("should produce a scope graph")
+    }
+
+    fn pop_symbols(graph: &FileScopeGraph) -> Vec<&str> {
+        graph.nodes.iter().filter_map(|n| match &n.kind {
+            ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
+            _ => None,
+        }).collect()
+    }
+
+    fn push_symbols(graph: &FileScopeGraph) -> Vec<&str> {
+        graph.nodes.iter().filter_map(|n| match &n.kind {
+            ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
+            _ => None,
+        }).collect()
+    }
+
+    #[test]
+    fn scope_graph_function() {
+        let sg = build_scope("pub fn greet(name: &str) {}\nfn helper() {}\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"greet"), "Should have greet, got: {defs:?}");
+        assert!(defs.contains(&"helper"), "Should have helper, got: {defs:?}");
+        assert!(defs.contains(&"name"), "Should have param name, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_pub_exported() {
+        let sg = build_scope("pub fn exported() {}\nfn private() {}\n");
+        assert!(
+            sg.export_nodes.iter().any(|&id| {
+                sg.nodes.iter().any(|n| n.id == id && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "exported"))
+            }),
+            "pub fn exported should be exported"
+        );
+        assert!(
+            !sg.export_nodes.iter().any(|&id| {
+                sg.nodes.iter().any(|n| n.id == id && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "private"))
+            }),
+            "fn private should not be exported"
+        );
+    }
+
+    #[test]
+    fn scope_graph_struct_and_enum() {
+        let sg = build_scope("pub struct Foo;\nenum Bar { A, B }\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"Foo"), "Should have Foo, got: {defs:?}");
+        assert!(defs.contains(&"Bar"), "Should have Bar, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_trait_def() {
+        let sg = build_scope("pub trait Greet {\n    fn hello(&self);\n}\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"Greet"), "Should have trait Greet, got: {defs:?}");
+        assert!(defs.contains(&"hello"), "Should have method hello, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_impl_references() {
+        let sg = build_scope("struct Foo;\ntrait Bar {}\nimpl Bar for Foo {}\n");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"Foo"), "impl should reference type Foo, got: {refs:?}");
+        assert!(refs.contains(&"Bar"), "impl should reference trait Bar, got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_use_simple() {
+        let sg = build_scope("use std::collections::HashMap;\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"HashMap"), "use should bind HashMap, got: {defs:?}");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"HashMap"), "use should reference HashMap, got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_use_list() {
+        let sg = build_scope("use std::collections::{HashMap, HashSet};\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"HashMap"), "Should bind HashMap, got: {defs:?}");
+        assert!(defs.contains(&"HashSet"), "Should bind HashSet, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_use_alias() {
+        let sg = build_scope("use std::collections::HashMap as Map;\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"Map"), "Should bind alias Map, got: {defs:?}");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"HashMap"), "Should reference original HashMap, got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_use_wildcard() {
+        let sg = build_scope("use std::collections::*;\n");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"*"), "Wildcard should reference *, got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_mod_inline() {
+        let sg = build_scope("pub mod inner {\n    pub fn foo() {}\n}\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"inner"), "Should have mod inner, got: {defs:?}");
+        assert!(defs.contains(&"foo"), "Should have fn foo inside mod, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_const_static() {
+        let sg = build_scope("pub const MAX: u32 = 100;\nstatic COUNT: u32 = 0;\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"MAX"), "Should have const MAX, got: {defs:?}");
+        assert!(defs.contains(&"COUNT"), "Should have static COUNT, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_call_reference() {
+        let sg = build_scope("fn foo() {}\nfn bar() { foo(); }\n");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"foo"), "Should reference foo(), got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_method_call() {
+        let sg = build_scope("fn run() { obj.process(); }\n");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"process"), "Should reference .process(), got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_self_param() {
+        let sg = build_scope("struct Foo;\nimpl Foo {\n    fn bar(&self) {}\n}\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"self"), "Should have self param, got: {defs:?}");
+        assert!(defs.contains(&"bar"), "Should have method bar, got: {defs:?}");
+    }
+
+    #[test]
+    fn scope_graph_within_file_resolution() {
+        let source = "fn helper() {}\nfn run() { helper(); }\n";
+        let sg = build_scope(source);
+        let mut scope_graph = ScopeGraph::new();
+        scope_graph.add_file_graph(&sg);
+        let resolved = scope_graph.resolve_all();
+        assert!(
+            resolved.iter().any(|r| r.symbol == "helper"),
+            "helper() should resolve, got: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn scope_graph_cross_file_resolution() {
+        // File A uses a name imported from file B
+        let source_a = "use crate::utils::greet;\nfn run() { greet(); }\n";
+        let sg_a = {
+            let tree = parse_rust(source_a);
+            RustSupport.build_scope_graph(&tree, source_a, Path::new("a.rs")).unwrap().unwrap()
+        };
+        // File B exports a public function
+        let source_b = "pub fn greet() {}\n";
+        let sg_b = {
+            let tree = parse_rust(source_b);
+            RustSupport.build_scope_graph(&tree, source_b, Path::new("b.rs")).unwrap().unwrap()
+        };
+
+        let mut scope_graph = ScopeGraph::new();
+        scope_graph.add_file_graph(&sg_a);
+        scope_graph.add_file_graph(&sg_b);
+        let resolved = scope_graph.resolve_all();
+
+        let cross_file: Vec<_> = resolved.iter()
+            .filter(|r| r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.rs"))
+            .collect();
+        assert!(!cross_file.is_empty(), "use greet should resolve cross-file, got: {resolved:?}");
     }
 
     #[test]
