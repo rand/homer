@@ -12,9 +12,10 @@ homer-core = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# rmcp = { workspace = true }  # Uncomment when MCP server is implemented
+rmcp = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

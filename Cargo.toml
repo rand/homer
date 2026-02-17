@@ -60,7 +60,8 @@ clap = { version = "4", features = ["derive", "env"] }
 indicatif = "0.17"
 
 # MCP
-rmcp = { version = "0.1", features = ["server", "transport-io"] }
+rmcp = { version = "0.15", features = ["server"] }
+schemars = "0.8"
 
 # HTTP
 reqwest = { version = "0.12", features = ["json"] }

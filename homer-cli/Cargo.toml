@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 homer-core = { workspace = true }
+homer-mcp = { path = "../homer-mcp" }
 
 clap = { workspace = true }
 tokio = { workspace = true }
