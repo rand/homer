@@ -166,6 +166,10 @@ pub struct FileGraph {
     pub file_path: PathBuf,
     pub definitions: Vec<Definition>,
     pub references: Vec<Reference>,
+    /// Scope nodes for precise resolution (populated by Precise tier languages).
+    pub scope_nodes: Vec<scope_graph::ScopeNode>,
+    /// Scope edges connecting scope nodes.
+    pub scope_edges: Vec<scope_graph::ScopeEdge>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

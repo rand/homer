@@ -32,6 +32,19 @@ insta = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "store_bench"
+harness = false
+
+[[bench]]
+name = "parse_bench"
+harness = false
+
+[[bench]]
+name = "centrality_bench"
+harness = false
 
 [lints]
 workspace = true

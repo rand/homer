@@ -13,12 +13,14 @@ use crate::config::HomerConfig;
 use crate::extract::document::DocumentExtractor;
 use crate::extract::git::GitExtractor;
 use crate::extract::github::GitHubExtractor;
+use crate::extract::gitlab::GitLabExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
 use crate::render::risk_map::RiskMapRenderer;
+use crate::render::topos_spec::ToposSpecRenderer;
 use crate::render::traits::Renderer;
 use crate::store::HomerStore;
 
@@ -198,6 +200,9 @@ impl HomerPipeline {
         // 5. GitHub (PRs, issues, reviews — only if GitHub remote detected)
         self.run_github_extraction(store, config, result).await;
 
+        // 5b. GitLab (MRs, issues, approvals — only if GitLab remote detected)
+        self.run_gitlab_extraction(store, config, result).await;
+
         // 6. Prompts (agent rules always; sessions if opt-in)
         self.run_prompt_extraction(store, config, result).await;
     }
@@ -224,6 +229,35 @@ impl HomerPipeline {
                     warn!(error = %e, "GitHub extraction failed");
                     result.errors.push(PipelineError {
                         stage: "extract:github",
+                        message: e.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    async fn run_gitlab_extraction(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        result: &mut PipelineResult,
+    ) {
+        if let Some(gl_ext) = GitLabExtractor::from_repo(&self.repo_path, config) {
+            match gl_ext.extract(store, config).await {
+                Ok(stats) => {
+                    result.extract_nodes += stats.nodes_created;
+                    result.extract_edges += stats.edges_created;
+                    for (desc, err) in stats.errors {
+                        result.errors.push(PipelineError {
+                            stage: "extract:gitlab",
+                            message: format!("{desc}: {err}"),
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "GitLab extraction failed");
+                    result.errors.push(PipelineError {
+                        stage: "extract:gitlab",
                         message: e.to_string(),
                     });
                 }
@@ -417,6 +451,21 @@ impl HomerPipeline {
                 warn!(error = %e, "Risk map rendering failed");
                 result.errors.push(PipelineError {
                     stage: "render:risk_map",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // spec/homer-spec.tps (Topos format)
+        let topos_renderer = ToposSpecRenderer;
+        match topos_renderer.write(store, config, &self.repo_path).await {
+            Ok(()) => {
+                result.artifacts_written += 1;
+            }
+            Err(e) => {
+                warn!(error = %e, "Topos spec rendering failed");
+                result.errors.push(PipelineError {
+                    stage: "render:topos_spec",
                     message: e.to_string(),
                 });
             }

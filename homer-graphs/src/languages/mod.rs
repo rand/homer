@@ -11,7 +11,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::{ConventionQuery, HeuristicGraph, ResolutionTier, Result};
+use crate::scope_graph::FileScopeGraph;
+use crate::{ConventionQuery, FileGraph, HeuristicGraph, ResolutionTier, Result};
 
 /// Trait implemented by each language's extraction support.
 pub trait LanguageSupport: Send + Sync + std::fmt::Debug {
@@ -34,6 +35,59 @@ pub trait LanguageSupport: Send + Sync + std::fmt::Debug {
         source: &str,
         path: &Path,
     ) -> Result<HeuristicGraph>;
+
+    /// Build a scope graph for a single file (Precise tier).
+    ///
+    /// Returns a `FileScopeGraph` with push/pop symbol nodes, scope nodes,
+    /// and edges encoding the file's name binding structure for cross-file
+    /// resolution via path-stitching.
+    ///
+    /// Default implementation returns `None` (not supported at Precise tier).
+    /// Languages that support Precise tier should override this.
+    fn build_scope_graph(
+        &self,
+        _tree: &tree_sitter::Tree,
+        _source: &str,
+        _path: &Path,
+    ) -> Result<Option<FileScopeGraph>> {
+        Ok(None)
+    }
+
+    /// Build a `FileGraph` combining definitions and references.
+    ///
+    /// Default implementation converts from the heuristic graph output.
+    fn build_file_graph(
+        &self,
+        tree: &tree_sitter::Tree,
+        source: &str,
+        path: &Path,
+    ) -> Result<FileGraph> {
+        let heuristic = self.extract_heuristic(tree, source, path)?;
+        Ok(FileGraph {
+            file_path: heuristic.file_path,
+            definitions: heuristic
+                .definitions
+                .into_iter()
+                .map(|d| crate::Definition {
+                    name: d.qualified_name,
+                    kind: d.kind,
+                    span: d.span,
+                    doc_comment: d.doc_comment,
+                })
+                .collect(),
+            references: heuristic
+                .calls
+                .into_iter()
+                .map(|c| crate::Reference {
+                    name: c.callee_name,
+                    kind: crate::SymbolKind::Function,
+                    span: c.span,
+                })
+                .collect(),
+            scope_nodes: vec![],
+            scope_edges: vec![],
+        })
+    }
 
     /// Tree-sitter queries for convention extraction.
     fn convention_queries(&self) -> &[ConventionQuery] {

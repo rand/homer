@@ -924,7 +924,7 @@ mod tests {
         let config = HomerConfig::default(); // enabled = false
         let extractor = PromptExtractor::new(tmp.path());
 
-        let stats = extractor.extract(&store, &config).await.unwrap();
+        let _stats = extractor.extract(&store, &config).await.unwrap();
 
         // Should not create any session nodes (prompts disabled).
         let filter = crate::types::NodeFilter {

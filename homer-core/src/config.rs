@@ -67,6 +67,8 @@ pub struct ExtractionSection {
     pub documents: DocumentExtractionConfig,
     #[serde(default)]
     pub prompts: PromptExtractionConfig,
+    #[serde(default)]
+    pub gitlab: GitLabExtractionConfig,
 }
 
 impl Default for ExtractionSection {
@@ -76,6 +78,7 @@ impl Default for ExtractionSection {
             structure: StructureExtractionConfig::default(),
             documents: DocumentExtractionConfig::default(),
             prompts: PromptExtractionConfig::default(),
+            gitlab: GitLabExtractionConfig::default(),
         }
     }
 }
@@ -155,6 +158,32 @@ impl Default for PromptExtractionConfig {
             redact_sensitive: true,
             store_full_text: false,
             hash_session_ids: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitLabExtractionConfig {
+    /// Environment variable holding the GitLab personal access token.
+    pub token_env: String,
+    /// Max merge requests to fetch on initial run.
+    pub max_mr_history: u32,
+    /// Max issues to fetch on initial run.
+    pub max_issue_history: u32,
+    /// Whether to include MR comments as metadata.
+    pub include_comments: bool,
+    /// Whether to include approvals/reviews.
+    pub include_reviews: bool,
+}
+
+impl Default for GitLabExtractionConfig {
+    fn default() -> Self {
+        Self {
+            token_env: "GITLAB_TOKEN".to_string(),
+            max_mr_history: 500,
+            max_issue_history: 1000,
+            include_comments: true,
+            include_reviews: true,
         }
     }
 }
