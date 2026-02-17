@@ -1,4 +1,6 @@
+pub mod graph;
 pub mod init;
+pub mod query;
 pub mod status;
 pub mod update;
 
@@ -12,6 +14,10 @@ pub enum Command {
     Update(update::UpdateArgs),
     /// Show current state of Homer's knowledge base
     Status(status::StatusArgs),
+    /// Query the Homer knowledge base for an entity
+    Query(query::QueryArgs),
+    /// Explore graph analysis results
+    Graph(graph::GraphArgs),
 }
 
 pub async fn run(cmd: Command) -> anyhow::Result<()> {
@@ -19,5 +25,7 @@ pub async fn run(cmd: Command) -> anyhow::Result<()> {
         Command::Init(args) => init::run(args).await,
         Command::Update(args) => update::run(args).await,
         Command::Status(args) => status::run(args).await,
+        Command::Query(args) => query::run(args).await,
+        Command::Graph(args) => graph::run(args).await,
     }
 }

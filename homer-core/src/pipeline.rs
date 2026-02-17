@@ -4,6 +4,8 @@ use std::time::Instant;
 use tracing::{info, warn};
 
 use crate::analyze::behavioral::BehavioralAnalyzer;
+use crate::analyze::centrality::CentralityAnalyzer;
+use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::traits::Analyzer;
 use crate::config::HomerConfig;
 use crate::extract::document::DocumentExtractor;
@@ -11,6 +13,8 @@ use crate::extract::git::GitExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::structure::StructureExtractor;
 use crate::render::agents_md::AgentsMdRenderer;
+use crate::render::module_context::ModuleContextRenderer;
+use crate::render::risk_map::RiskMapRenderer;
 use crate::render::traits::Renderer;
 use crate::store::HomerStore;
 
@@ -194,8 +198,9 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        let analyzer = BehavioralAnalyzer;
-        match analyzer.analyze(store, config).await {
+        // Behavioral analysis first (change frequency, bus factor, etc.)
+        let behavioral = BehavioralAnalyzer;
+        match behavioral.analyze(store, config).await {
             Ok(stats) => {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
@@ -213,6 +218,48 @@ impl HomerPipeline {
                 });
             }
         }
+
+        // Centrality analysis (PageRank, betweenness, HITS, composite salience)
+        let centrality = CentralityAnalyzer::default();
+        match centrality.analyze(store, config).await {
+            Ok(stats) => {
+                result.analysis_results += stats.results_stored;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "analyze:centrality",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Centrality analysis failed");
+                result.errors.push(PipelineError {
+                    stage: "analyze:centrality",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // Community detection + stability classification
+        let community = CommunityAnalyzer;
+        match community.analyze(store, config).await {
+            Ok(stats) => {
+                result.analysis_results += stats.results_stored;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "analyze:community",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Community analysis failed");
+                result.errors.push(PipelineError {
+                    stage: "analyze:community",
+                    message: e.to_string(),
+                });
+            }
+        }
     }
 
     async fn run_rendering(
@@ -221,6 +268,7 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
+        // AGENTS.md
         let renderer = AgentsMdRenderer;
         match renderer.write(store, config, &self.repo_path).await {
             Ok(()) => {
@@ -230,6 +278,36 @@ impl HomerPipeline {
                 warn!(error = %e, "AGENTS.md rendering failed");
                 result.errors.push(PipelineError {
                     stage: "render:agents_md",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // Per-directory .context.md files
+        let ctx_renderer = ModuleContextRenderer;
+        match ctx_renderer.write(store, config, &self.repo_path).await {
+            Ok(()) => {
+                result.artifacts_written += 1;
+            }
+            Err(e) => {
+                warn!(error = %e, "Module context rendering failed");
+                result.errors.push(PipelineError {
+                    stage: "render:module_context",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // homer-risk.json
+        let risk_renderer = RiskMapRenderer;
+        match risk_renderer.write(store, config, &self.repo_path).await {
+            Ok(()) => {
+                result.artifacts_written += 1;
+            }
+            Err(e) => {
+                warn!(error = %e, "Risk map rendering failed");
+                result.errors.push(PipelineError {
+                    stage: "render:risk_map",
                     message: e.to_string(),
                 });
             }

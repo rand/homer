@@ -102,6 +102,26 @@ async fn minimal_rust_full_pipeline() {
         "Should have change frequency results"
     );
 
+    // Should have centrality analysis results (PageRank on call graph)
+    let pr_results = store
+        .get_analyses_by_kind(AnalysisKind::PageRank)
+        .await
+        .unwrap();
+    assert!(
+        !pr_results.is_empty(),
+        "Should have PageRank results from call graph"
+    );
+
+    // Should have composite salience
+    let salience_results = store
+        .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+        .await
+        .unwrap();
+    assert!(
+        !salience_results.is_empty(),
+        "Should have composite salience results"
+    );
+
     // AGENTS.md should be generated
     assert!(
         result.artifacts_written >= 1,
@@ -151,6 +171,86 @@ async fn minimal_rust_has_bus_factor_analysis() {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         assert_eq!(bf, 1, "Bus factor should be 1 for single-contributor repo");
+    }
+}
+
+#[tokio::test]
+async fn minimal_rust_has_centrality_analysis() {
+    let repo = TestRepo::minimal_rust();
+    let (_result, store) = run_pipeline_with_store(repo.path()).await;
+
+    // PageRank should be computed on the call graph
+    let pr_results = store
+        .get_analyses_by_kind(AnalysisKind::PageRank)
+        .await
+        .unwrap();
+    assert!(!pr_results.is_empty(), "Should have PageRank results");
+
+    // Each PageRank result should have score and rank
+    for r in &pr_results {
+        assert!(
+            r.data.get("pagerank").is_some(),
+            "PageRank result should have score"
+        );
+        assert!(r.data.get("rank").is_some(), "Should have rank");
+    }
+
+    // HITS should be computed
+    let hits_results = store
+        .get_analyses_by_kind(AnalysisKind::HITSScore)
+        .await
+        .unwrap();
+    assert!(!hits_results.is_empty(), "Should have HITS results");
+
+    for r in &hits_results {
+        assert!(r.data.get("hub_score").is_some(), "Should have hub_score");
+        assert!(
+            r.data.get("authority_score").is_some(),
+            "Should have authority_score"
+        );
+        let classification = r
+            .data
+            .get("classification")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+        assert!(
+            ["Hub", "Authority", "Both", "Neither"].contains(&classification),
+            "Invalid HITS classification: {classification}"
+        );
+    }
+
+    // Composite salience should combine centrality + behavioral
+    let salience_results = store
+        .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+        .await
+        .unwrap();
+    assert!(
+        !salience_results.is_empty(),
+        "Should have composite salience results"
+    );
+
+    for r in &salience_results {
+        let val = r
+            .data
+            .get("score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
+        assert!(val >= 0.0, "Salience score should be non-negative");
+        let classification = r
+            .data
+            .get("classification")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+        assert!(
+            [
+                "ActiveHotspot",
+                "FoundationalStable",
+                "PeripheralActive",
+                "QuietLeaf"
+            ]
+            .contains(&classification),
+            "Invalid salience classification: {classification}"
+        );
     }
 }
 
@@ -288,6 +388,65 @@ async fn pipeline_survives_malformed_source_file() {
     assert!(
         result.artifacts_written >= 1,
         "Should still produce AGENTS.md"
+    );
+}
+
+// ── Module Context + Risk Map ────────────────────────────────────
+
+#[tokio::test]
+async fn pipeline_generates_risk_map() {
+    let repo = TestRepo::minimal_rust();
+    let (_result, _store) = run_pipeline_with_store(repo.path()).await;
+
+    let risk_path = repo.path().join("homer-risk.json");
+    assert!(risk_path.exists(), "homer-risk.json should be created");
+
+    let content = std::fs::read_to_string(&risk_path).unwrap();
+    let risk_map: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(risk_map["version"], "1.0");
+    assert!(
+        risk_map["risk_areas"].is_array(),
+        "Should have risk_areas array"
+    );
+    assert!(
+        risk_map["safe_areas"].is_array(),
+        "Should have safe_areas array"
+    );
+}
+
+#[tokio::test]
+async fn pipeline_generates_module_context() {
+    let repo = TestRepo::minimal_rust();
+    let (_result, _store) = run_pipeline_with_store(repo.path()).await;
+
+    let src_ctx = repo.path().join("src/.context.md");
+    assert!(
+        src_ctx.exists(),
+        "src/.context.md should be created"
+    );
+
+    let content = std::fs::read_to_string(&src_ctx).unwrap();
+    assert!(content.contains("# src"), "Should have module title");
+    assert!(
+        content.contains("## Key Entities"),
+        "Should have entities section"
+    );
+    assert!(
+        content.contains("## Change Profile"),
+        "Should have change profile"
+    );
+}
+
+#[tokio::test]
+async fn agents_md_has_load_bearing_code() {
+    let repo = TestRepo::minimal_rust();
+    let (_result, _store) = run_pipeline_with_store(repo.path()).await;
+
+    let agents_path = repo.path().join("AGENTS.md");
+    let content = std::fs::read_to_string(&agents_path).unwrap();
+    assert!(
+        content.contains("## Load-Bearing Code"),
+        "AGENTS.md should have Load-Bearing Code section"
     );
 }
 

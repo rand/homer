@@ -49,6 +49,9 @@ impl Renderer for AgentsMdRenderer {
         // Change Patterns
         render_change_patterns(&mut out, store).await?;
 
+        // Load-Bearing Code (top entities by composite salience)
+        render_load_bearing_code(&mut out, store).await?;
+
         // Danger Zones
         render_danger_zones(&mut out, store).await?;
 
@@ -329,6 +332,71 @@ async fn render_change_patterns(
         }
         writeln!(out).unwrap();
     }
+
+    Ok(())
+}
+
+// ── Load-Bearing Code ─────────────────────────────────────────────
+
+async fn render_load_bearing_code(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    writeln!(out, "## Load-Bearing Code").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "Functions and types with the highest structural importance (composite salience)."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Modifications require understanding all callers and running the full test suite."
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    let salience_results = store
+        .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+        .await?;
+
+    if salience_results.is_empty() {
+        writeln!(out, "*No salience data available.*").unwrap();
+        writeln!(out).unwrap();
+        return Ok(());
+    }
+
+    // Collect and sort by salience value
+    let mut entries: Vec<_> = salience_results
+        .iter()
+        .filter_map(|r| {
+            let val = r.data.get("score")?.as_f64()?;
+            let cls = r
+                .data
+                .get("classification")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Unknown");
+            Some((r.node_id, val, cls.to_string()))
+        })
+        .collect();
+
+    entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Show top 20
+    let top_n = entries.iter().take(20);
+
+    writeln!(out, "| Entity | Salience | Classification |").unwrap();
+    writeln!(out, "|--------|----------|----------------|").unwrap();
+
+    for (node_id, val, cls) in top_n {
+        let name = store
+            .get_node(*node_id)
+            .await?
+            .map_or_else(|| format!("node:{}", node_id.0), |n| n.name);
+        let short_name = name.rsplit("::").next().unwrap_or(&name);
+        writeln!(out, "| `{short_name}` | {val:.2} | {cls} |").unwrap();
+    }
+    writeln!(out).unwrap();
 
     Ok(())
 }
