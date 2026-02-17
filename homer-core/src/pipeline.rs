@@ -7,6 +7,7 @@ use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::convention::ConventionAnalyzer;
+use crate::analyze::temporal::TemporalAnalyzer;
 use crate::analyze::task_pattern::TaskPatternAnalyzer;
 use crate::analyze::traits::Analyzer;
 use crate::config::HomerConfig;
@@ -293,6 +294,7 @@ impl HomerPipeline {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn run_analysis(
         &self,
         store: &dyn HomerStore,
@@ -357,6 +359,27 @@ impl HomerPipeline {
                 warn!(error = %e, "Community analysis failed");
                 result.errors.push(PipelineError {
                     stage: "analyze:community",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // Temporal analysis (centrality trends, drift, enhanced stability)
+        let temporal = TemporalAnalyzer;
+        match temporal.analyze(store, config).await {
+            Ok(stats) => {
+                result.analysis_results += stats.results_stored;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "analyze:temporal",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Temporal analysis failed");
+                result.errors.push(PipelineError {
+                    stage: "analyze:temporal",
                     message: e.to_string(),
                 });
             }

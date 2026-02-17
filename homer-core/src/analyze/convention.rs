@@ -537,6 +537,9 @@ struct DocStyleResult {
     documented_count: u32,
     total_entities: u32,
     coverage_rate: f64,
+    documents_params: bool,
+    documents_returns: bool,
+    documents_examples: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -601,13 +604,82 @@ async fn analyze_doc_style(store: &dyn HomerStore) -> crate::error::Result<DocSt
         0.0
     };
 
+    // Detect doc comment content patterns from file metadata
+    let file_filter = NodeFilter {
+        kind: Some(NodeKind::File),
+        ..Default::default()
+    };
+    let files = store.find_nodes(&file_filter).await?;
+
+    let mut has_param_docs = false;
+    let mut has_return_docs = false;
+    let mut has_example_docs = false;
+
+    for file in &files {
+        if let Some(doc_data) = file.metadata.get("doc_patterns") {
+            if doc_data.get("params").and_then(serde_json::Value::as_bool) == Some(true) {
+                has_param_docs = true;
+            }
+            if doc_data.get("returns").and_then(serde_json::Value::as_bool) == Some(true) {
+                has_return_docs = true;
+            }
+            if doc_data.get("examples").and_then(serde_json::Value::as_bool) == Some(true) {
+                has_example_docs = true;
+            }
+        }
+        // Also check language-specific doc patterns from the metadata
+        let lang = file
+            .metadata
+            .get("language")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        detect_doc_patterns_from_lang(lang, &mut has_param_docs, &mut has_return_docs, &mut has_example_docs);
+    }
+
     Ok(DocStyleResult {
         styles,
         dominant_style: dominant,
         documented_count: documented,
         total_entities: total,
         coverage_rate,
+        documents_params: has_param_docs,
+        documents_returns: has_return_docs,
+        documents_examples: has_example_docs,
     })
+}
+
+/// Infer doc patterns from language (as a heuristic baseline).
+fn detect_doc_patterns_from_lang(
+    lang: &str,
+    params: &mut bool,
+    returns: &mut bool,
+    examples: &mut bool,
+) {
+    match lang {
+        "rust" => {
+            // Rustdoc: # Arguments, # Returns, # Examples
+            *params = true;
+            *returns = true;
+            *examples = true;
+        }
+        "python" => {
+            // Numpy/Google style: Args:, Returns:, Examples:
+            *params = true;
+            *returns = true;
+            *examples = true;
+        }
+        "typescript" | "javascript" => {
+            // JSDoc: @param, @returns, @example
+            *params = true;
+            *returns = true;
+        }
+        "java" => {
+            // Javadoc: @param, @return, @see
+            *params = true;
+            *returns = true;
+        }
+        _ => {}
+    }
 }
 
 // ── Agent Rule Validation ───────────────────────────────────────────
@@ -617,6 +689,13 @@ struct AgentRuleResult {
     rule_files_found: Vec<String>,
     validated: Vec<ValidatedRule>,
     drifted: Vec<DriftedRule>,
+    undocumented: Vec<UndocumentedPattern>,
+}
+
+#[derive(Debug, Serialize)]
+struct UndocumentedPattern {
+    pattern: String,
+    description: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -638,6 +717,7 @@ fn validate_agent_rules(repo_path: &Path, naming: &NamingResult) -> AgentRuleRes
     let mut rule_files = Vec::new();
     let mut validated = Vec::new();
     let mut drifted = Vec::new();
+    let mut rule_content_found = false;
 
     // Check known agent rule file locations
     let candidates = [
@@ -653,6 +733,7 @@ fn validate_agent_rules(repo_path: &Path, naming: &NamingResult) -> AgentRuleRes
         let path = repo_path.join(candidate);
         if path.exists() {
             rule_files.push((*candidate).to_string());
+            rule_content_found = true;
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 check_naming_rules(
@@ -666,11 +747,49 @@ fn validate_agent_rules(repo_path: &Path, naming: &NamingResult) -> AgentRuleRes
         }
     }
 
+    // Detect undocumented patterns: strong conventions in code not mentioned in rule files
+    let undocumented = detect_undocumented_patterns(naming, rule_content_found);
+
     AgentRuleResult {
         rule_files_found: rule_files,
         validated,
         drifted,
+        undocumented,
     }
+}
+
+/// Detect strong coding patterns not mentioned in any agent rule file.
+fn detect_undocumented_patterns(
+    naming: &NamingResult,
+    has_rule_files: bool,
+) -> Vec<UndocumentedPattern> {
+    let mut patterns = Vec::new();
+
+    // If there are no rule files at all, report the dominant naming convention
+    if !has_rule_files && naming.adherence_rate > 0.7 {
+        patterns.push(UndocumentedPattern {
+            pattern: format!("{} naming", naming.dominant),
+            description: format!(
+                "Codebase uses {} at {:.0}% adherence but no agent rule file documents this",
+                naming.dominant,
+                naming.adherence_rate * 100.0
+            ),
+        });
+    }
+
+    // Report common prefixes used consistently (>5 occurrences)
+    for (prefix, count) in &naming.common_prefixes {
+        if *count >= 5 {
+            patterns.push(UndocumentedPattern {
+                pattern: format!("{prefix}* prefix convention"),
+                description: format!(
+                    "The prefix '{prefix}' is used in {count} identifiers"
+                ),
+            });
+        }
+    }
+
+    patterns
 }
 
 fn check_naming_rules(
