@@ -24,6 +24,8 @@ pub struct HomerConfig {
     pub graph: GraphSection,
     #[serde(default)]
     pub renderers: RenderersSection,
+    #[serde(default)]
+    pub llm: LlmSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +194,36 @@ impl Default for RenderersSection {
     fn default() -> Self {
         Self {
             enabled: vec!["agents-md".into(), "module-ctx".into(), "risk-map".into()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmSection {
+    pub provider: String,
+    pub model: String,
+    /// Environment variable holding the API key.
+    pub api_key_env: String,
+    /// Base URL override (for custom providers).
+    pub base_url: Option<String>,
+    /// Max concurrent LLM requests.
+    pub max_concurrent: u32,
+    /// USD cost budget; 0 = unlimited.
+    pub cost_budget: f64,
+    /// Whether LLM features are enabled.
+    pub enabled: bool,
+}
+
+impl Default for LlmSection {
+    fn default() -> Self {
+        Self {
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet-4-20250514".to_string(),
+            api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            base_url: None,
+            max_concurrent: 5,
+            cost_budget: 0.0,
+            enabled: false, // opt-in by default
         }
     }
 }

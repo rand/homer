@@ -6,10 +6,12 @@ use tracing::{info, warn};
 use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
+use crate::analyze::convention::ConventionAnalyzer;
 use crate::analyze::traits::Analyzer;
 use crate::config::HomerConfig;
 use crate::extract::document::DocumentExtractor;
 use crate::extract::git::GitExtractor;
+use crate::extract::github::GitHubExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::structure::StructureExtractor;
 use crate::render::agents_md::AgentsMdRenderer;
@@ -190,6 +192,38 @@ impl HomerPipeline {
                 });
             }
         }
+
+        // 5. GitHub (PRs, issues, reviews — only if GitHub remote detected)
+        self.run_github_extraction(store, config, result).await;
+    }
+
+    async fn run_github_extraction(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        result: &mut PipelineResult,
+    ) {
+        if let Some(gh_ext) = GitHubExtractor::from_repo(&self.repo_path, config) {
+            match gh_ext.extract(store, config).await {
+                Ok(stats) => {
+                    result.extract_nodes += stats.nodes_created;
+                    result.extract_edges += stats.edges_created;
+                    for (desc, err) in stats.errors {
+                        result.errors.push(PipelineError {
+                            stage: "extract:github",
+                            message: format!("{desc}: {err}"),
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "GitHub extraction failed");
+                    result.errors.push(PipelineError {
+                        stage: "extract:github",
+                        message: e.to_string(),
+                    });
+                }
+            }
+        }
     }
 
     async fn run_analysis(
@@ -256,6 +290,27 @@ impl HomerPipeline {
                 warn!(error = %e, "Community analysis failed");
                 result.errors.push(PipelineError {
                     stage: "analyze:community",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // Convention analysis (naming, testing, error handling, doc style, agent rules)
+        let convention = ConventionAnalyzer::new(&self.repo_path);
+        match convention.analyze(store, config).await {
+            Ok(stats) => {
+                result.analysis_results += stats.results_stored;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "analyze:convention",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Convention analysis failed");
+                result.errors.push(PipelineError {
+                    stage: "analyze:convention",
                     message: e.to_string(),
                 });
             }

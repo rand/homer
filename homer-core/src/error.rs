@@ -18,6 +18,9 @@ pub enum HomerError {
 
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
+
+    #[error("LLM error: {0}")]
+    Llm(#[from] LlmError),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -75,6 +78,24 @@ pub enum ConfigError {
 
     #[error("Parse error: {0}")]
     Parse(String),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum LlmError {
+    #[error("Network error: {0}")]
+    Network(String),
+
+    #[error("API error (HTTP {status}): {body}")]
+    ApiError { status: u16, body: String },
+
+    #[error("Response parse error: {0}")]
+    Parse(String),
+
+    #[error("Configuration error: {0}")]
+    Config(String),
+
+    #[error("Cost budget exceeded: {0}")]
+    BudgetExceeded(String),
 }
 
 pub type Result<T> = std::result::Result<T, HomerError>;
