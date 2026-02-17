@@ -20,7 +20,7 @@
 
 | Module | Files | Functions | Types |
 |--------|------:|----------:|------:|
-| `homer` | 7 | 0 | 0 |
+| `homer` | 10 | 0 | 0 |
 | `homer-cli` | 2 | 0 | 0 |
 | `homer-cli/src` | 4 | 1 | 2 |
 | `homer-cli/src/commands` | 16 | 32 | 19 |
@@ -28,19 +28,19 @@
 | `homer-core/benches` | 6 | 14 | 0 |
 | `homer-core/src` | 22 | 47 | 57 |
 | `homer-core/src/analyze` | 16 | 107 | 39 |
-| `homer-core/src/extract` | 18 | 137 | 37 |
+| `homer-core/src/extract` | 18 | 140 | 37 |
 | `homer-core/src/llm` | 6 | 34 | 23 |
 | `homer-core/src/query` | 2 | 0 | 0 |
 | `homer-core/src/render` | 12 | 84 | 23 |
 | `homer-core/src/store` | 10 | 42 | 8 |
-| `homer-graphs` | 1 | 0 | 0 |
-| `homer-graphs/src` | 6 | 34 | 40 |
-| `homer-graphs/src/languages` | 9 | 93 | 23 |
-| `homer-mcp` | 1 | 0 | 0 |
-| `homer-mcp/src` | 1 | 17 | 5 |
-| `homer-test` | 2 | 0 | 0 |
-| `homer-test/src` | 1 | 8 | 1 |
-| `homer-test/tests` | 1 | 13 | 0 |
+| `homer-graphs` | 2 | 0 | 0 |
+| `homer-graphs/src` | 12 | 34 | 40 |
+| `homer-graphs/src/languages` | 18 | 93 | 23 |
+| `homer-mcp` | 2 | 0 | 0 |
+| `homer-mcp/src` | 2 | 17 | 5 |
+| `homer-test` | 4 | 0 | 0 |
+| `homer-test/src` | 2 | 8 | 1 |
+| `homer-test/tests` | 2 | 13 | 0 |
 
 ## Change Patterns
 
@@ -48,24 +48,24 @@
 
 | File | Changes |
 |------|--------:|
-| `homer-core/src` | 16 |
-| `homer-core` | 16 |
-| `homer-core/src/pipeline.rs` | 12 |
-| `homer-core/src/analyze` | 12 |
-| `homer-core/src/render` | 12 |
-| `homer-core/src/analyze/mod.rs` | 12 |
-| `homer-cli/src/commands` | 10 |
-| `homer-cli` | 10 |
-| `homer-cli/src` | 10 |
-| `homer-core/src/extract` | 10 |
+| `homer-core/src` | 10 |
+| `homer-core` | 10 |
+| `homer-core/src/analyze` | 7 |
+| `homer-core/src/extract` | 7 |
+| `homer-core/src/render` | 7 |
+| `homer-core/src/pipeline.rs` | 6 |
+| `homer-cli` | 6 |
+| `homer-core/src/analyze/mod.rs` | 6 |
+| `homer-cli/src` | 6 |
+| `homer-cli/src/commands` | 6 |
 
 **Files that change together:**
 
-- `homer-core/src/render/mod.rs` + `homer-core` (confidence: 0%)
-- `homer-core/src/render/mod.rs` + `homer-graphs/src/call_graph.rs` (confidence: 0%)
-- `homer-core/src/render/mod.rs` + `homer-graphs/src/scope_graph.rs` (confidence: 0%)
-- `homer-cli/Cargo.toml` + `homer-graphs/src/languages/java.rs` (confidence: 0%)
-- `homer-cli/Cargo.toml` + `homer-core/src/render/traits.rs` (confidence: 0%)
+- `homer-core/Cargo.toml` + `homer-graphs/src/languages/rust.rs` (confidence: 1%)
+- `homer-core/Cargo.toml` + `homer-core/src` (confidence: 1%)
+- `homer-core/Cargo.toml` + `homer-graphs/src/languages/python.rs` (confidence: 1%)
+- `homer-core/src/query` + `homer-mcp/src` (confidence: 1%)
+- `homer-core/src/query` + `homer-core/src/render` (confidence: 1%)
 
 ## Load-Bearing Code
 
@@ -74,26 +74,26 @@ Modifications require understanding all callers and running the full test suite.
 
 | Entity | Salience | Classification |
 |--------|----------|----------------|
-| `homer-core/src/analyze/mod.rs` | 14.65 | PeripheralActive |
 | `homer-core/src/pipeline.rs` | 14.35 | PeripheralActive |
-| `homer-core/src/render/agents_md.rs` | 14.05 | PeripheralActive |
-| `homer-core/src/config.rs` | 13.30 | PeripheralActive |
-| `homer-cli/src/commands/mod.rs` | 13.15 | PeripheralActive |
+| `homer-core/src/analyze/mod.rs` | 14.05 | PeripheralActive |
+| `homer-core/src/render/agents_md.rs` | 13.75 | PeripheralActive |
+| `homer-core/src/config.rs` | 13.60 | PeripheralActive |
+| `homer-cli/src/commands/mod.rs` | 12.85 | PeripheralActive |
 | `homer-graphs/src/languages/mod.rs` | 12.40 | PeripheralActive |
-| `homer-graphs/src/languages/go.rs` | 11.65 | PeripheralActive |
-| `homer-graphs/src/languages/rust.rs` | 11.35 | PeripheralActive |
-| `homer-core/src/extract/graph.rs` | 11.20 | PeripheralActive |
-| `homer-cli/src/main.rs` | 10.90 | PeripheralActive |
-| `homer-graphs/src/languages/typescript.rs` | 10.75 | PeripheralActive |
-| `homer-graphs/src/lib.rs` | 10.60 | PeripheralActive |
-| `homer-core/src/extract/prompt.rs` | 10.45 | PeripheralActive |
-| `homer-core/src/store/traits.rs` | 10.30 | PeripheralActive |
-| `homer-core/src/store/sqlite.rs` | 10.15 | PeripheralActive |
-| `homer-graphs/src/languages/python.rs` | 10.00 | PeripheralActive |
-| `homer-core/src/render/traits.rs` | 9.85 | PeripheralActive |
-| `homer-cli/src/commands/init.rs` | 9.70 | PeripheralActive |
-| `homer-core/src/analyze/traits.rs` | 9.55 | PeripheralActive |
-| `homer-test/src/lib.rs` | 9.55 | PeripheralActive |
+| `homer-core/src/extract/structure.rs` | 11.80 | PeripheralActive |
+| `homer-core/src/extract/git.rs` | 11.50 | PeripheralActive |
+| `homer-cli/src/commands/init.rs` | 11.50 | PeripheralActive |
+| `homer-graphs/src/languages/java.rs` | 11.35 | PeripheralActive |
+| `homer-test/tests/pipeline.rs` | 11.20 | PeripheralActive |
+| `homer-mcp/src/lib.rs` | 11.05 | PeripheralActive |
+| `homer-graphs/src/languages/go.rs` | 10.90 | PeripheralActive |
+| `homer-core/src/store/sqlite.rs` | 10.75 | PeripheralActive |
+| `homer-test/src/lib.rs` | 10.75 | PeripheralActive |
+| `homer-cli/src/commands/update.rs` | 10.75 | PeripheralActive |
+| `homer-core/src/error.rs` | 10.45 | PeripheralActive |
+| `homer-core/src/extract/document.rs` | 10.30 | PeripheralActive |
+| `homer-cli/src/commands/status.rs` | 10.15 | PeripheralActive |
+| `homer-cli/src/main.rs` | 10.00 | PeripheralActive |
 
 ## Danger Zones
 
@@ -101,16 +101,16 @@ Files with high change frequency and low bus factor require extra care.
 
 | File | Changes | Bus Factor | Top Contributor |
 |------|--------:|-----------:|----------------:|
-| `homer-core/src` | 16 | 1 | 100% |
-| `homer-core` | 16 | 1 | 100% |
-| `homer-core/src/pipeline.rs` | 12 | 1 | 100% |
-| `homer-core/src/analyze` | 12 | 1 | 100% |
-| `homer-core/src/render` | 12 | 1 | 100% |
-| `homer-core/src/analyze/mod.rs` | 12 | 1 | 100% |
-| `homer-cli/src/commands` | 10 | 1 | 100% |
-| `homer-cli` | 10 | 1 | 100% |
-| `homer-cli/src` | 10 | 1 | 100% |
-| `homer-core/src/extract` | 10 | 1 | 100% |
+| `homer-core/src` | 10 | 1 | 100% |
+| `homer-core` | 10 | 1 | 100% |
+| `homer-core/src/analyze` | 7 | 1 | 100% |
+| `homer-core/src/extract` | 7 | 1 | 100% |
+| `homer-core/src/render` | 7 | 1 | 100% |
+| `homer-core/src/pipeline.rs` | 6 | 1 | 100% |
+| `homer-cli` | 6 | 1 | 100% |
+| `homer-core/src/analyze/mod.rs` | 6 | 1 | 100% |
+| `homer-cli/src` | 6 | 1 | 100% |
+| `homer-cli/src/commands` | 6 | 1 | 100% |
 
 ## Conventions
 
@@ -120,21 +120,21 @@ Files with high change frequency and low bus factor require extra care.
 **Dependencies:** 36 external packages
 
 **Naming:** snake_case (59% adherence)
-- snake_case: 555 (59%)
+- snake_case: 558 (59%)
 - lowercase: 201 (21%)
 - PascalCase: 184 (20%)
 
 **Testing:** unknown
 - Pattern: tests/ directory
-- 2 test files / 64 source files
+- 3 test files / 64 source files
 
 **Error handling:** mixed
 - `.unwrap()`: 665 occurrences
-- `? operator`: 629 occurrences
+- `? operator`: 633 occurrences
 - `Result<T, E>`: 232 occurrences
 - `.expect()`: 12 occurrences
 
-**Documentation:** 9% coverage (85/940 entities)
+**Documentation:** 9% coverage (88/943 entities)
 - Dominant style: Rustdoc
 
 **Agent rules:** CLAUDE.md
