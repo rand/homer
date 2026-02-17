@@ -130,10 +130,7 @@ impl Default for DocumentExtractionConfig {
                 "doc/**/*.md".into(),
                 "adr/**/*.md".into(),
             ],
-            exclude_patterns: vec![
-                "**/node_modules/**".into(),
-                "**/vendor/**".into(),
-            ],
+            exclude_patterns: vec!["**/node_modules/**".into(), "**/vendor/**".into()],
         }
     }
 }
@@ -194,11 +191,7 @@ pub struct RenderersSection {
 impl Default for RenderersSection {
     fn default() -> Self {
         Self {
-            enabled: vec![
-                "agents-md".into(),
-                "module-ctx".into(),
-                "risk-map".into(),
-            ],
+            enabled: vec!["agents-md".into(), "module-ctx".into(), "risk-map".into()],
         }
     }
 }

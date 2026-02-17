@@ -4,13 +4,17 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{HomerError, StoreError};
-use crate::types::{Node, NodeId, NodeKind, HyperedgeMember, Hyperedge, HyperedgeId, HyperedgeKind, NodeFilter, AnalysisResult, AnalysisKind, AnalysisResultId, SearchScope, SearchHit, SnapshotId, StoreStats};
+use crate::types::{
+    AnalysisKind, AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeKind,
+    HyperedgeMember, Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId,
+    StoreStats,
+};
 
-use super::schema;
 use super::HomerStore;
+use super::schema;
 
 /// SQLite-backed implementation of `HomerStore`.
 #[derive(Debug)]
@@ -80,13 +84,17 @@ impl SqliteStore {
         let kind_str: String = row.get("kind")?;
         let metadata_str: String = row.get("metadata")?;
         let last_extracted_str: String = row.get("last_extracted")?;
+        // Read as i64 and reinterpret bits as u64 (inverse of the write cast)
+        let hash_i64: Option<i64> = row.get("content_hash")?;
 
         Ok(Node {
             id: NodeId(row.get("id")?),
             kind: serde_json::from_str(&format!("\"{kind_str}\"")).unwrap_or(NodeKind::File),
             name: row.get("name")?,
-            content_hash: row.get("content_hash")?,
-            last_extracted: DateTime::parse_from_rfc3339(&last_extracted_str).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
+            #[allow(clippy::cast_sign_loss)]
+            content_hash: hash_i64.map(|h| h as u64),
+            last_extracted: DateTime::parse_from_rfc3339(&last_extracted_str)
+                .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
             metadata: Self::parse_metadata(&metadata_str),
         })
     }
@@ -121,7 +129,8 @@ impl SqliteStore {
                 .unwrap_or(HyperedgeKind::Modifies),
             members: Vec::new(), // Loaded separately
             confidence: row.get("confidence")?,
-            last_updated: DateTime::parse_from_rfc3339(&last_updated_str).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
+            last_updated: DateTime::parse_from_rfc3339(&last_updated_str)
+                .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
             metadata: Self::parse_metadata(&metadata_str),
         })
     }
@@ -138,6 +147,10 @@ impl HomerStore for SqliteStore {
             serde_json::to_string(&node.metadata).map_err(StoreError::Serialization)?;
         let last_extracted = node.last_extracted.to_rfc3339();
 
+        // SQLite INTEGER is i64; reinterpret u64 bits to avoid TryFromIntError
+        #[allow(clippy::cast_possible_wrap)]
+        let hash_i64: Option<i64> = node.content_hash.map(|h| h as i64);
+
         conn.execute(
             "INSERT INTO nodes (kind, name, content_hash, last_extracted, metadata)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -145,33 +158,32 @@ impl HomerStore for SqliteStore {
                 content_hash = excluded.content_hash,
                 last_extracted = excluded.last_extracted,
                 metadata = excluded.metadata",
-            params![kind_str, node.name, node.content_hash, last_extracted, metadata_json],
+            params![kind_str, node.name, hash_i64, last_extracted, metadata_json],
         )
         .map_err(StoreError::Sqlite)?;
 
-        let id = conn.last_insert_rowid();
-        // If it was an update (not insert), last_insert_rowid returns 0 in some drivers.
-        // Query the actual ID.
-        if id == 0 {
-            let actual_id: i64 = conn
-                .query_row(
-                    "SELECT id FROM nodes WHERE kind = ?1 AND name = ?2",
-                    params![kind_str, node.name],
-                    |row| row.get(0),
-                )
-                .map_err(StoreError::Sqlite)?;
-            Ok(NodeId(actual_id))
-        } else {
-            Ok(NodeId(id))
-        }
+        // Always query the actual id — last_insert_rowid() is unreliable after
+        // ON CONFLICT DO UPDATE (it retains the rowid from the previous INSERT).
+        let actual_id: i64 = conn
+            .query_row(
+                "SELECT id FROM nodes WHERE kind = ?1 AND name = ?2",
+                params![kind_str, node.name],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Sqlite)?;
+        Ok(NodeId(actual_id))
     }
 
     async fn get_node(&self, id: NodeId) -> crate::error::Result<Option<Node>> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT * FROM nodes WHERE id = ?1", params![id.0], Self::row_to_node)
-            .optional()
-            .map_err(StoreError::Sqlite)
-            .map_err(HomerError::Store)
+        conn.query_row(
+            "SELECT * FROM nodes WHERE id = ?1",
+            params![id.0],
+            Self::row_to_node,
+        )
+        .optional()
+        .map_err(StoreError::Sqlite)
+        .map_err(HomerError::Store)
     }
 
     async fn get_node_by_name(
@@ -212,8 +224,10 @@ impl HomerStore for SqliteStore {
         }
 
         let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
-        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(std::convert::AsRef::as_ref).collect();
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
         let nodes = stmt
             .query_map(params_ref.as_slice(), Self::row_to_node)
             .map_err(StoreError::Sqlite)?
@@ -260,17 +274,19 @@ impl HomerStore for SqliteStore {
             .map_err(StoreError::Sqlite)?;
 
         for member in &edge.members {
-            stmt.execute(params![edge_id, member.node_id.0, member.role, member.position])
-                .map_err(StoreError::Sqlite)?;
+            stmt.execute(params![
+                edge_id,
+                member.node_id.0,
+                member.role,
+                member.position
+            ])
+            .map_err(StoreError::Sqlite)?;
         }
 
         Ok(HyperedgeId(edge_id))
     }
 
-    async fn get_edges_involving(
-        &self,
-        node_id: NodeId,
-    ) -> crate::error::Result<Vec<Hyperedge>> {
+    async fn get_edges_involving(&self, node_id: NodeId) -> crate::error::Result<Vec<Hyperedge>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -295,10 +311,7 @@ impl HomerStore for SqliteStore {
         Ok(result)
     }
 
-    async fn get_edges_by_kind(
-        &self,
-        kind: HyperedgeKind,
-    ) -> crate::error::Result<Vec<Hyperedge>> {
+    async fn get_edges_by_kind(&self, kind: HyperedgeKind) -> crate::error::Result<Vec<Hyperedge>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT * FROM hyperedges WHERE kind = ?1")
@@ -389,7 +402,8 @@ impl HomerStore for SqliteStore {
                     kind: kind.clone(),
                     data: serde_json::from_str(&data_str).unwrap_or_default(),
                     input_hash: row.get("input_hash")?,
-                    computed_at: DateTime::parse_from_rfc3339(&computed_at_str).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
+                    computed_at: DateTime::parse_from_rfc3339(&computed_at_str)
+                        .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
                 })
             },
         )
@@ -419,7 +433,8 @@ impl HomerStore for SqliteStore {
                         .unwrap_or(AnalysisKind::ChangeFrequency),
                     data: serde_json::from_str(&data_str).unwrap_or_default(),
                     input_hash: row.get("input_hash")?,
-                    computed_at: DateTime::parse_from_rfc3339(&computed_at_str).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
+                    computed_at: DateTime::parse_from_rfc3339(&computed_at_str)
+                        .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc)),
                 })
             })
             .map_err(StoreError::Sqlite)?
@@ -518,6 +533,20 @@ impl HomerStore for SqliteStore {
         Ok(())
     }
 
+    async fn clear_checkpoints(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM checkpoints", [])
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    async fn clear_analyses(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM analysis_results", [])
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
     // ── Graph snapshots ────────────────────────────────────────────
 
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId> {
@@ -553,7 +582,9 @@ impl HomerStore for SqliteStore {
             .query_row("SELECT COUNT(*) FROM hyperedges", [], |row| row.get(0))
             .map_err(StoreError::Sqlite)?;
         let total_analyses: u64 = conn
-            .query_row("SELECT COUNT(*) FROM analysis_results", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM analysis_results", [], |row| {
+                row.get(0)
+            })
             .map_err(StoreError::Sqlite)?;
 
         // Count nodes by kind
@@ -561,7 +592,9 @@ impl HomerStore for SqliteStore {
             .prepare("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
             .map_err(StoreError::Sqlite)?;
         let nodes_by_kind: HashMap<String, u64> = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            })
             .map_err(StoreError::Sqlite)?
             .collect::<rusqlite::Result<HashMap<_, _>>>()
             .map_err(StoreError::Sqlite)?;
@@ -571,7 +604,9 @@ impl HomerStore for SqliteStore {
             .prepare("SELECT kind, COUNT(*) FROM hyperedges GROUP BY kind")
             .map_err(StoreError::Sqlite)?;
         let edges_by_kind: HashMap<String, u64> = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            })
             .map_err(StoreError::Sqlite)?
             .collect::<rusqlite::Result<HashMap<_, _>>>()
             .map_err(StoreError::Sqlite)?;
@@ -673,11 +708,11 @@ mod tests {
     async fn hyperedge_operations() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let caller_id = store
+        let source_id = store
             .upsert_node(&make_test_node(NodeKind::Function, "main"))
             .await
             .unwrap();
-        let callee_id = store
+        let target_id = store
             .upsert_node(&make_test_node(NodeKind::Function, "helper"))
             .await
             .unwrap();
@@ -687,12 +722,12 @@ mod tests {
             kind: HyperedgeKind::Calls,
             members: vec![
                 HyperedgeMember {
-                    node_id: caller_id,
+                    node_id: source_id,
                     role: "caller".to_string(),
                     position: 0,
                 },
                 HyperedgeMember {
-                    node_id: callee_id,
+                    node_id: target_id,
                     role: "callee".to_string(),
                     position: 1,
                 },
@@ -706,7 +741,7 @@ mod tests {
         assert!(edge_id.0 > 0);
 
         // Test get_edges_involving
-        let edges = store.get_edges_involving(caller_id).await.unwrap();
+        let edges = store.get_edges_involving(source_id).await.unwrap();
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].members.len(), 2);
 
@@ -716,10 +751,10 @@ mod tests {
 
         // Test get_co_members
         let co = store
-            .get_co_members(caller_id, HyperedgeKind::Calls)
+            .get_co_members(source_id, HyperedgeKind::Calls)
             .await
             .unwrap();
-        assert_eq!(co, vec![callee_id]);
+        assert_eq!(co, vec![target_id]);
     }
 
     #[tokio::test]
@@ -796,7 +831,11 @@ mod tests {
             .unwrap();
 
         store
-            .index_text(id, "commit_message", "Fix authentication bug in token validation")
+            .index_text(
+                id,
+                "commit_message",
+                "Fix authentication bug in token validation",
+            )
             .await
             .unwrap();
 

@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 homer-graphs = { workspace = true }
+tree-sitter = { workspace = true }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }

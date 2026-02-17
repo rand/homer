@@ -1,4 +1,7 @@
-use crate::types::{Node, NodeId, NodeKind, NodeFilter, Hyperedge, HyperedgeId, HyperedgeKind, AnalysisResult, AnalysisKind, SearchScope, SearchHit, SnapshotId, StoreStats};
+use crate::types::{
+    AnalysisKind, AnalysisResult, Hyperedge, HyperedgeId, HyperedgeKind, Node, NodeFilter, NodeId,
+    NodeKind, SearchHit, SearchScope, SnapshotId, StoreStats,
+};
 
 /// The core store abstraction. All pipeline stages read/write through this trait.
 #[async_trait::async_trait]
@@ -30,16 +33,10 @@ pub trait HomerStore: Send + Sync {
     async fn upsert_hyperedge(&self, edge: &Hyperedge) -> crate::error::Result<HyperedgeId>;
 
     /// Get all edges involving a specific node.
-    async fn get_edges_involving(
-        &self,
-        node_id: NodeId,
-    ) -> crate::error::Result<Vec<Hyperedge>>;
+    async fn get_edges_involving(&self, node_id: NodeId) -> crate::error::Result<Vec<Hyperedge>>;
 
     /// Get all edges of a specific kind.
-    async fn get_edges_by_kind(
-        &self,
-        kind: HyperedgeKind,
-    ) -> crate::error::Result<Vec<Hyperedge>>;
+    async fn get_edges_by_kind(&self, kind: HyperedgeKind) -> crate::error::Result<Vec<Hyperedge>>;
 
     /// Get all co-member node IDs for a given node in edges of a specific kind.
     async fn get_co_members(
@@ -93,6 +90,12 @@ pub trait HomerStore: Send + Sync {
 
     /// Set a checkpoint value.
     async fn set_checkpoint(&self, kind: &str, value: &str) -> crate::error::Result<()>;
+
+    /// Clear all checkpoints (for --force re-extraction).
+    async fn clear_checkpoints(&self) -> crate::error::Result<()>;
+
+    /// Clear all analysis results (for --force-analysis).
+    async fn clear_analyses(&self) -> crate::error::Result<()>;
 
     // ── Graph snapshots ────────────────────────────────────────────
 

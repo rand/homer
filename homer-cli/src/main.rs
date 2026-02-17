@@ -3,7 +3,11 @@ use clap::Parser;
 mod commands;
 
 #[derive(Parser, Debug)]
-#[command(name = "homer", version, about = "Mine git repositories for agentic development context")]
+#[command(
+    name = "homer",
+    version,
+    about = "Mine git repositories for agentic development context"
+)]
 struct Cli {
     #[command(subcommand)]
     command: commands::Command,
