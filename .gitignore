@@ -1,0 +1,7 @@
+/target
+.homer/homer.db
+.homer/cache/
+*.swp
+*.swo
+*~
+.DS_Store

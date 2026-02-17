@@ -1,0 +1,23 @@
+[package]
+name = "homer-mcp"
+description = "MCP server for Homer — exposes repository analysis to AI agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+homer-core = { workspace = true }
+
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# rmcp = { workspace = true }  # Uncomment when MCP server is implemented
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

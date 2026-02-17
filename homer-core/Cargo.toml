@@ -1,0 +1,36 @@
+[package]
+name = "homer-core"
+description = "Core library for Homer — repository mining and analysis pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+homer-graphs = { workspace = true }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true }
+gix = { workspace = true }
+petgraph = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+glob = { workspace = true }
+rayon = { workspace = true }
+reqwest = { workspace = true }
+indicatif = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
