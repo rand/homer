@@ -1,4 +1,6 @@
 pub mod behavioral;
+pub mod centrality;
+pub mod community;
 pub mod traits;
 
 use std::time::Duration;
