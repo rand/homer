@@ -27,7 +27,7 @@ impl LanguageSupport for FallbackSupport {
     fn tree_sitter_language(&self) -> tree_sitter::Language {
         // Fallback doesn't have its own grammar; callers must provide one.
         // This method shouldn't be called directly on the fallback.
-        panic!("FallbackSupport::tree_sitter_language() should not be called directly")
+        unimplemented!("FallbackSupport has no grammar; callers must provide one")
     }
 
     fn extract_heuristic(

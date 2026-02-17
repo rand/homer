@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 8d619e6f005af28e2d75e535ac092ea23d8f988c1ad5cb784fd94a5e9c6898a9 # shrinks to kind = ChangeFrequency, score = 6.479492531749085e102, input_hash = 9223372036854775808
+cc 5d6e5b8ab840c2c9dac258565cb0ae1bc83821233a1f66f4f4206d1f1db22d44 # shrinks to kind = ChangeFrequency, score = 3.200897171678041e230, input_hash = 0
+cc df9bc5288d4330d82e69964e89ba7318525b37bcc028891b3a5b85bc19fa3f0b # shrinks to kind = ChangeFrequency, score = -236507616186985.94, input_hash = 0
