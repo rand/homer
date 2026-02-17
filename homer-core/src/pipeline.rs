@@ -7,12 +7,14 @@ use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::convention::ConventionAnalyzer;
+use crate::analyze::task_pattern::TaskPatternAnalyzer;
 use crate::analyze::traits::Analyzer;
 use crate::config::HomerConfig;
 use crate::extract::document::DocumentExtractor;
 use crate::extract::git::GitExtractor;
 use crate::extract::github::GitHubExtractor;
 use crate::extract::graph::GraphExtractor;
+use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
@@ -195,6 +197,9 @@ impl HomerPipeline {
 
         // 5. GitHub (PRs, issues, reviews — only if GitHub remote detected)
         self.run_github_extraction(store, config, result).await;
+
+        // 6. Prompts (agent rules always; sessions if opt-in)
+        self.run_prompt_extraction(store, config, result).await;
     }
 
     async fn run_github_extraction(
@@ -222,6 +227,34 @@ impl HomerPipeline {
                         message: e.to_string(),
                     });
                 }
+            }
+        }
+    }
+
+    async fn run_prompt_extraction(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        result: &mut PipelineResult,
+    ) {
+        let prompt_ext = PromptExtractor::new(&self.repo_path);
+        match prompt_ext.extract(store, config).await {
+            Ok(stats) => {
+                result.extract_nodes += stats.nodes_created;
+                result.extract_edges += stats.edges_created;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "extract:prompt",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Prompt extraction failed");
+                result.errors.push(PipelineError {
+                    stage: "extract:prompt",
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -311,6 +344,27 @@ impl HomerPipeline {
                 warn!(error = %e, "Convention analysis failed");
                 result.errors.push(PipelineError {
                     stage: "analyze:convention",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // Task pattern analysis (prompt hotspots, correction hotspots, task patterns, vocabulary)
+        let task_pattern = TaskPatternAnalyzer;
+        match task_pattern.analyze(store, config).await {
+            Ok(stats) => {
+                result.analysis_results += stats.results_stored;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "analyze:task_pattern",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Task pattern analysis failed");
+                result.errors.push(PipelineError {
+                    stage: "analyze:task_pattern",
                     message: e.to_string(),
                 });
             }

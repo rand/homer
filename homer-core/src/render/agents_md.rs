@@ -58,6 +58,15 @@ impl Renderer for AgentsMdRenderer {
         // Conventions
         render_conventions(&mut out, store).await?;
 
+        // Common Tasks (from prompt-derived task patterns)
+        render_common_tasks(&mut out, store).await?;
+
+        // Areas That Confuse Agents (from correction hotspots)
+        render_confusion_zones(&mut out, store).await?;
+
+        // Domain Vocabulary (from prompt-derived vocabulary)
+        render_domain_vocabulary(&mut out, store).await?;
+
         info!(bytes = out.len(), "AGENTS.md rendered");
         Ok(out)
     }
@@ -811,6 +820,213 @@ async fn render_agent_rules(
     Ok(())
 }
 
+// ── Common Tasks ──────────────────────────────────────────────────
+
+async fn render_common_tasks(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    let root_id = find_convention_root(store).await?;
+    let Some(root_id) = root_id else {
+        return Ok(());
+    };
+
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::TaskPattern)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let Some(patterns) = result.data.get("patterns").and_then(|v| v.as_array()) else {
+        return Ok(());
+    };
+
+    if patterns.is_empty() {
+        return Ok(());
+    }
+
+    let total_sessions = result
+        .data
+        .get("total_sessions")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    writeln!(out, "## Common Tasks").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "Based on analysis of {total_sessions} agent sessions, the most common task patterns:"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "| Task | Files Typically Involved | Frequency |").unwrap();
+    writeln!(out, "|------|------------------------|----------:|").unwrap();
+
+    for pattern in patterns.iter().take(10) {
+        let name = pattern
+            .get("pattern_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let frequency = pattern
+            .get("frequency")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let files = pattern
+            .get("typical_files")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+
+        writeln!(out, "| {name} | `{files}` | {frequency} sessions |").unwrap();
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+// ── Areas That Confuse Agents ────────────────────────────────────
+
+async fn render_confusion_zones(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    let correction_results = store
+        .get_analyses_by_kind(AnalysisKind::CorrectionHotspot)
+        .await?;
+
+    // Filter to actual confusion zones.
+    let mut zones: Vec<(String, f64, u64)> = Vec::new();
+    for result in &correction_results {
+        let is_confusion = result
+            .data
+            .get("is_confusion_zone")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if !is_confusion {
+            continue;
+        }
+
+        let rate = result
+            .data
+            .get("correction_rate")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let count = result
+            .data
+            .get("correction_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+
+        let name = store
+            .get_node(result.node_id)
+            .await?
+            .map_or_else(|| format!("node:{}", result.node_id.0), |n| n.name);
+
+        zones.push((name, rate, count));
+    }
+
+    if zones.is_empty() {
+        return Ok(());
+    }
+
+    zones.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    writeln!(out, "## Areas That Confuse Agents").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "These areas have high correction rates in agent interactions — proceed with extra caution:"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "| File | Correction Rate | Corrections |").unwrap();
+    writeln!(out, "|------|----------------:|------------:|").unwrap();
+
+    for (name, rate, count) in zones.iter().take(10) {
+        writeln!(out, "| `{name}` | {:.0}% | {count} |", rate * 100.0).unwrap();
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+// ── Domain Vocabulary ────────────────────────────────────────────
+
+async fn render_domain_vocabulary(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    let root_id = find_convention_root(store).await?;
+    let Some(root_id) = root_id else {
+        return Ok(());
+    };
+
+    let Some(result) = store
+        .get_analysis(root_id, AnalysisKind::DomainVocabulary)
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let Some(vocabulary) = result.data.get("vocabulary").and_then(|v| v.as_array()) else {
+        return Ok(());
+    };
+
+    if vocabulary.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(out, "## Domain Vocabulary").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "| Term | File | Key Entities | References |").unwrap();
+    writeln!(out, "|------|------|-------------|----------:|").unwrap();
+
+    for entry in vocabulary.iter().take(20) {
+        let term = entry
+            .get("term")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let file = entry
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let ref_count = entry
+            .get("reference_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let entities = entry
+            .get("entities")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .take(3)
+                    .map(|s| {
+                        // Show just the leaf name for brevity.
+                        s.rsplit("::").next().unwrap_or(s)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+
+        writeln!(out, "| {term} | `{file}` | {entities} | {ref_count} |").unwrap();
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1076,6 +1292,168 @@ mod tests {
         assert!(
             content.contains("1 external packages"),
             "Should show dependency count"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_agent_intelligence_sections() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        // Create file node and module.
+        let file_a = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/auth.rs".to_string(),
+                content_hash: None,
+                last_extracted: Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let root = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Module,
+                name: ".".to_string(),
+                content_hash: None,
+                last_extracted: Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Create function for vocabulary.
+        store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Function,
+                name: "src/auth.rs::validate_token".to_string(),
+                content_hash: None,
+                last_extracted: Utc::now(),
+                metadata: {
+                    let mut m = HashMap::new();
+                    m.insert("file".to_string(), serde_json::json!("src/auth.rs"));
+                    m
+                },
+            })
+            .await
+            .unwrap();
+
+        // Create sessions with prompt data.
+        for i in 0..3 {
+            let mut meta = HashMap::new();
+            meta.insert("source".to_string(), serde_json::json!("claude-code"));
+            meta.insert("interaction_count".to_string(), serde_json::json!(5));
+            meta.insert(
+                "correction_count".to_string(),
+                serde_json::json!(if i == 0 { 3 } else { 0 }),
+            );
+
+            let session = store
+                .upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::AgentSession,
+                    name: format!("session:{i}"),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: meta,
+                })
+                .await
+                .unwrap();
+
+            store
+                .upsert_hyperedge(&Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: HyperedgeKind::PromptReferences,
+                    members: vec![
+                        HyperedgeMember {
+                            node_id: session,
+                            role: "session".to_string(),
+                            position: 0,
+                        },
+                        HyperedgeMember {
+                            node_id: file_a,
+                            role: "file".to_string(),
+                            position: 1,
+                        },
+                    ],
+                    confidence: 0.9,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                })
+                .await
+                .unwrap();
+
+            store
+                .upsert_hyperedge(&Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: HyperedgeKind::PromptModifiedFiles,
+                    members: vec![
+                        HyperedgeMember {
+                            node_id: session,
+                            role: "session".to_string(),
+                            position: 0,
+                        },
+                        HyperedgeMember {
+                            node_id: file_a,
+                            role: "file".to_string(),
+                            position: 1,
+                        },
+                    ],
+                    confidence: 1.0,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                })
+                .await
+                .unwrap();
+        }
+
+        // Run task pattern analyzer.
+        let config = HomerConfig::default();
+        let analyzer = crate::analyze::task_pattern::TaskPatternAnalyzer;
+        use crate::analyze::traits::Analyzer as _;
+        analyzer.analyze(&store, &config).await.unwrap();
+
+        // Verify analyses were stored.
+        let hotspot = store
+            .get_analysis(file_a, AnalysisKind::CorrectionHotspot)
+            .await
+            .unwrap();
+        assert!(hotspot.is_some(), "Should have CorrectionHotspot");
+
+        let task_patterns = store
+            .get_analysis(root, AnalysisKind::TaskPattern)
+            .await
+            .unwrap();
+        assert!(task_patterns.is_some(), "Should have TaskPattern");
+
+        let vocab = store
+            .get_analysis(root, AnalysisKind::DomainVocabulary)
+            .await
+            .unwrap();
+        assert!(vocab.is_some(), "Should have DomainVocabulary");
+
+        // Render and check new sections.
+        let renderer = AgentsMdRenderer;
+        let content = renderer.render(&store, &config).await.unwrap();
+
+        assert!(
+            content.contains("## Common Tasks"),
+            "Should have Common Tasks section"
+        );
+        assert!(
+            content.contains("## Domain Vocabulary"),
+            "Should have Domain Vocabulary section"
+        );
+        assert!(
+            content.contains("auth"),
+            "Should contain auth domain term"
+        );
+        assert!(
+            content.contains("validate_token"),
+            "Should contain function name in vocabulary"
         );
     }
 }
