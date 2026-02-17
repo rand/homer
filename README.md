@@ -139,9 +139,7 @@ cargo test --workspace
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
-
-This project is maintained by a queer developer. Everyone who shares our values of kindness and respect is welcome here. Bigotry is not tolerated.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. Everyone who treats people well is welcome here.
 
 ## License
 

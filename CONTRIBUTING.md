@@ -1,109 +1,67 @@
-# Contributing to Homer
+# Contributing
 
-Thank you for your interest in contributing to Homer. This project is built in the open and welcomes contributions from everyone who shares our values and wants to make the tool better.
+Homer is built in the open and contributions are welcome — whether that's fixing a bug, improving docs, adding language support, or just asking a good question in an issue.
 
-## Values
+Before you dive in, please read our [Code of Conduct](CODE_OF_CONDUCT.md). The short version: be good to people.
 
-This project is maintained by a queer developer and exists in a community that values kindness, respect, and mutual care. We believe good software comes from environments where people feel safe, welcomed, and valued for who they are.
+## Ways to Help
 
-**We do not tolerate bigotry in any form.** Racism, sexism, homophobia, transphobia, ableism, and other forms of discrimination have no place here. This is non-negotiable. See our [Code of Conduct](CODE_OF_CONDUCT.md).
+**Report a bug.** Open an issue with what you expected, what happened, and how to reproduce it. Include `homer --version` and your OS if relevant.
 
-## How to Contribute
+**Suggest something.** If Homer could work better for your use case, open an issue. Describe the problem you're solving, not just the solution you want — that helps us find the best approach together.
 
-### Reporting Bugs
+**Fix something.** Fork the repo, make your change on a branch, and open a PR. If it's more than a small fix, it's worth opening an issue first to discuss the approach.
 
-Open an issue at https://github.com/rand/homer/issues with:
+**Add a language.** Homer's tree-sitter extraction engine (`homer-graphs/src/languages/`) is designed to be extended. Each language implements the `LanguageSupport` trait. Look at an existing one like `rust.rs` or `python.rs` for the pattern.
 
-- What you expected to happen
-- What actually happened
-- Steps to reproduce
-- Homer version (`homer --version`) and OS
+## Development
 
-### Suggesting Features
-
-Open an issue describing:
-
-- The problem you're trying to solve
-- How you'd like it to work
-- Any alternatives you've considered
-
-### Contributing Code
-
-1. **Fork and clone** the repository
-2. **Create a branch** for your change: `git checkout -b my-change`
-3. **Make your changes** — see the development guide below
-4. **Run tests**: `cargo test --workspace`
-5. **Run lints**: `cargo clippy --workspace -- -D warnings`
-6. **Format**: `cargo fmt --all`
-7. **Commit** with a clear message describing the change
-8. **Open a pull request** against `main`
-
-### Development Setup
+Rust 1.85+ required (Edition 2024).
 
 ```bash
-# Prerequisites: Rust 1.85+
-rustup update stable
-
-# Clone
 git clone https://github.com/rand/homer.git
 cd homer
-
-# Build
 cargo build --workspace
-
-# Test
 cargo test --workspace
-
-# Lint
-cargo clippy --workspace -- -D warnings
-
-# Format
-cargo fmt --all
 ```
 
-### Code Conventions
+Before submitting a PR:
 
-- **Edition 2024**, MSRV 1.85
-- **`unsafe` is forbidden** — the workspace forbids unsafe code
-- **Clippy pedantic** is enabled with `-D warnings` in CI
-- `gix` for git operations (not `git2`)
-- `rusqlite` for SQLite with WAL mode
-- `async_trait` for async trait definitions
-- Pipeline stages return errors without aborting — individual failures are collected, not fatal
-- Tests go next to the code they test (in-module `#[cfg(test)]` blocks) or in `homer-test/tests/` for integration tests
+```bash
+cargo test --workspace           # All 187 tests pass
+cargo clippy --workspace -- -D warnings  # Zero warnings
+cargo fmt --all -- --check       # Formatted
+```
 
-### Project Structure
+CI runs these on both Linux and macOS.
+
+## Project Layout
 
 ```
-homer-core/     Pipeline, extractors, analyzers, renderers, SQLite store
-homer-graphs/   Tree-sitter heuristic extraction (6 languages)
-homer-cli/      CLI binary (clap subcommands)
+homer-core/     Pipeline, extractors, analyzers, renderers, store
+homer-graphs/   Tree-sitter extraction for 6 languages
+homer-cli/      The `homer` binary
 homer-mcp/      MCP server for AI agent integration
-homer-test/     Integration test fixtures and helpers
-homer-spec/     Design specification documents
-docs/           User-facing documentation
+homer-test/     Integration tests and fixture repos
+homer-spec/     Design specification (12 documents)
+docs/           User documentation
 ```
 
-### Writing Tests
+## Code Style
 
-- Unit tests belong in `#[cfg(test)]` modules within the source file
-- Integration tests go in `homer-test/tests/`
-- Use `tempfile` for temporary directories
-- Use `insta` for snapshot testing where output format matters
-- Property-based tests use `proptest`
+Homer uses clippy pedantic and forbids `unsafe`. A few conventions worth knowing:
 
-### Commit Messages
+- Tests live next to the code they test (`#[cfg(test)]` modules), with integration tests in `homer-test/tests/`
+- Pipeline stages collect errors rather than aborting — one broken file shouldn't stop the whole analysis
+- Node and edge types are exhaustive enums, not stringly-typed — if you add a new kind, the compiler tells you everywhere that needs updating
+- Prefer `proptest` for anything involving round-trip correctness (store, serialization)
 
-Write clear commit messages. Use imperative mood ("Add feature" not "Added feature"). A sentence or two is fine for small changes. For larger changes, include a blank line after the summary and explain the why.
+## Pull Requests
 
-## Pull Request Process
+Keep them focused — one logical change per PR. If your change adds behavior, add a test. If it changes user-facing behavior, update the docs. CI must pass.
 
-1. PRs are reviewed before merging
-2. CI must pass (tests, clippy, format check on Linux and macOS)
-3. Keep PRs focused — one logical change per PR
-4. If your PR adds a new feature, include tests
-5. Update documentation if the user-facing behavior changes
+There's no PR template to fill out. Just explain what you changed and why.
 
-## Questions?
+## Questions
 
-Open an issue or start a discussion. There are no stupid questions.
+Open an issue. There's no minimum bar for asking — if something confused you, it probably confuses others too, and that's useful to know.

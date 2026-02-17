@@ -1,44 +1,43 @@
 # Code of Conduct
 
-## Our Commitment
+Good software comes from people who feel safe enough to do their best work. This document describes the kind of community we're building and the boundaries we hold.
 
-Homer is a project where everyone should feel welcome, safe, and respected regardless of who they are. We are committed to providing a harassment-free experience for everyone — regardless of gender identity and expression, sexual orientation, disability, physical appearance, body size, race, ethnicity, age, religion, nationality, or level of experience.
+## The Short Version
 
-This project is maintained by a queer developer. LGBTQ+ people, people of color, disabled people, and other marginalized folks are explicitly welcome and valued here.
+Be good to each other. That's the whole thing, really.
 
-## Standards
+If you're someone who treats people with kindness and respect — regardless of who they are, what they look like, who they love, or how they got here — you belong in this community. If that's not you, this isn't the right project.
 
-**Behavior we expect:**
+## What We Mean
 
-- Treating each other with kindness, empathy, and good faith
-- Respecting different viewpoints and experiences
-- Giving and receiving constructive feedback gracefully
-- Taking responsibility for mistakes and learning from them
-- Prioritizing what's best for the community
+Being good to each other looks like:
 
-**Behavior we will not tolerate:**
+- Assuming good faith, especially across language and cultural barriers
+- Making space for people to ask questions without judgment
+- Acknowledging when you're wrong and learning from it
+- Recognizing that different people bring different strengths
+- Giving feedback on the work, not the person
 
-- Harassment, intimidation, or discrimination of any kind
-- Racist, sexist, homophobic, transphobic, or ableist language or actions
-- Sexual harassment or unwelcome sexual attention
-- Deliberate misgendering or use of deadnames
-- Trolling, insulting, or derogatory comments
-- Publishing others' private information without consent
-- Sustained disruption of discussions
-- Any conduct that makes people feel unsafe or unwelcome
+What we won't accept:
 
-To be direct: bigots are not welcome here. If you believe some people deserve less respect based on their identity, this is not the project for you.
+- Harassment or discrimination based on identity — gender, sexuality, race, ethnicity, disability, religion, age, or anything else
+- Deliberate misgendering, deadnaming, or other identity-based hostility
+- Sexual harassment or unwelcome advances
+- Doxxing, threats, or intimidation
+- Pattern behavior designed to exhaust, exclude, or silence others
+
+This list isn't exhaustive. You know the difference between treating someone well and treating them badly. Act accordingly.
 
 ## Scope
 
-This Code of Conduct applies in all project spaces — GitHub issues, pull requests, discussions, and any other forums associated with Homer. It also applies when representing the project in public spaces.
+This applies everywhere the project lives — issues, PRs, discussions, and any space where you're representing Homer or interacting with its community.
 
 ## Enforcement
 
-Instances of unacceptable behavior can be reported by opening an issue or contacting the maintainer directly. All reports will be reviewed and responded to promptly.
+If someone's behavior is making the community worse, report it by contacting the maintainer directly. Reports will be handled promptly and with discretion.
 
-Maintainers have the right and responsibility to remove, edit, or reject contributions and to ban temporarily or permanently anyone whose behavior is harmful, threatening, or otherwise in violation of this Code of Conduct.
+Consequences range from a conversation to a permanent ban, depending on severity and pattern. The goal is always to protect the people doing good work here.
 
-## Attribution
+## Background
 
-This Code of Conduct is informed by the [Contributor Covenant](https://www.contributor-covenant.org/) and the lived experience of its maintainers. It is written to be direct about what we will and will not accept, rather than using soft language that leaves room for bad actors to rules-lawyer their way around the spirit of the document.
+This Code of Conduct is informed by the [Contributor Covenant](https://www.contributor-covenant.org/) and by the experience of building software as a queer person in an industry that doesn't always make that easy. The language here is intentionally direct — clarity protects people better than politeness.
