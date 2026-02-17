@@ -21,6 +21,8 @@ use crate::extract::structure::StructureExtractor;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
 use crate::render::risk_map::RiskMapRenderer;
+use crate::render::report::ReportRenderer;
+use crate::render::skills::SkillsRenderer;
 use crate::render::topos_spec::ToposSpecRenderer;
 use crate::render::traits::Renderer;
 use crate::store::HomerStore;
@@ -474,6 +476,36 @@ impl HomerPipeline {
                 warn!(error = %e, "Risk map rendering failed");
                 result.errors.push(PipelineError {
                     stage: "render:risk_map",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // .claude/skills/ (Claude Code skills)
+        let skills_renderer = SkillsRenderer;
+        match skills_renderer.write(store, config, &self.repo_path).await {
+            Ok(()) => {
+                result.artifacts_written += 1;
+            }
+            Err(e) => {
+                warn!(error = %e, "Skills rendering failed");
+                result.errors.push(PipelineError {
+                    stage: "render:skills",
+                    message: e.to_string(),
+                });
+            }
+        }
+
+        // homer-report.html
+        let report_renderer = ReportRenderer;
+        match report_renderer.write(store, config, &self.repo_path).await {
+            Ok(()) => {
+                result.artifacts_written += 1;
+            }
+            Err(e) => {
+                warn!(error = %e, "Report rendering failed");
+                result.errors.push(PipelineError {
+                    stage: "render:report",
                     message: e.to_string(),
                 });
             }

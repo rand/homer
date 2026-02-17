@@ -43,8 +43,14 @@ impl Renderer for AgentsMdRenderer {
         // Build & Test Commands
         render_build_commands(&mut out, store).await?;
 
+        // Architecture Overview (from community analysis)
+        render_architecture_overview(&mut out, store).await?;
+
         // Module Map
         render_module_map(&mut out, store).await?;
+
+        // Key Documents
+        render_key_documents(&mut out, store).await?;
 
         // Change Patterns
         render_change_patterns(&mut out, store).await?;
@@ -66,6 +72,9 @@ impl Renderer for AgentsMdRenderer {
 
         // Domain Vocabulary (from prompt-derived vocabulary)
         render_domain_vocabulary(&mut out, store).await?;
+
+        // Key Design Decisions (from high-impact PRs and ADR documents)
+        render_key_design_decisions(&mut out, store).await?;
 
         info!(bytes = out.len(), "AGENTS.md rendered");
         Ok(out)
@@ -171,6 +180,173 @@ async fn render_build_commands(
             writeln!(out).unwrap();
         }
     }
+
+    Ok(())
+}
+
+// ── Architecture Overview ─────────────────────────────────────────
+
+async fn render_architecture_overview(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    let community_results = store
+        .get_analyses_by_kind(AnalysisKind::CommunityAssignment)
+        .await?;
+
+    if community_results.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(out, "## Architecture Overview").unwrap();
+    writeln!(out).unwrap();
+
+    // Group files by community
+    let mut communities: HashMap<u32, Vec<(String, f64)>> = HashMap::new();
+    for result in &community_results {
+        #[allow(clippy::cast_possible_truncation)]
+        let community_id = result
+            .data
+            .get("community_id")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32;
+        let modularity = result
+            .data
+            .get("modularity_contribution")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let name = store
+            .get_node(result.node_id)
+            .await?
+            .map_or_else(|| format!("node:{}", result.node_id.0), |n| n.name);
+        communities
+            .entry(community_id)
+            .or_default()
+            .push((name, modularity));
+    }
+
+    let mut sorted_communities: Vec<_> = communities.into_iter().collect();
+    sorted_communities.sort_by_key(|(id, _)| *id);
+
+    writeln!(
+        out,
+        "The codebase organizes into {} architectural clusters:",
+        sorted_communities.len()
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    for (id, mut members) in sorted_communities {
+        members.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Derive cluster name from common directory prefix
+        let cluster_label = derive_cluster_label(&members);
+        let top_files: Vec<_> = members.iter().take(5).map(|(n, _)| n.as_str()).collect();
+
+        writeln!(
+            out,
+            "- **Cluster {id}** ({cluster_label}, {} files): `{}`",
+            members.len(),
+            top_files.join("`, `")
+        )
+        .unwrap();
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+fn derive_cluster_label(members: &[(String, f64)]) -> String {
+    if members.is_empty() {
+        return "unknown".to_string();
+    }
+
+    // Find most common directory prefix
+    let dirs: Vec<&str> = members
+        .iter()
+        .filter_map(|(name, _)| name.rfind('/').map(|i| &name[..i]))
+        .collect();
+
+    if dirs.is_empty() {
+        return "root".to_string();
+    }
+
+    let mut dir_counts: HashMap<&str, usize> = HashMap::new();
+    for dir in &dirs {
+        *dir_counts.entry(dir).or_default() += 1;
+    }
+
+    dir_counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map_or_else(|| "mixed".to_string(), |(dir, _)| dir.to_string())
+}
+
+// ── Key Documents ────────────────────────────────────────────────
+
+async fn render_key_documents(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    let doc_filter = crate::types::NodeFilter {
+        kind: Some(NodeKind::Document),
+        ..Default::default()
+    };
+    let documents = store.find_nodes(&doc_filter).await?;
+
+    if documents.is_empty() {
+        return Ok(());
+    }
+
+    // Count cross-references for each document via Documents edges
+    let doc_edges = store
+        .get_edges_by_kind(HyperedgeKind::Documents)
+        .await?;
+
+    let mut doc_ref_counts: HashMap<crate::types::NodeId, u32> = HashMap::new();
+    for edge in &doc_edges {
+        for member in &edge.members {
+            if member.role == "document" {
+                *doc_ref_counts.entry(member.node_id).or_default() += 1;
+            }
+        }
+    }
+
+    // Sort by reference count (most referenced first)
+    let mut scored_docs: Vec<_> = documents
+        .iter()
+        .map(|d| {
+            let refs = doc_ref_counts.get(&d.id).copied().unwrap_or(0);
+            let doc_type = d
+                .metadata
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("document");
+            (d.name.as_str(), doc_type, refs)
+        })
+        .collect();
+
+    scored_docs.sort_by(|a, b| b.2.cmp(&a.2));
+
+    // Only show if we have meaningful data
+    let top_docs: Vec<_> = scored_docs.iter().take(10).collect();
+    if top_docs.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(out, "## Key Documents").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "| Document | Type | References |").unwrap();
+    writeln!(out, "|----------|------|----------:|").unwrap();
+
+    for (name, doc_type, refs) in &top_docs {
+        writeln!(out, "| `{name}` | {doc_type} | {refs} |").unwrap();
+    }
+    writeln!(out).unwrap();
 
     Ok(())
 }
@@ -1027,6 +1203,70 @@ async fn render_domain_vocabulary(
     Ok(())
 }
 
+// ── Key Design Decisions ──────────────────────────────────────────
+
+async fn render_key_design_decisions(
+    out: &mut String,
+    store: &dyn HomerStore,
+) -> crate::error::Result<()> {
+    // Look for ADR documents or high-impact PRs
+    let doc_filter = crate::types::NodeFilter {
+        kind: Some(NodeKind::Document),
+        ..Default::default()
+    };
+    let documents = store.find_nodes(&doc_filter).await?;
+
+    let adrs: Vec<_> = documents
+        .iter()
+        .filter(|d| {
+            let name_lower = d.name.to_lowercase();
+            name_lower.contains("adr") || name_lower.contains("decision")
+        })
+        .collect();
+
+    // Also check for design rationale analyses
+    let rationale_results = store
+        .get_analyses_by_kind(AnalysisKind::DesignRationale)
+        .await?;
+
+    if adrs.is_empty() && rationale_results.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(out, "## Key Design Decisions").unwrap();
+    writeln!(out).unwrap();
+
+    // Show ADR documents
+    for adr in adrs.iter().take(10) {
+        let status = adr
+            .metadata
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("accepted");
+        writeln!(out, "- **{}** ({})", adr.name, status).unwrap();
+    }
+
+    // Show extracted design rationale
+    for result in rationale_results.iter().take(10) {
+        let rationale = result
+            .data
+            .get("rationale")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if !rationale.is_empty() {
+            let entity_name = store
+                .get_node(result.node_id)
+                .await?
+                .map_or_else(|| "unknown".to_string(), |n| n.name);
+            let short_name = entity_name.rsplit("::").next().unwrap_or(&entity_name);
+            writeln!(out, "- **{short_name}**: {rationale}").unwrap();
+        }
+    }
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1454,6 +1694,145 @@ mod tests {
         assert!(
             content.contains("validate_token"),
             "Should contain function name in vocabulary"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_architecture_and_documents() {
+        use crate::types::{AnalysisResult, AnalysisResultId};
+
+        let store = SqliteStore::in_memory().unwrap();
+        let now = Utc::now();
+
+        // Create file nodes
+        let file_a = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/core/engine.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let file_b = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/api/handler.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Store community assignments
+        for (node_id, community_id) in [(file_a, 0), (file_b, 1)] {
+            store
+                .store_analysis(&AnalysisResult {
+                    id: AnalysisResultId(0),
+                    node_id,
+                    kind: AnalysisKind::CommunityAssignment,
+                    data: serde_json::json!({
+                        "community_id": community_id,
+                        "modularity_contribution": 0.1
+                    }),
+                    input_hash: 0,
+                    computed_at: now,
+                })
+                .await
+                .unwrap();
+        }
+
+        // Create document nodes
+        let doc_id = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Document,
+                name: "docs/architecture.md".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: {
+                    let mut m = HashMap::new();
+                    m.insert("type".to_string(), serde_json::json!("markdown"));
+                    m
+                },
+            })
+            .await
+            .unwrap();
+
+        // Create Documents edge
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::Documents,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: doc_id,
+                        role: "document".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: file_a,
+                        role: "entity".to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: 1.0,
+                last_updated: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Create ADR document for design decisions
+        store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Document,
+                name: "docs/adr/001-use-sqlite.md".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: {
+                    let mut m = HashMap::new();
+                    m.insert("type".to_string(), serde_json::json!("adr"));
+                    m.insert("status".to_string(), serde_json::json!("accepted"));
+                    m
+                },
+            })
+            .await
+            .unwrap();
+
+        let config = HomerConfig::default();
+        let renderer = AgentsMdRenderer;
+        let content = renderer.render(&store, &config).await.unwrap();
+
+        assert!(
+            content.contains("## Architecture Overview"),
+            "Should have architecture overview: {content}"
+        );
+        assert!(
+            content.contains("Cluster"),
+            "Should have cluster info"
+        );
+        assert!(
+            content.contains("## Key Documents"),
+            "Should have key documents section"
+        );
+        assert!(
+            content.contains("docs/architecture.md"),
+            "Should list architecture doc"
+        );
+        assert!(
+            content.contains("## Key Design Decisions"),
+            "Should have design decisions: {content}"
+        );
+        assert!(
+            content.contains("001-use-sqlite"),
+            "Should list ADR document"
         );
     }
 }
