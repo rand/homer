@@ -201,8 +201,8 @@ impl Default for GraphSection {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+/// Language selection: `"auto"` to detect from file extensions, or an explicit list.
+#[derive(Debug, Clone)]
 pub enum LanguageConfig {
     Auto,
     Explicit(Vec<String>),
@@ -211,6 +211,48 @@ pub enum LanguageConfig {
 impl Default for LanguageConfig {
     fn default() -> Self {
         Self::Auto
+    }
+}
+
+impl Serialize for LanguageConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Auto => serializer.serialize_str("auto"),
+            Self::Explicit(langs) => langs.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LanguageConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de;
+
+        struct Visitor;
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = LanguageConfig;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(r#""auto" or a list of language names"#)
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                if v == "auto" {
+                    Ok(LanguageConfig::Auto)
+                } else {
+                    Err(E::custom(format!("expected \"auto\", got \"{v}\"")))
+                }
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut langs = Vec::new();
+                while let Some(val) = seq.next_element()? {
+                    langs.push(val);
+                }
+                Ok(LanguageConfig::Explicit(langs))
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
     }
 }
 

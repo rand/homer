@@ -204,10 +204,15 @@ impl StructureExtractor {
             .await?;
         stats.edges_created += 1;
 
-        // Index file content for FTS (first 1000 chars for searchability)
+        // Index file content for FTS (first ~1000 bytes for searchability)
         let text_preview = String::from_utf8_lossy(&content);
         let preview: &str = if text_preview.len() > 1000 {
-            &text_preview[..1000]
+            // Find the nearest char boundary at or before byte 1000
+            let mut end = 1000;
+            while !text_preview.is_char_boundary(end) {
+                end -= 1;
+            }
+            &text_preview[..end]
         } else {
             &text_preview
         };
