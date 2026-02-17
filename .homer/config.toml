@@ -1,0 +1,81 @@
+[homer]
+version = "0.1.0"
+
+[analysis]
+depth = "standard"
+llm_salience_threshold = 0.7
+max_llm_batch_size = 50
+
+[extraction]
+max_commits = 2000
+
+[extraction.structure]
+include_patterns = [
+    "**/*.rs",
+    "**/*.py",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.go",
+    "**/*.java",
+]
+exclude_patterns = [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/target/**",
+    "**/.git/**",
+    "**/dist/**",
+]
+
+[extraction.documents]
+enabled = true
+include_doc_comments = true
+include_patterns = [
+    "README*",
+    "CONTRIBUTING*",
+    "ARCHITECTURE*",
+    "CHANGELOG*",
+    "docs/**/*.md",
+    "doc/**/*.md",
+    "adr/**/*.md",
+]
+exclude_patterns = [
+    "**/node_modules/**",
+    "**/vendor/**",
+]
+
+[extraction.prompts]
+enabled = false
+sources = [
+    "claude-code",
+    "agent-rules",
+]
+redact_sensitive = true
+store_full_text = false
+hash_session_ids = true
+
+[extraction.gitlab]
+token_env = "GITLAB_TOKEN"
+max_mr_history = 500
+max_issue_history = 1000
+include_comments = true
+include_reviews = true
+
+[graph]
+languages = "auto"
+
+[renderers]
+enabled = [
+    "agents-md",
+    "module-ctx",
+    "risk-map",
+]
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_concurrent = 5
+cost_budget = 0.0
+enabled = false

@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: homer
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: homer
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: homer
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: homer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target }} -p homer-cli
+
+      - name: Build (cross)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target }} -p homer-cli
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/
+          cd dist
+          tar czf homer-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homer-${{ matrix.target }}
+          path: dist/homer-${{ matrix.target }}.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true
