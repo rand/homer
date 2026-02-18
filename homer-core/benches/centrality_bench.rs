@@ -71,7 +71,11 @@ fn bench_betweenness(c: &mut Criterion) {
     // Approximate betweenness at larger scales
     for node_count in [5_000, 10_000] {
         let graph = build_synthetic_graph(node_count, 3);
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
         let k = (node_count as f64).sqrt() as usize;
 
         group.bench_with_input(
