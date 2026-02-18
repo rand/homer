@@ -4,6 +4,7 @@ pub mod error;
 pub mod extract;
 pub mod llm;
 pub mod pipeline;
+pub mod progress;
 pub mod query;
 pub mod render;
 pub mod store;

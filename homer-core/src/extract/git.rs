@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, TimeZone, Utc};
 use gix::bstr::ByteSlice;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -28,6 +28,7 @@ impl GitExtractor {
     }
 
     /// Run full git extraction into the store.
+    #[instrument(skip_all, name = "git_extract")]
     pub async fn extract(
         &self,
         store: &dyn HomerStore,

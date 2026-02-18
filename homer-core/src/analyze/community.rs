@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use chrono::Utc;
 use petgraph::graph::NodeIndex;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -535,6 +535,7 @@ impl Analyzer for CommunityAnalyzer {
         "community"
     }
 
+    #[instrument(skip_all, name = "community_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,

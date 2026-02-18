@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -34,6 +34,7 @@ impl Analyzer for TemporalAnalyzer {
         "temporal"
     }
 
+    #[instrument(skip_all, name = "temporal_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,

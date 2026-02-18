@@ -79,6 +79,19 @@ CREATE TABLE IF NOT EXISTS graph_snapshots (
     edge_count INTEGER NOT NULL,
     node_count INTEGER NOT NULL
 );
+
+-- Snapshot membership: which nodes and edges exist at each snapshot
+CREATE TABLE IF NOT EXISTS snapshot_nodes (
+    snapshot_id INTEGER NOT NULL REFERENCES graph_snapshots(id) ON DELETE CASCADE,
+    node_id INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, node_id)
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_edges (
+    snapshot_id INTEGER NOT NULL REFERENCES graph_snapshots(id) ON DELETE CASCADE,
+    edge_id INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, edge_id)
+);
 ";
 
 /// Projected views for common query patterns.
@@ -127,6 +140,17 @@ FROM hyperedges e
 JOIN hyperedge_members d ON e.id = d.hyperedge_id AND d.role = 'document'
 JOIN hyperedge_members c ON e.id = c.hyperedge_id AND c.role = 'code_entity'
 WHERE e.kind = 'Documents';
+
+-- Prompt-to-file modification relationships
+CREATE VIEW IF NOT EXISTS prompt_modifications AS
+SELECT
+    p.node_id AS prompt_id,
+    f.node_id AS file_id,
+    e.confidence
+FROM hyperedges e
+JOIN hyperedge_members p ON e.id = p.hyperedge_id AND p.role = 'prompt'
+JOIN hyperedge_members f ON e.id = f.hyperedge_id AND f.role = 'file'
+WHERE e.kind = 'PromptModifiedFiles';
 ";
 
 /// `SQLite` PRAGMAs for performance.

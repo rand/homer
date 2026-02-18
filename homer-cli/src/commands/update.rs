@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::Args;
-use indicatif::{ProgressBar, ProgressStyle};
 use tracing::info;
 
 use homer_core::config::HomerConfig;
 use homer_core::pipeline::HomerPipeline;
+use homer_core::progress::IndicatifReporter;
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
 
@@ -68,22 +68,12 @@ pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
             .context("Failed to clear analyses")?;
     }
 
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.cyan} {msg}")
-            .expect("valid template"),
-    );
-    pb.set_message("Updating Homer...");
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
+    let progress = IndicatifReporter::new();
     let pipeline = HomerPipeline::new(&repo_path);
     let result = pipeline
-        .run(&store, &config)
+        .run_with_progress(&store, &config, &progress)
         .await
         .context("Pipeline execution failed")?;
-
-    pb.finish_and_clear();
 
     println!("Homer updated in {}", repo_path.display());
     println!();

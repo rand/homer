@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
@@ -25,6 +25,7 @@ use crate::render::report::ReportRenderer;
 use crate::render::skills::SkillsRenderer;
 use crate::render::topos_spec::ToposSpecRenderer;
 use crate::render::traits::Renderer;
+use crate::progress::ProgressReporter;
 use crate::store::HomerStore;
 
 /// Result of a full pipeline run.
@@ -70,6 +71,18 @@ impl HomerPipeline {
         store: &dyn HomerStore,
         config: &HomerConfig,
     ) -> crate::error::Result<PipelineResult> {
+        self.run_with_progress(store, config, &crate::progress::NoopReporter)
+            .await
+    }
+
+    /// Run the full pipeline with a progress reporter for user-visible feedback.
+    #[instrument(skip(self, store, config, progress), fields(repo = %self.repo_path.display()))]
+    pub async fn run_with_progress(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        progress: &dyn ProgressReporter,
+    ) -> crate::error::Result<PipelineResult> {
         let start = Instant::now();
         let mut result = PipelineResult {
             extract_nodes: 0,
@@ -83,13 +96,25 @@ impl HomerPipeline {
         info!(repo = %self.repo_path.display(), "Starting Homer pipeline");
 
         // ── Phase 1: Extraction ───────────────────────────────────
+        progress.start("Extracting", None);
         self.run_extraction(store, config, &mut result).await;
+        progress.message(&format!(
+            "Extracted {} nodes, {} edges",
+            result.extract_nodes, result.extract_edges
+        ));
+        progress.finish();
 
         // ── Phase 2: Analysis ─────────────────────────────────────
+        progress.start("Analyzing", None);
         self.run_analysis(store, config, &mut result).await;
+        progress.message(&format!("{} analyses computed", result.analysis_results));
+        progress.finish();
 
         // ── Phase 3: Rendering ────────────────────────────────────
+        progress.start("Rendering", None);
         self.run_rendering(store, config, &mut result).await;
+        progress.message(&format!("{} artifacts written", result.artifacts_written));
+        progress.finish();
 
         result.duration = start.elapsed();
 
@@ -106,6 +131,7 @@ impl HomerPipeline {
         Ok(result)
     }
 
+    #[instrument(skip_all)]
     async fn run_extraction(
         &self,
         store: &dyn HomerStore,
@@ -297,6 +323,7 @@ impl HomerPipeline {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[instrument(skip_all)]
     async fn run_analysis(
         &self,
         store: &dyn HomerStore,
@@ -430,99 +457,44 @@ impl HomerPipeline {
         }
     }
 
+    #[instrument(skip_all)]
     async fn run_rendering(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        // AGENTS.md
-        let renderer = AgentsMdRenderer;
-        match renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "AGENTS.md rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:agents_md",
-                    message: e.to_string(),
-                });
-            }
-        }
+        let path = &self.repo_path;
 
-        // Per-directory .context.md files
-        let ctx_renderer = ModuleContextRenderer;
-        match ctx_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Module context rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:module_context",
-                    message: e.to_string(),
-                });
-            }
-        }
+        // Run all renderers concurrently — they are independent of each other
+        let (agents, ctx, risk, skills, report, topos) = tokio::join!(
+            AgentsMdRenderer.write(store, config, path),
+            ModuleContextRenderer.write(store, config, path),
+            RiskMapRenderer.write(store, config, path),
+            SkillsRenderer.write(store, config, path),
+            ReportRenderer.write(store, config, path),
+            ToposSpecRenderer.write(store, config, path),
+        );
 
-        // homer-risk.json
-        let risk_renderer = RiskMapRenderer;
-        match risk_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Risk map rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:risk_map",
-                    message: e.to_string(),
-                });
-            }
-        }
+        let outcomes: [(&str, crate::error::Result<()>); 6] = [
+            ("render:agents_md", agents),
+            ("render:module_context", ctx),
+            ("render:risk_map", risk),
+            ("render:skills", skills),
+            ("render:report", report),
+            ("render:topos_spec", topos),
+        ];
 
-        // .claude/skills/ (Claude Code skills)
-        let skills_renderer = SkillsRenderer;
-        match skills_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Skills rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:skills",
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // homer-report.html
-        let report_renderer = ReportRenderer;
-        match report_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Report rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:report",
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // spec/homer-spec.tps (Topos format)
-        let topos_renderer = ToposSpecRenderer;
-        match topos_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Topos spec rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:topos_spec",
-                    message: e.to_string(),
-                });
+        for (stage, outcome) in outcomes {
+            match outcome {
+                Ok(()) => result.artifacts_written += 1,
+                Err(e) => {
+                    warn!(stage, error = %e, "Renderer failed");
+                    result.errors.push(PipelineError {
+                        stage,
+                        message: e.to_string(),
+                    });
+                }
             }
         }
     }

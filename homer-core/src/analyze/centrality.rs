@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use chrono::Utc;
 use petgraph::graph::{DiGraph, NodeIndex};
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -71,9 +71,13 @@ impl InMemoryGraph {
     ) -> crate::error::Result<Self> {
         let edges = store.get_edges_by_kind(edge_kind).await?;
 
-        let mut graph = DiGraph::<NodeId, f64>::new();
-        let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::new();
-        let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::new();
+        // Pre-allocate with capacity hints based on edge count
+        let estimated_nodes = edges.len(); // ~1 unique node per edge as lower bound
+        let mut graph = DiGraph::<NodeId, f64>::with_capacity(estimated_nodes, edges.len());
+        let mut node_to_index: HashMap<NodeId, NodeIndex> =
+            HashMap::with_capacity(estimated_nodes);
+        let mut index_to_node: HashMap<NodeIndex, NodeId> =
+            HashMap::with_capacity(estimated_nodes);
 
         // Ensure all member nodes are in the graph
         for edge in &edges {
@@ -157,6 +161,7 @@ impl Analyzer for CentralityAnalyzer {
         "centrality"
     }
 
+    #[instrument(skip_all, name = "centrality_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,

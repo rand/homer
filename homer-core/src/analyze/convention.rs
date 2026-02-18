@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use chrono::Utc;
 use serde::Serialize;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -40,6 +40,7 @@ impl Analyzer for ConventionAnalyzer {
         "convention"
     }
 
+    #[instrument(skip_all, name = "convention_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,

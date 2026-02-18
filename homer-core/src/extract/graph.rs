@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info};
+use rayon::prelude::*;
+use tracing::{debug, info, instrument};
 
 use homer_graphs::scope_graph::{FileScopeGraph, ScopeGraph, ScopeNodeId};
 use homer_graphs::{
@@ -34,6 +35,7 @@ impl GraphExtractor {
         }
     }
 
+    #[instrument(skip_all, name = "graph_extract")]
     pub async fn extract(
         &self,
         store: &dyn HomerStore,
@@ -178,52 +180,47 @@ impl GraphExtractor {
         config: &HomerConfig,
     ) {
         let mut scope_graph = ScopeGraph::new();
-        let mut file_scope_graphs: Vec<FileScopeGraph> = Vec::new();
 
-        for file_node in file_nodes {
-            let file_path = self.repo_path.join(&file_node.name);
+        // Collect eligible files for scope graph building
+        let eligible_files: Vec<(&Node, PathBuf)> = file_nodes
+            .iter()
+            .filter_map(|file_node| {
+                let file_path = self.repo_path.join(&file_node.name);
+                let lang = self.registry.for_file(&file_path)?;
+                if lang.tier() != ResolutionTier::Precise {
+                    return None;
+                }
+                let file_ext = file_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                let lang_included = lang.extensions().iter().any(|ext| {
+                    config
+                        .extraction
+                        .structure
+                        .include_patterns
+                        .iter()
+                        .any(|p| p.contains(&format!("*.{ext}")))
+                });
+                if !lang_included && !file_ext.is_empty() {
+                    return None;
+                }
+                Some((file_node, file_path))
+            })
+            .collect();
 
-            let Some(lang) = self.registry.for_file(&file_path) else {
-                continue;
-            };
-
-            if lang.tier() != ResolutionTier::Precise {
-                continue;
-            }
-
-            // Check extension inclusion (same filter as heuristic pass)
-            let file_ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-            let lang_included = lang.extensions().iter().any(|ext| {
-                config
-                    .extraction
-                    .structure
-                    .include_patterns
-                    .iter()
-                    .any(|p| p.contains(&format!("*.{ext}")))
-            });
-            if !lang_included && !file_ext.is_empty() {
-                continue;
-            }
-
-            let Ok(source) = std::fs::read_to_string(&file_path) else {
-                continue;
-            };
-
-            let mut parser = tree_sitter::Parser::new();
-            if parser.set_language(&lang.tree_sitter_language()).is_err() {
-                continue;
-            }
-            let Some(tree) = parser.parse(&source, None) else {
-                continue;
-            };
-
-            if let Ok(Some(fsg)) = lang.build_scope_graph(&tree, &source, &file_path) {
-                file_scope_graphs.push(fsg);
-            }
-        }
+        // Parallel: read files, parse with tree-sitter, build scope graphs
+        let file_scope_graphs: Vec<FileScopeGraph> = eligible_files
+            .par_iter()
+            .filter_map(|(_, file_path)| {
+                let source = std::fs::read_to_string(file_path).ok()?;
+                let lang = self.registry.for_file(file_path)?;
+                let mut parser = tree_sitter::Parser::new();
+                parser.set_language(&lang.tree_sitter_language()).ok()?;
+                let tree = parser.parse(&source, None)?;
+                lang.build_scope_graph(&tree, &source, file_path).ok().flatten()
+            })
+            .collect();
 
         // Merge all file scope graphs and compute enclosing functions
         let mut all_enclosing: HashMap<ScopeNodeId, ScopeNodeId> = HashMap::new();

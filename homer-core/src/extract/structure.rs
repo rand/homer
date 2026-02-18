@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -29,6 +29,7 @@ impl StructureExtractor {
     }
 
     /// Run structure extraction.
+    #[instrument(skip_all, name = "structure_extract")]
     pub async fn extract(
         &self,
         store: &dyn HomerStore,
