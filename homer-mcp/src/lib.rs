@@ -341,7 +341,7 @@ fn compute_risk_level(risk: &serde_json::Value) -> &'static str {
 
 /// Start the MCP server on stdio transport.
 pub async fn serve_stdio(db_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let server = HomerMcpServer::new(db_path).map_err(|e| e.to_string())?;
+    let server = HomerMcpServer::new(db_path)?;
     info!("Starting Homer MCP server (stdio transport)");
 
     let transport = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
