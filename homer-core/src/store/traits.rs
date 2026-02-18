@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 
 use crate::types::{
     AnalysisKind, AnalysisResult, GraphDiff, Hyperedge, HyperedgeId, HyperedgeKind, Node,
-    NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, StoreStats,
+    NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, SnapshotInfo, StoreStats,
 };
 
 /// The core store abstraction. All pipeline stages read/write through this trait.
@@ -114,6 +114,12 @@ pub trait HomerStore: Send + Sync {
 
     /// Create a named snapshot of current graph state.
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId>;
+
+    /// List all snapshots ordered by creation time.
+    async fn list_snapshots(&self) -> crate::error::Result<Vec<SnapshotInfo>>;
+
+    /// Delete a snapshot by its label.
+    async fn delete_snapshot(&self, label: &str) -> crate::error::Result<bool>;
 
     /// Compute the diff between two snapshots (added/removed nodes and edges).
     async fn get_snapshot_diff(

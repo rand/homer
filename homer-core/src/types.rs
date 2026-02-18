@@ -395,6 +395,16 @@ pub enum SubgraphFilter {
     And(Vec<SubgraphFilter>),
 }
 
+/// Metadata about a stored snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotInfo {
+    pub id: SnapshotId,
+    pub label: String,
+    pub snapshot_at: DateTime<Utc>,
+    pub node_count: u64,
+    pub edge_count: u64,
+}
+
 /// Graph diff between two snapshots.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GraphDiff {

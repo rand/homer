@@ -3,7 +3,9 @@ pub mod graph;
 pub mod init;
 pub mod query;
 pub mod render;
+pub mod risk_check;
 pub mod serve;
+pub mod snapshot;
 pub mod status;
 pub mod update;
 
@@ -25,6 +27,10 @@ pub enum Command {
     Diff(diff::DiffArgs),
     /// Regenerate output artifacts without re-extraction
     Render(render::RenderArgs),
+    /// Manage graph snapshots for temporal comparison
+    Snapshot(snapshot::SnapshotArgs),
+    /// Check risk thresholds for CI/CD gating
+    RiskCheck(risk_check::RiskCheckArgs),
     /// Start MCP server for AI agent integration
     Serve(serve::ServeArgs),
 }
@@ -38,6 +44,8 @@ pub async fn run(cmd: Command) -> anyhow::Result<()> {
         Command::Graph(args) => graph::run(args).await,
         Command::Diff(args) => diff::run(args).await,
         Command::Render(args) => render::run(args).await,
+        Command::Snapshot(args) => snapshot::run(args).await,
+        Command::RiskCheck(args) => risk_check::run(args).await,
         Command::Serve(args) => serve::run(args).await,
     }
 }

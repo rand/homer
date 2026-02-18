@@ -10,7 +10,7 @@ use crate::error::{HomerError, StoreError};
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, GraphDiff, Hyperedge, HyperedgeId,
     HyperedgeKind, HyperedgeMember, Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope,
-    SnapshotId, StoreStats,
+    SnapshotId, SnapshotInfo, StoreStats,
 };
 
 use super::HomerStore;
@@ -660,6 +660,57 @@ impl HomerStore for SqliteStore {
         .map_err(StoreError::Sqlite)?;
 
         Ok(SnapshotId(snap_id))
+    }
+
+    async fn list_snapshots(&self) -> crate::error::Result<Vec<SnapshotInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, label, snapshot_at, node_count, edge_count
+                 FROM graph_snapshots ORDER BY snapshot_at ASC",
+            )
+            .map_err(StoreError::Sqlite)?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let id: i64 = row.get(0)?;
+                let label: String = row.get(1)?;
+                let at_str: String = row.get(2)?;
+                let node_count: i64 = row.get(3)?;
+                let edge_count: i64 = row.get(4)?;
+                Ok((id, label, at_str, node_count, edge_count))
+            })
+            .map_err(StoreError::Sqlite)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::Sqlite)?;
+
+        let mut snapshots = Vec::with_capacity(rows.len());
+        for (id, label, at_str, node_count, edge_count) in rows {
+            let snapshot_at = DateTime::parse_from_rfc3339(&at_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_default();
+            snapshots.push(SnapshotInfo {
+                id: SnapshotId(id),
+                label,
+                snapshot_at,
+                node_count: u64::try_from(node_count).unwrap_or(0),
+                edge_count: u64::try_from(edge_count).unwrap_or(0),
+            });
+        }
+
+        Ok(snapshots)
+    }
+
+    async fn delete_snapshot(&self, label: &str) -> crate::error::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        // CASCADE will clean up snapshot_nodes and snapshot_edges
+        let deleted = conn
+            .execute(
+                "DELETE FROM graph_snapshots WHERE label = ?1",
+                params![label],
+            )
+            .map_err(StoreError::Sqlite)?;
+        Ok(deleted > 0)
     }
 
     async fn get_snapshot_diff(
