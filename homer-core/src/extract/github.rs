@@ -60,10 +60,11 @@ impl GitHubExtractor {
     pub async fn extract(
         &self,
         store: &dyn HomerStore,
-        _config: &HomerConfig,
+        config: &HomerConfig,
     ) -> crate::error::Result<ExtractStats> {
         let start = Instant::now();
         let mut stats = ExtractStats::default();
+        let gh_config = &config.extraction.github;
 
         info!(owner = %self.owner, repo = %self.repo, "GitHub extraction starting");
 
@@ -79,8 +80,11 @@ impl GitHubExtractor {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(0);
 
-        // Fetch PRs
-        match self.fetch_pull_requests(store, &mut stats, last_pr).await {
+        // Fetch PRs (with optional reviews and comments)
+        match self
+            .fetch_pull_requests(store, &mut stats, last_pr, gh_config)
+            .await
+        {
             Ok(max_pr) => {
                 if max_pr > last_pr {
                     store
@@ -95,7 +99,10 @@ impl GitHubExtractor {
         }
 
         // Fetch Issues
-        match self.fetch_issues(store, &mut stats, last_issue).await {
+        match self
+            .fetch_issues(store, &mut stats, last_issue, gh_config)
+            .await
+        {
             Ok(max_issue) => {
                 if max_issue > last_issue {
                     store
@@ -128,9 +135,11 @@ impl GitHubExtractor {
         store: &dyn HomerStore,
         stats: &mut ExtractStats,
         since_number: u64,
+        gh_config: &crate::config::GitHubExtractionConfig,
     ) -> crate::error::Result<u64> {
         let mut max_number = since_number;
         let mut page = 1u32;
+        let mut fetched = 0u32;
 
         loop {
             let prs = self
@@ -148,12 +157,35 @@ impl GitHubExtractor {
                 if pr.number <= since_number {
                     continue;
                 }
+                if fetched >= gh_config.max_pr_history {
+                    break;
+                }
                 max_number = max_number.max(pr.number);
+                fetched += 1;
 
-                self.store_pull_request(store, stats, pr).await?;
+                let pr_node_id =
+                    self.store_pull_request(store, stats, pr).await?;
+
+                if gh_config.include_reviews {
+                    if let Err(e) = self
+                        .fetch_pr_reviews(store, stats, pr.number, pr_node_id)
+                        .await
+                    {
+                        debug!(pr = pr.number, error = %e, "Failed to fetch reviews");
+                    }
+                }
+
+                if gh_config.include_comments {
+                    if let Err(e) = self
+                        .fetch_pr_comments(store, pr.number, pr_node_id)
+                        .await
+                    {
+                        debug!(pr = pr.number, error = %e, "Failed to fetch comments");
+                    }
+                }
             }
 
-            if prs.len() < 100 {
+            if prs.len() < 100 || fetched >= gh_config.max_pr_history {
                 break;
             }
             page += 1;
@@ -167,7 +199,7 @@ impl GitHubExtractor {
         store: &dyn HomerStore,
         stats: &mut ExtractStats,
         pr: &GhPullRequest,
-    ) -> crate::error::Result<()> {
+    ) -> crate::error::Result<NodeId> {
         let mut metadata = HashMap::new();
         metadata.insert("title".to_string(), serde_json::json!(pr.title));
         metadata.insert("state".to_string(), serde_json::json!(pr.state));
@@ -272,6 +304,115 @@ impl GitHubExtractor {
             }
         }
 
+        Ok(pr_node_id)
+    }
+
+    // ── Reviews & Comments ───────────────────────────────────────
+
+    async fn fetch_pr_reviews(
+        &self,
+        store: &dyn HomerStore,
+        stats: &mut ExtractStats,
+        pr_number: u64,
+        pr_node_id: NodeId,
+    ) -> crate::error::Result<()> {
+        let reviews = self
+            .api_get::<Vec<GhReview>>(&format!(
+                "/repos/{}/{}/pulls/{pr_number}/reviews",
+                self.owner, self.repo
+            ))
+            .await?;
+
+        for review in &reviews {
+            let Some(user) = &review.user else {
+                continue;
+            };
+
+            let reviewer_id = ensure_contributor(store, stats, &user.login).await?;
+
+            let mut edge_meta = HashMap::new();
+            edge_meta.insert("state".to_string(), serde_json::json!(review.state));
+            if let Some(submitted) = &review.submitted_at {
+                edge_meta.insert(
+                    "submitted_at".to_string(),
+                    serde_json::json!(submitted),
+                );
+            }
+            if let Some(body) = &review.body {
+                if !body.is_empty() {
+                    edge_meta.insert("body".to_string(), serde_json::json!(body));
+                }
+            }
+
+            store
+                .upsert_hyperedge(&Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: HyperedgeKind::Reviewed,
+                    members: vec![
+                        HyperedgeMember {
+                            node_id: reviewer_id,
+                            role: "reviewer".to_string(),
+                            position: 0,
+                        },
+                        HyperedgeMember {
+                            node_id: pr_node_id,
+                            role: "artifact".to_string(),
+                            position: 1,
+                        },
+                    ],
+                    confidence: 1.0,
+                    last_updated: Utc::now(),
+                    metadata: edge_meta,
+                })
+                .await?;
+            stats.edges_created += 1;
+        }
+
+        Ok(())
+    }
+
+    async fn fetch_pr_comments(
+        &self,
+        store: &dyn HomerStore,
+        pr_number: u64,
+        pr_node_id: NodeId,
+    ) -> crate::error::Result<()> {
+        let comments = self
+            .api_get::<Vec<GhComment>>(&format!(
+                "/repos/{}/{}/issues/{pr_number}/comments",
+                self.owner, self.repo
+            ))
+            .await?;
+
+        if comments.is_empty() {
+            return Ok(());
+        }
+
+        // Store comments as metadata on the PR node
+        let comment_data: Vec<serde_json::Value> = comments
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "author": c.user.as_ref().map_or("unknown", |u| u.login.as_str()),
+                    "body": c.body,
+                    "created_at": c.created_at,
+                })
+            })
+            .collect();
+
+        // Fetch current node, add comments to metadata, re-upsert
+        if let Some(mut node) = store.get_node(pr_node_id).await? {
+            node.metadata.insert(
+                "comments".to_string(),
+                serde_json::json!(comment_data),
+            );
+            node.metadata.insert(
+                "comment_count".to_string(),
+                serde_json::json!(comment_data.len()),
+            );
+            store.upsert_node(&node).await?;
+        }
+
         Ok(())
     }
 
@@ -282,9 +423,11 @@ impl GitHubExtractor {
         store: &dyn HomerStore,
         stats: &mut ExtractStats,
         since_number: u64,
+        gh_config: &crate::config::GitHubExtractionConfig,
     ) -> crate::error::Result<u64> {
         let mut max_number = since_number;
         let mut page = 1u32;
+        let mut fetched = 0u32;
 
         loop {
             let issues = self
@@ -306,7 +449,11 @@ impl GitHubExtractor {
                 if issue.number <= since_number {
                     continue;
                 }
+                if fetched >= gh_config.max_issue_history {
+                    break;
+                }
                 max_number = max_number.max(issue.number);
+                fetched += 1;
 
                 let mut metadata = HashMap::new();
                 metadata.insert("title".to_string(), serde_json::json!(issue.title));
@@ -333,7 +480,7 @@ impl GitHubExtractor {
                 stats.nodes_created += 1;
             }
 
-            if issues.len() < 100 {
+            if issues.len() < 100 || fetched >= gh_config.max_issue_history {
                 break;
             }
             page += 1;
@@ -423,6 +570,21 @@ struct GhUser {
 #[derive(Debug, Deserialize)]
 struct GhLabel {
     name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReview {
+    user: Option<GhUser>,
+    state: String,
+    body: Option<String>,
+    submitted_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhComment {
+    user: Option<GhUser>,
+    body: String,
+    created_at: String,
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -604,5 +766,55 @@ mod tests {
         assert_eq!(extract_issue_number("#42"), Some(42));
         assert_eq!(extract_issue_number("  #100"), Some(100));
         assert_eq!(extract_issue_number("#abc"), None);
+    }
+
+    #[test]
+    fn github_config_defaults() {
+        let config = crate::config::GitHubExtractionConfig::default();
+        assert_eq!(config.token_env, "GITHUB_TOKEN");
+        assert_eq!(config.max_pr_history, 500);
+        assert_eq!(config.max_issue_history, 1000);
+        assert!(config.include_comments);
+        assert!(config.include_reviews);
+    }
+
+    #[test]
+    fn deserialize_review() {
+        let json = r#"{
+            "user": {"login": "reviewer1"},
+            "state": "APPROVED",
+            "body": "Looks good!",
+            "submitted_at": "2024-01-01T00:00:00Z"
+        }"#;
+        let review: GhReview = serde_json::from_str(json).unwrap();
+        assert_eq!(review.state, "APPROVED");
+        assert_eq!(review.user.unwrap().login, "reviewer1");
+        assert_eq!(review.body.unwrap(), "Looks good!");
+    }
+
+    #[test]
+    fn deserialize_comment() {
+        let json = r#"{
+            "user": {"login": "commenter"},
+            "body": "Nice work",
+            "created_at": "2024-01-02T12:00:00Z"
+        }"#;
+        let comment: GhComment = serde_json::from_str(json).unwrap();
+        assert_eq!(comment.body, "Nice work");
+        assert_eq!(comment.created_at, "2024-01-02T12:00:00Z");
+    }
+
+    #[test]
+    fn deserialize_review_without_body() {
+        let json = r#"{
+            "user": {"login": "reviewer2"},
+            "state": "COMMENTED",
+            "body": null,
+            "submitted_at": null
+        }"#;
+        let review: GhReview = serde_json::from_str(json).unwrap();
+        assert_eq!(review.state, "COMMENTED");
+        assert!(review.body.is_none());
+        assert!(review.submitted_at.is_none());
     }
 }

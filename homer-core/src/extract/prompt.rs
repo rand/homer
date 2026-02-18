@@ -56,6 +56,10 @@ impl PromptExtractor {
                 .await;
         }
 
+        // Correlate sessions with commits by shared modified files
+        self.correlate_sessions_with_commits(store, &mut stats)
+            .await;
+
         stats.duration = start.elapsed();
         info!(
             nodes = stats.nodes_created,
@@ -414,6 +418,121 @@ impl PromptExtractor {
 
         Ok((nodes, edges))
     }
+
+    /// Correlate agent sessions with git commits by shared modified files.
+    async fn correlate_sessions_with_commits(
+        &self,
+        store: &dyn HomerStore,
+        stats: &mut ExtractStats,
+    ) {
+        let filter = crate::types::NodeFilter {
+            kind: Some(NodeKind::AgentSession),
+            ..Default::default()
+        };
+        let Ok(sessions) = store.find_nodes(&filter).await else {
+            return;
+        };
+
+        let commit_filter = crate::types::NodeFilter {
+            kind: Some(NodeKind::Commit),
+            ..Default::default()
+        };
+        let Ok(commits) = store.find_nodes(&commit_filter).await else {
+            return;
+        };
+
+        if sessions.is_empty() || commits.is_empty() {
+            return;
+        }
+
+        for session in &sessions {
+            correlate_one_session(store, stats, session, &commits).await;
+        }
+    }
+}
+
+async fn correlate_one_session(
+    store: &dyn HomerStore,
+    stats: &mut ExtractStats,
+    session: &Node,
+    commits: &[Node],
+) {
+    let session_files = extract_string_set(&session.metadata, "modified_files");
+    if session_files.is_empty() {
+        return;
+    }
+
+    let session_ts = session
+        .metadata
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&Utc));
+
+    for commit in commits {
+        let commit_files = extract_string_set(&commit.metadata, "files_changed");
+        let shared: Vec<&String> = session_files.intersection(&commit_files).collect();
+        if shared.is_empty() {
+            continue;
+        }
+
+        // Time proximity: session within 24h before commit
+        if let Some(s_ts) = session_ts {
+            let diff = commit.last_extracted - s_ts;
+            if diff.num_hours() < 0 || diff.num_hours() > 24 {
+                continue;
+            }
+        }
+
+        let confidence = shared.len() as f64 / session_files.len().max(1) as f64;
+        let mut meta = HashMap::new();
+        meta.insert(
+            "shared_files".to_string(),
+            serde_json::json!(shared.into_iter().collect::<Vec<_>>()),
+        );
+
+        if let Err(e) = store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::RelatedPrompts,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: session.id,
+                        role: "session".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: commit.id,
+                        role: "commit".to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence,
+                last_updated: Utc::now(),
+                metadata: meta,
+            })
+            .await
+        {
+            warn!(error = %e, "Failed to create session-commit correlation");
+        } else {
+            stats.edges_created += 1;
+        }
+    }
+}
+
+fn extract_string_set(
+    metadata: &HashMap<String, serde_json::Value>,
+    key: &str,
+) -> HashSet<String> {
+    metadata
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // ── JSONL parsing ────────────────────────────────────────────────
