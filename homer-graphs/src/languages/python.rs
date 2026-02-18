@@ -874,9 +874,7 @@ from pathlib import Path
         // The import's PushSymbol("greet") should resolve to b.py's PopSymbol("greet")
         let cross_file: Vec<_> = resolved
             .iter()
-            .filter(|r| {
-                r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.py")
-            })
+            .filter(|r| r.symbol == "greet" && r.definition_file == std::path::Path::new("b.py"))
             .collect();
         assert!(
             !cross_file.is_empty(),

@@ -737,9 +737,7 @@ mod tests {
 
         let cross_file: Vec<_> = resolved
             .iter()
-            .filter(|r| {
-                r.symbol == "Bar" && r.definition_file == std::path::PathBuf::from("Bar.java")
-            })
+            .filter(|r| r.symbol == "Bar" && r.definition_file == std::path::Path::new("Bar.java"))
             .collect();
         assert!(
             !cross_file.is_empty(),

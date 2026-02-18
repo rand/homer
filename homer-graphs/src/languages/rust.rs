@@ -1007,9 +1007,7 @@ use crate::types::{Node, NodeKind};
 
         let cross_file: Vec<_> = resolved
             .iter()
-            .filter(|r| {
-                r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.rs")
-            })
+            .filter(|r| r.symbol == "greet" && r.definition_file == std::path::Path::new("b.rs"))
             .collect();
         assert!(
             !cross_file.is_empty(),
