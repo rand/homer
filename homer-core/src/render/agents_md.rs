@@ -237,10 +237,7 @@ async fn render_architecture_overview(
     writeln!(out).unwrap();
 
     for (id, mut members) in sorted_communities {
-        members.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        members.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Derive cluster name from common directory prefix
         let cluster_label = derive_cluster_label(&members);
@@ -302,9 +299,7 @@ async fn render_key_documents(
     }
 
     // Count cross-references for each document via Documents edges
-    let doc_edges = store
-        .get_edges_by_kind(HyperedgeKind::Documents)
-        .await?;
+    let doc_edges = store.get_edges_by_kind(HyperedgeKind::Documents).await?;
 
     let mut doc_ref_counts: HashMap<crate::types::NodeId, u32> = HashMap::new();
     for edge in &doc_edges {
@@ -845,7 +840,11 @@ async fn render_testing_conventions(
     )
     .unwrap();
     if source_count > 0 {
-        writeln!(out, "- {test_count} test files / {source_count} source files").unwrap();
+        writeln!(
+            out,
+            "- {test_count} test files / {source_count} source files"
+        )
+        .unwrap();
     }
     writeln!(out).unwrap();
 
@@ -958,10 +957,7 @@ async fn render_agent_rules(
 
     if let Some(files) = rule_files {
         if !files.is_empty() {
-            let names: Vec<_> = files
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .collect();
+            let names: Vec<_> = files.iter().filter_map(serde_json::Value::as_str).collect();
             writeln!(out, "**Agent rules:** {}", names.join(", ")).unwrap();
         }
     }
@@ -998,10 +994,7 @@ async fn render_agent_rules(
 
 // ── Common Tasks ──────────────────────────────────────────────────
 
-async fn render_common_tasks(
-    out: &mut String,
-    store: &dyn HomerStore,
-) -> crate::error::Result<()> {
+async fn render_common_tasks(out: &mut String, store: &dyn HomerStore) -> crate::error::Result<()> {
     let root_id = find_convention_root(store).await?;
     let Some(root_id) = root_id else {
         return Ok(());
@@ -1168,14 +1161,8 @@ async fn render_domain_vocabulary(
     writeln!(out, "|------|------|-------------|----------:|").unwrap();
 
     for entry in vocabulary.iter().take(20) {
-        let term = entry
-            .get("term")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        let file = entry
-            .get("file")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
+        let term = entry.get("term").and_then(|v| v.as_str()).unwrap_or("?");
+        let file = entry.get("file").and_then(|v| v.as_str()).unwrap_or("?");
         let ref_count = entry
             .get("reference_count")
             .and_then(serde_json::Value::as_u64)
@@ -1687,10 +1674,7 @@ mod tests {
             content.contains("## Domain Vocabulary"),
             "Should have Domain Vocabulary section"
         );
-        assert!(
-            content.contains("auth"),
-            "Should contain auth domain term"
-        );
+        assert!(content.contains("auth"), "Should contain auth domain term");
         assert!(
             content.contains("validate_token"),
             "Should contain function name in vocabulary"
@@ -1814,10 +1798,7 @@ mod tests {
             content.contains("## Architecture Overview"),
             "Should have architecture overview: {content}"
         );
-        assert!(
-            content.contains("Cluster"),
-            "Should have cluster info"
-        );
+        assert!(content.contains("Cluster"), "Should have cluster info");
         assert!(
             content.contains("## Key Documents"),
             "Should have key documents section"

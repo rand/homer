@@ -14,8 +14,8 @@ use crate::llm::{AnalysisProvenance, CostTracker, LlmProvider, ProvenanceConfide
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, NodeKind};
 
-use super::traits::Analyzer;
 use super::AnalyzeStats;
+use super::traits::Analyzer;
 
 const TEMPLATE_VERSION: &str = "entity-summary-v3";
 // Used by design rationale extraction (requires GitHub PR data from F2)
@@ -63,8 +63,7 @@ impl Analyzer for SemanticAnalyzer {
 
         info!(
             count = candidates.len(),
-            threshold,
-            "Running semantic analysis"
+            threshold, "Running semantic analysis"
         );
 
         let semaphore = Arc::new(Semaphore::new(config.llm.max_concurrent as usize));
@@ -92,9 +91,7 @@ impl Analyzer for SemanticAnalyzer {
                 Ok(false) => {} // skipped (cached or doc-comment)
                 Err(e) => {
                     debug!(entity = %candidate.name, error = %e, "Semantic analysis failed");
-                    stats
-                        .errors
-                        .push((candidate.name.clone(), e));
+                    stats.errors.push((candidate.name.clone(), e));
                 }
             }
         }
@@ -137,9 +134,7 @@ async fn collect_candidates(
         .await?;
 
     // Pre-load centrality data for enrichment
-    let pagerank_results = store
-        .get_analyses_by_kind(AnalysisKind::PageRank)
-        .await?;
+    let pagerank_results = store.get_analyses_by_kind(AnalysisKind::PageRank).await?;
     let betweenness_results = store
         .get_analyses_by_kind(AnalysisKind::BetweennessCentrality)
         .await?;
@@ -419,12 +414,24 @@ fn build_summary_prompt(candidate: &Candidate, source: &str) -> String {
     let callers_display = if candidate.callers.is_empty() {
         "(none)".to_string()
     } else {
-        candidate.callers.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
+        candidate
+            .callers
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     let callees_display = if candidate.callees.is_empty() {
         "(none)".to_string()
     } else {
-        candidate.callees.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
+        candidate
+            .callees
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
     format!(

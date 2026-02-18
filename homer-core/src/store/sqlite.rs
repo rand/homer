@@ -247,10 +247,7 @@ impl HomerStore for SqliteStore {
         Ok(())
     }
 
-    async fn delete_stale_nodes(
-        &self,
-        older_than: DateTime<Utc>,
-    ) -> crate::error::Result<u64> {
+    async fn delete_stale_nodes(&self, older_than: DateTime<Utc>) -> crate::error::Result<u64> {
         let conn = self.conn.lock().unwrap();
         let cutoff = older_than.to_rfc3339();
         let count = conn

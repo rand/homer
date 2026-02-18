@@ -30,10 +30,7 @@ pub trait HomerStore: Send + Sync {
     async fn mark_node_stale(&self, id: NodeId) -> crate::error::Result<()>;
 
     /// Delete nodes marked stale before `older_than`. Returns count deleted.
-    async fn delete_stale_nodes(
-        &self,
-        older_than: DateTime<Utc>,
-    ) -> crate::error::Result<u64>;
+    async fn delete_stale_nodes(&self, older_than: DateTime<Utc>) -> crate::error::Result<u64>;
 
     /// Batch upsert nodes within a single transaction. Returns IDs.
     async fn upsert_nodes_batch(&self, nodes: &[Node]) -> crate::error::Result<Vec<NodeId>>;

@@ -43,7 +43,12 @@ impl LanguageSupport for TypeScriptSupport {
         let mut module_defs = Vec::new();
 
         super::ecma_scope::walk_scope(
-            tree.root_node(), source, root, &mut builder, &mut module_defs, true,
+            tree.root_node(),
+            source,
+            root,
+            &mut builder,
+            &mut module_defs,
+            true,
         );
 
         for def_id in &module_defs {
@@ -265,26 +270,44 @@ mod tests {
     }
 
     fn pop_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn push_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
     fn scope_graph_function_and_class() {
-        let sg = build_scope("function greet(name: string): void {}\nclass Greeter { greet() {} }\n");
+        let sg =
+            build_scope("function greet(name: string): void {}\nclass Greeter { greet() {} }\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"greet"), "Should have function greet, got: {defs:?}");
-        assert!(defs.contains(&"Greeter"), "Should have class Greeter, got: {defs:?}");
-        assert!(defs.contains(&"name"), "Should have param 'name', got: {defs:?}");
+        assert!(
+            defs.contains(&"greet"),
+            "Should have function greet, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"Greeter"),
+            "Should have class Greeter, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"name"),
+            "Should have param 'name', got: {defs:?}"
+        );
     }
 
     #[test]
@@ -292,10 +315,16 @@ mod tests {
         let sg = build_scope("import { foo, bar as baz } from './module';\n");
         let defs = pop_symbols(&sg);
         assert!(defs.contains(&"foo"), "Should bind foo, got: {defs:?}");
-        assert!(defs.contains(&"baz"), "Should bind alias baz, got: {defs:?}");
+        assert!(
+            defs.contains(&"baz"),
+            "Should bind alias baz, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
         assert!(refs.contains(&"foo"), "Should reference foo, got: {refs:?}");
-        assert!(refs.contains(&"bar"), "Should reference original bar, got: {refs:?}");
+        assert!(
+            refs.contains(&"bar"),
+            "Should reference original bar, got: {refs:?}"
+        );
     }
 
     #[test]
@@ -304,7 +333,10 @@ mod tests {
         let defs = pop_symbols(&sg);
         assert!(defs.contains(&"React"), "Should bind React, got: {defs:?}");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"default"), "Default import should ref 'default', got: {refs:?}");
+        assert!(
+            refs.contains(&"default"),
+            "Default import should ref 'default', got: {refs:?}"
+        );
     }
 
     #[test]
@@ -318,7 +350,10 @@ mod tests {
     fn scope_graph_export_function() {
         let sg = build_scope("export function compute(): number { return 0; }\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"compute"), "Should have compute, got: {defs:?}");
+        assert!(
+            defs.contains(&"compute"),
+            "Should have compute, got: {defs:?}"
+        );
         assert!(
             sg.export_nodes.iter().any(|&id| {
                 sg.nodes.iter().any(|n| n.id == id && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "compute"))
@@ -331,14 +366,20 @@ mod tests {
     fn scope_graph_export_default() {
         let sg = build_scope("export default 42;\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"default"), "Should have default export, got: {defs:?}");
+        assert!(
+            defs.contains(&"default"),
+            "Should have default export, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_interface_and_type() {
         let sg = build_scope("interface Props { name: string; }\ntype ID = string;\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Props"), "Should have interface Props, got: {defs:?}");
+        assert!(
+            defs.contains(&"Props"),
+            "Should have interface Props, got: {defs:?}"
+        );
         assert!(defs.contains(&"ID"), "Should have type ID, got: {defs:?}");
     }
 
@@ -346,8 +387,14 @@ mod tests {
     fn scope_graph_arrow_function() {
         let sg = build_scope("const greet = (name: string) => { console.log(name); };\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"greet"), "Should have arrow fn 'greet', got: {defs:?}");
-        assert!(defs.contains(&"name"), "Should have param 'name', got: {defs:?}");
+        assert!(
+            defs.contains(&"greet"),
+            "Should have arrow fn 'greet', got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"name"),
+            "Should have param 'name', got: {defs:?}"
+        );
     }
 
     #[test]
@@ -355,7 +402,10 @@ mod tests {
         let source = "function foo() {}\nfoo();\n";
         let sg = build_scope(source);
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"foo"), "Should have PushSymbol for foo(), got: {refs:?}");
+        assert!(
+            refs.contains(&"foo"),
+            "Should have PushSymbol for foo(), got: {refs:?}"
+        );
     }
 
     #[test]
@@ -376,12 +426,18 @@ mod tests {
         let source_a = "import { greet } from './b';\ngreet();\n";
         let sg_a = {
             let tree = parse_ts(source_a);
-            TypeScriptSupport.build_scope_graph(&tree, source_a, Path::new("a.ts")).unwrap().unwrap()
+            TypeScriptSupport
+                .build_scope_graph(&tree, source_a, Path::new("a.ts"))
+                .unwrap()
+                .unwrap()
         };
         let source_b = "export function greet(): void {}\n";
         let sg_b = {
             let tree = parse_ts(source_b);
-            TypeScriptSupport.build_scope_graph(&tree, source_b, Path::new("b.ts")).unwrap().unwrap()
+            TypeScriptSupport
+                .build_scope_graph(&tree, source_b, Path::new("b.ts"))
+                .unwrap()
+                .unwrap()
         };
 
         let mut scope_graph = ScopeGraph::new();
@@ -389,16 +445,25 @@ mod tests {
         scope_graph.add_file_graph(&sg_b);
         let resolved = scope_graph.resolve_all();
 
-        let cross_file: Vec<_> = resolved.iter()
-            .filter(|r| r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.ts"))
+        let cross_file: Vec<_> = resolved
+            .iter()
+            .filter(|r| {
+                r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.ts")
+            })
             .collect();
-        assert!(!cross_file.is_empty(), "import greet should resolve cross-file, got: {resolved:?}");
+        assert!(
+            !cross_file.is_empty(),
+            "import greet should resolve cross-file, got: {resolved:?}"
+        );
     }
 
     #[test]
     fn scope_graph_method_in_class() {
         let sg = build_scope("class Foo {\n  bar() { this.baz(); }\n  baz() {}\n}\n");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"baz"), "this.baz() should create PushSymbol for baz, got: {refs:?}");
+        assert!(
+            refs.contains(&"baz"),
+            "this.baz() should create PushSymbol for baz, got: {refs:?}"
+        );
     }
 }

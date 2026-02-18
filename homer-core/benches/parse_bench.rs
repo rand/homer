@@ -118,9 +118,7 @@ fn bench_extract_heuristic(c: &mut Criterion) {
     for (lang_id, source) in &languages {
         let lang = registry.get(lang_id).unwrap();
         let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&lang.tree_sitter_language())
-            .unwrap();
+        parser.set_language(&lang.tree_sitter_language()).unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         group.bench_with_input(

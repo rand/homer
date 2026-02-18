@@ -7,8 +7,8 @@
 // - call_expression, lexical_declaration, formal_parameters
 // - TypeScript-specific: interface_declaration, type_alias_declaration, enum_declaration
 
-use crate::scope_graph::ScopeNodeId;
 use crate::SymbolKind;
+use crate::scope_graph::ScopeNodeId;
 
 use super::helpers::{
     ScopeGraphBuilder, child_by_field, find_child_by_kind, node_range, node_text,
@@ -81,8 +81,12 @@ fn scope_function_decl(
         return;
     };
     let name = node_text(name_node, source);
-    let def_id =
-        builder.add_definition(scope, name, Some(node_range(name_node)), Some(SymbolKind::Function));
+    let def_id = builder.add_definition(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Function),
+    );
     if is_module_level {
         module_defs.push(def_id);
     }
@@ -108,8 +112,12 @@ fn scope_class_decl(
         return;
     };
     let name = node_text(name_node, source);
-    let def_id =
-        builder.add_definition(scope, name, Some(node_range(name_node)), Some(SymbolKind::Type));
+    let def_id = builder.add_definition(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Type),
+    );
     if is_module_level {
         module_defs.push(def_id);
     }
@@ -130,7 +138,12 @@ fn scope_method_def(
         return;
     };
     let name = node_text(name_node, source);
-    builder.add_definition(scope, name, Some(node_range(name_node)), Some(SymbolKind::Function));
+    builder.add_definition(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Function),
+    );
 
     let method_scope = builder.add_scope(scope, Some(node_range(node)));
     if let Some(params) = child_by_field(node, "parameters") {
@@ -155,8 +168,12 @@ fn scope_type_decl(
         return;
     };
     let name = node_text(name_node, source);
-    let def_id =
-        builder.add_definition(scope, name, Some(node_range(name_node)), Some(SymbolKind::Type));
+    let def_id = builder.add_definition(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Type),
+    );
     if is_module_level {
         module_defs.push(def_id);
     }
@@ -183,22 +200,32 @@ fn scope_import(
                 // Default import: import foo from '...'
                 let local_name = node_text(child, source);
                 builder.add_import_reference(import_scope, "default", Some(node_range(child)));
-                let def_id = builder.add_definition(scope, local_name, Some(node_range(child)), None);
+                let def_id =
+                    builder.add_definition(scope, local_name, Some(node_range(child)), None);
                 if is_module_level {
                     module_defs.push(def_id);
                 }
             }
             "named_imports" => {
                 scope_named_imports(
-                    child, source, scope, import_scope, builder, module_defs, is_module_level,
+                    child,
+                    source,
+                    scope,
+                    import_scope,
+                    builder,
+                    module_defs,
+                    is_module_level,
                 );
             }
             "namespace_import" => {
-                let ns_name = find_child_by_kind(child, "identifier")
-                    .map_or("*", |n| node_text(n, source));
+                let ns_name =
+                    find_child_by_kind(child, "identifier").map_or("*", |n| node_text(n, source));
                 builder.add_import_reference(import_scope, "*", Some(node_range(child)));
                 let def_id = builder.add_definition(
-                    scope, ns_name, Some(node_range(child)), Some(SymbolKind::Module),
+                    scope,
+                    ns_name,
+                    Some(node_range(child)),
+                    Some(SymbolKind::Module),
                 );
                 if is_module_level {
                     module_defs.push(def_id);
@@ -308,7 +335,12 @@ fn scope_call(
         _ => None,
     };
     if let Some(name) = target {
-        builder.add_reference(scope, &name, Some(node_range(func)), Some(SymbolKind::Function));
+        builder.add_reference(
+            scope,
+            &name,
+            Some(node_range(func)),
+            Some(SymbolKind::Function),
+        );
     }
 }
 
@@ -342,7 +374,11 @@ fn scope_single_var(
     }
     let name = node_text(name_node, source);
     let is_arrow = child_by_field(node, "value").is_some_and(|v| v.kind() == "arrow_function");
-    let kind = if is_arrow { SymbolKind::Function } else { SymbolKind::Variable };
+    let kind = if is_arrow {
+        SymbolKind::Function
+    } else {
+        SymbolKind::Variable
+    };
     let def_id = builder.add_definition(scope, name, Some(node_range(name_node)), Some(kind));
     module_defs.push(def_id);
 
@@ -384,7 +420,10 @@ fn scope_params(
         };
         if let Some(name) = name {
             builder.add_definition(
-                func_scope, name, Some(node_range(child)), Some(SymbolKind::Variable),
+                func_scope,
+                name,
+                Some(node_range(child)),
+                Some(SymbolKind::Variable),
             );
         }
     }

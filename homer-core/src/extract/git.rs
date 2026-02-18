@@ -74,8 +74,7 @@ impl GitExtractor {
             None
         };
 
-        let commits_to_process =
-            Self::collect_commits(&head, effective_checkpoint, config)?;
+        let commits_to_process = Self::collect_commits(&head, effective_checkpoint, config)?;
         info!(count = commits_to_process.len(), "Processing commits");
 
         for oid in &commits_to_process {
@@ -522,15 +521,11 @@ fn compute_diff(
         .map(|entry| {
             let (lines_added, lines_deleted) = match entry.status {
                 DiffStatus::Added => {
-                    let added = entry
-                        .new_blob
-                        .map_or(0, |id| count_blob_lines(repo, id));
+                    let added = entry.new_blob.map_or(0, |id| count_blob_lines(repo, id));
                     (added, 0)
                 }
                 DiffStatus::Deleted => {
-                    let deleted = entry
-                        .old_blob
-                        .map_or(0, |id| count_blob_lines(repo, id));
+                    let deleted = entry.old_blob.map_or(0, |id| count_blob_lines(repo, id));
                     (0, deleted)
                 }
                 DiffStatus::Modified | DiffStatus::Renamed | DiffStatus::Copied => {
@@ -627,9 +622,9 @@ fn count_newlines(data: &[u8]) -> u32 {
     if data.is_empty() {
         return 0;
     }
-    let newlines = data.iter().fold(0usize, |acc, &b| {
-        acc + usize::from(b == b'\n')
-    });
+    let newlines = data
+        .iter()
+        .fold(0usize, |acc, &b| acc + usize::from(b == b'\n'));
     let total = if data.last() == Some(&b'\n') {
         newlines
     } else {

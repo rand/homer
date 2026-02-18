@@ -116,7 +116,10 @@ mod tests {
         }];
 
         let graph = project_import_graph(&resolved);
-        assert!(graph.edges.is_empty(), "Same-file refs should not produce import edges");
+        assert!(
+            graph.edges.is_empty(),
+            "Same-file refs should not produce import edges"
+        );
     }
 
     #[test]
@@ -144,6 +147,10 @@ mod tests {
 
         let graph = project_import_graph(&resolved);
         assert_eq!(graph.edges.len(), 1);
-        assert_eq!(graph.edges[0].symbols.len(), 1, "Should deduplicate symbol names");
+        assert_eq!(
+            graph.edges[0].symbols.len(),
+            1,
+            "Should deduplicate symbol names"
+        );
     }
 }

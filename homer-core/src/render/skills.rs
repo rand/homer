@@ -54,9 +54,8 @@ impl Renderer for SkillsRenderer {
         }
 
         let skills_dir = repo_root.join(".claude/skills");
-        std::fs::create_dir_all(&skills_dir).map_err(|e| {
-            crate::error::HomerError::Extract(crate::error::ExtractError::Io(e))
-        })?;
+        std::fs::create_dir_all(&skills_dir)
+            .map_err(|e| crate::error::HomerError::Extract(crate::error::ExtractError::Io(e)))?;
 
         let mut written = 0u32;
         for skill in &skills {
@@ -215,9 +214,7 @@ async fn derive_from_co_changes(
     store: &dyn HomerStore,
     skills: &mut Vec<DerivedSkill>,
 ) -> crate::error::Result<()> {
-    let co_change_edges = store
-        .get_edges_by_kind(HyperedgeKind::CoChanges)
-        .await?;
+    let co_change_edges = store.get_edges_by_kind(HyperedgeKind::CoChanges).await?;
 
     for edge in &co_change_edges {
         #[allow(clippy::cast_possible_truncation)]
@@ -254,9 +251,9 @@ async fn derive_from_co_changes(
         }
 
         // Check if this file set is already covered by a task pattern skill
-        let already_covered = skills.iter().any(|s| {
-            files.iter().filter(|f| s.files.contains(f)).count() >= files.len() / 2
-        });
+        let already_covered = skills
+            .iter()
+            .any(|s| files.iter().filter(|f| s.files.contains(f)).count() >= files.len() / 2);
         if already_covered {
             continue;
         }
@@ -394,7 +391,9 @@ fn common_prefix(files: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::store::sqlite::SqliteStore;
-    use crate::types::{AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeMember, Node, NodeId};
+    use crate::types::{
+        AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeMember, Node, NodeId,
+    };
     use chrono::Utc;
 
     #[tokio::test]
@@ -505,9 +504,21 @@ mod tests {
                 id: HyperedgeId(0),
                 kind: HyperedgeKind::CoChanges,
                 members: vec![
-                    HyperedgeMember { node_id: file_a, role: "file".to_string(), position: 0 },
-                    HyperedgeMember { node_id: file_b, role: "file".to_string(), position: 1 },
-                    HyperedgeMember { node_id: file_c, role: "file".to_string(), position: 2 },
+                    HyperedgeMember {
+                        node_id: file_a,
+                        role: "file".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: file_b,
+                        role: "file".to_string(),
+                        position: 1,
+                    },
+                    HyperedgeMember {
+                        node_id: file_c,
+                        role: "file".to_string(),
+                        position: 2,
+                    },
                 ],
                 confidence: 0.8,
                 last_updated: now,
@@ -543,14 +554,26 @@ mod tests {
         assert!(content.contains("# Add API endpoint"), "Should have title");
         assert!(content.contains("## Files to modify"), "Should list files");
         assert!(content.contains("src/routes.rs"), "Should include file");
-        assert!(content.contains("## Patterns to follow"), "Should have patterns");
-        assert!(content.contains("## Common pitfalls"), "Should have pitfalls");
+        assert!(
+            content.contains("## Patterns to follow"),
+            "Should have patterns"
+        );
+        assert!(
+            content.contains("## Common pitfalls"),
+            "Should have pitfalls"
+        );
     }
 
     #[test]
     fn skill_filename_generation() {
-        assert_eq!(skill_filename("Add API endpoint"), "homer-add-api-endpoint.md");
-        assert_eq!(skill_filename("Fix auth/session bug"), "homer-fix-auth-session-bug.md");
+        assert_eq!(
+            skill_filename("Add API endpoint"),
+            "homer-add-api-endpoint.md"
+        );
+        assert_eq!(
+            skill_filename("Fix auth/session bug"),
+            "homer-fix-auth-session-bug.md"
+        );
     }
 
     #[test]

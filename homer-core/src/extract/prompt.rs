@@ -150,10 +150,7 @@ impl PromptExtractor {
         let mut metadata = HashMap::new();
         let source = classify_rule_source(relative);
         metadata.insert("source".to_string(), serde_json::json!(source));
-        metadata.insert(
-            "size_bytes".to_string(),
-            serde_json::json!(content.len()),
-        );
+        metadata.insert("size_bytes".to_string(), serde_json::json!(content.len()));
 
         // Extract referenced file paths from the rule content.
         let refs = extract_file_references(&content);
@@ -234,13 +231,13 @@ impl PromptExtractor {
             return;
         }
 
-        info!(count = session_files.len(), "Found Claude Code session files");
+        info!(
+            count = session_files.len(),
+            "Found Claude Code session files"
+        );
 
         for path in &session_files {
-            match self
-                .process_session_file(store, config, path)
-                .await
-            {
+            match self.process_session_file(store, config, path).await {
                 Ok((nodes, edges)) => {
                     stats.nodes_created += nodes;
                     stats.edges_created += edges;
@@ -386,8 +383,7 @@ impl PromptExtractor {
         // Optionally create individual Prompt nodes per interaction.
         if config.extraction.prompts.store_full_text {
             for interaction in interactions {
-                let prompt_name =
-                    format!("{session_id}:{}", interaction.timestamp.timestamp());
+                let prompt_name = format!("{session_id}:{}", interaction.timestamp.timestamp());
                 let mut prompt_meta = HashMap::new();
                 prompt_meta.insert(
                     "referenced_files".to_string(),
@@ -520,10 +516,7 @@ async fn correlate_one_session(
     }
 }
 
-fn extract_string_set(
-    metadata: &HashMap<String, serde_json::Value>,
-    key: &str,
-) -> HashSet<String> {
+fn extract_string_set(metadata: &HashMap<String, serde_json::Value>, key: &str) -> HashSet<String> {
     metadata
         .get(key)
         .and_then(|v| v.as_array())
@@ -573,10 +566,7 @@ fn build_session_metadata(interactions: &[AgentInteraction]) -> HashMap<String, 
             0.0
         }),
     );
-    metadata.insert(
-        "tool_uses".to_string(),
-        serde_json::json!(total_tool_uses),
-    );
+    metadata.insert("tool_uses".to_string(), serde_json::json!(total_tool_uses));
     metadata.insert(
         "files_referenced".to_string(),
         serde_json::json!(all_referenced.len()),
@@ -653,10 +643,14 @@ fn parse_claude_code_jsonl(content: &str) -> Vec<AgentInteraction> {
                     let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                     if block_type == "tool_use" {
                         tool_count += 1;
-                        let tool_name =
-                            block.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let tool_name = block.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         if let Some(input) = block.get("input") {
-                            extract_tool_file_refs(tool_name, input, &mut referenced, &mut modified);
+                            extract_tool_file_refs(
+                                tool_name,
+                                input,
+                                &mut referenced,
+                                &mut modified,
+                            );
                         }
                     }
                 }
@@ -775,9 +769,7 @@ fn detect_correction(
         }
 
         // User references the same files that were just modified.
-        if !current_modified.is_empty()
-            && current_modified.iter().any(|f| text.contains(f))
-        {
+        if !current_modified.is_empty() && current_modified.iter().any(|f| text.contains(f)) {
             return true;
         }
 
@@ -885,10 +877,7 @@ mod tests {
             classify_rule_source(Path::new(".windsurf/rules/r.md")),
             "windsurf"
         );
-        assert_eq!(
-            classify_rule_source(Path::new(".clinerules/r.md")),
-            "cline"
-        );
+        assert_eq!(classify_rule_source(Path::new(".clinerules/r.md")), "cline");
         assert_eq!(classify_rule_source(Path::new("AGENTS.md")), "agents-md");
         assert_eq!(classify_rule_source(Path::new("other.txt")), "unknown");
     }
@@ -919,10 +908,18 @@ mod tests {
         assert_eq!(interactions.len(), 2);
 
         // First interaction reads src/main.rs.
-        assert!(interactions[0].referenced_files.contains(&"src/main.rs".to_string()));
+        assert!(
+            interactions[0]
+                .referenced_files
+                .contains(&"src/main.rs".to_string())
+        );
 
         // Second interaction modifies src/lib.rs, and the follow-up has "revert".
-        assert!(interactions[1].modified_files.contains(&"src/lib.rs".to_string()));
+        assert!(
+            interactions[1]
+                .modified_files
+                .contains(&"src/lib.rs".to_string())
+        );
         assert!(interactions[1].had_correction);
     }
 
@@ -1051,6 +1048,9 @@ mod tests {
             ..Default::default()
         };
         let sessions = store.find_nodes(&filter).await.unwrap();
-        assert!(sessions.is_empty(), "Should not extract sessions when disabled");
+        assert!(
+            sessions.is_empty(),
+            "Should not extract sessions when disabled"
+        );
     }
 }

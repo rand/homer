@@ -571,14 +571,16 @@ async fn compute_co_change(
     // (for quick per-file lookup in renderers)
     let mut file_partners: HashMap<NodeId, Vec<(NodeId, u32, f64)>> = HashMap::new();
     for pair in &scored_pairs {
-        file_partners
-            .entry(pair.file_a)
-            .or_default()
-            .push((pair.file_b, pair.count, pair.confidence));
-        file_partners
-            .entry(pair.file_b)
-            .or_default()
-            .push((pair.file_a, pair.count, pair.confidence));
+        file_partners.entry(pair.file_a).or_default().push((
+            pair.file_b,
+            pair.count,
+            pair.confidence,
+        ));
+        file_partners.entry(pair.file_b).or_default().push((
+            pair.file_a,
+            pair.count,
+            pair.confidence,
+        ));
     }
 
     for (file_id, mut partners) in file_partners {
@@ -811,8 +813,7 @@ async fn compute_doc_freshness(
         }
 
         // Count commits since doc was last updated
-        let (commits_since_doc, is_stale) = if let Some(&doc_time) = doc_timestamps.get(file_id)
-        {
+        let (commits_since_doc, is_stale) = if let Some(&doc_time) = doc_timestamps.get(file_id) {
             let since = changes.iter().filter(|c| c.commit_time > doc_time).count();
             (since as u32, since >= 3) // Stale if 3+ changes since doc update
         } else {
@@ -1074,10 +1075,7 @@ mod tests {
             .get_edges_by_kind(HyperedgeKind::CoChanges)
             .await
             .unwrap();
-        assert!(
-            !co_edges.is_empty(),
-            "Should have CoChanges hyperedge(s)"
-        );
+        assert!(!co_edges.is_empty(), "Should have CoChanges hyperedge(s)");
         // The edge should contain both file_a and file_b
         let has_pair = co_edges.iter().any(|e| {
             let ids: Vec<NodeId> = e.members.iter().map(|m| m.node_id).collect();
@@ -1387,8 +1385,7 @@ mod tests {
         );
 
         let edge = ternary.unwrap();
-        let member_ids: HashSet<NodeId> =
-            edge.members.iter().map(|m| m.node_id).collect();
+        let member_ids: HashSet<NodeId> = edge.members.iter().map(|m| m.node_id).collect();
         for &file_id in &files {
             assert!(
                 member_ids.contains(&file_id),

@@ -62,7 +62,10 @@ pub async fn store_cached(
 
 /// Determine if an entity has a sufficiently good doc comment to skip LLM.
 pub fn has_quality_doc_comment(metadata: &serde_json::Map<String, serde_json::Value>) -> bool {
-    let Some(doc) = metadata.get("doc_comment").and_then(serde_json::Value::as_str) else {
+    let Some(doc) = metadata
+        .get("doc_comment")
+        .and_then(serde_json::Value::as_str)
+    else {
         return false;
     };
 
@@ -139,8 +142,7 @@ mod tests {
         meta.insert(
             "doc_comment".to_string(),
             serde_json::Value::String(
-                "Validates the user token and returns the authenticated user profile."
-                    .to_string(),
+                "Validates the user token and returns the authenticated user profile.".to_string(),
             ),
         );
         assert!(has_quality_doc_comment(&meta));

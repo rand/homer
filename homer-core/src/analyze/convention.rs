@@ -18,8 +18,8 @@ use crate::config::HomerConfig;
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, NodeFilter, NodeKind};
 
-use super::traits::Analyzer;
 use super::AnalyzeStats;
+use super::traits::Analyzer;
 
 #[derive(Debug)]
 pub struct ConventionAnalyzer {
@@ -84,7 +84,13 @@ impl Analyzer for ConventionAnalyzer {
 
         // Validate agent rules against actual patterns
         let agent_rules = validate_agent_rules(&self.repo_path, &naming);
-        store_result(store, root_id, AnalysisKind::AgentRuleValidation, &agent_rules).await?;
+        store_result(
+            store,
+            root_id,
+            AnalysisKind::AgentRuleValidation,
+            &agent_rules,
+        )
+        .await?;
         stats.results_stored += 1;
 
         stats.duration = start.elapsed();
@@ -165,9 +171,7 @@ async fn analyze_naming(store: &dyn HomerStore) -> crate::error::Result<NamingRe
         .first()
         .map_or("unknown", |c| c.convention.as_str())
         .to_string();
-    let adherence = conventions
-        .first()
-        .map_or(0.0, |c| c.percentage / 100.0);
+    let adherence = conventions.first().map_or(0.0, |c| c.percentage / 100.0);
 
     let mut top_prefixes: Vec<_> = prefix_counts.into_iter().collect();
     top_prefixes.sort_by(|a, b| b.1.cmp(&a.1));
@@ -187,10 +191,7 @@ async fn analyze_naming(store: &dyn HomerStore) -> crate::error::Result<NamingRe
 }
 
 fn leaf_name(qualified: &str) -> &str {
-    qualified
-        .rsplit("::")
-        .next()
-        .unwrap_or(qualified)
+    qualified.rsplit("::").next().unwrap_or(qualified)
 }
 
 fn classify_name(name: &str) -> &'static str {
@@ -233,7 +234,10 @@ fn classify_and_count(
     *counts.entry(convention).or_default() += 1;
 
     // Extract common prefixes (get_, set_, is_, has_, etc.)
-    for prefix in ["get_", "set_", "is_", "has_", "new_", "from_", "to_", "with_", "create_", "delete_", "update_", "find_", "test_", "handle_"] {
+    for prefix in [
+        "get_", "set_", "is_", "has_", "new_", "from_", "to_", "with_", "create_", "delete_",
+        "update_", "find_", "test_", "handle_",
+    ] {
         if name.starts_with(prefix) {
             *prefixes.entry(prefix.to_string()).or_default() += 1;
             break;
@@ -241,7 +245,10 @@ fn classify_and_count(
     }
 
     // Extract common suffixes (Handler, Service, Error, Result, Test, etc.)
-    for suffix in ["_test", "_spec", "_impl", "_handler", "_service", "_error", "_result", "_factory", "_builder", "_config", "_utils"] {
+    for suffix in [
+        "_test", "_spec", "_impl", "_handler", "_service", "_error", "_result", "_factory",
+        "_builder", "_config", "_utils",
+    ] {
         if name.ends_with(suffix) {
             *suffixes.entry(suffix.to_string()).or_default() += 1;
             break;
@@ -339,9 +346,7 @@ async fn analyze_testing(
 }
 
 fn is_source_file(name: &str) -> bool {
-    let ext_list = [
-        ".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java",
-    ];
+    let ext_list = [".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java"];
     ext_list.iter().any(|ext| name.ends_with(ext))
 }
 
@@ -624,7 +629,11 @@ async fn analyze_doc_style(store: &dyn HomerStore) -> crate::error::Result<DocSt
             if doc_data.get("returns").and_then(serde_json::Value::as_bool) == Some(true) {
                 has_return_docs = true;
             }
-            if doc_data.get("examples").and_then(serde_json::Value::as_bool) == Some(true) {
+            if doc_data
+                .get("examples")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
                 has_example_docs = true;
             }
         }
@@ -634,7 +643,12 @@ async fn analyze_doc_style(store: &dyn HomerStore) -> crate::error::Result<DocSt
             .get("language")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
-        detect_doc_patterns_from_lang(lang, &mut has_param_docs, &mut has_return_docs, &mut has_example_docs);
+        detect_doc_patterns_from_lang(
+            lang,
+            &mut has_param_docs,
+            &mut has_return_docs,
+            &mut has_example_docs,
+        );
     }
 
     Ok(DocStyleResult {
@@ -737,13 +751,7 @@ fn validate_agent_rules(repo_path: &Path, naming: &NamingResult) -> AgentRuleRes
             rule_content_found = true;
 
             if let Ok(content) = std::fs::read_to_string(&path) {
-                check_naming_rules(
-                    &content,
-                    candidate,
-                    naming,
-                    &mut validated,
-                    &mut drifted,
-                );
+                check_naming_rules(&content, candidate, naming, &mut validated, &mut drifted);
             }
         }
     }
@@ -783,9 +791,7 @@ fn detect_undocumented_patterns(
         if *count >= 5 {
             patterns.push(UndocumentedPattern {
                 pattern: format!("{prefix}* prefix convention"),
-                description: format!(
-                    "The prefix '{prefix}' is used in {count} identifiers"
-                ),
+                description: format!("The prefix '{prefix}' is used in {count} identifiers"),
             });
         }
     }
@@ -817,7 +823,11 @@ fn check_naming_rules(
             drifted.push(DriftedRule {
                 source: source.to_string(),
                 stated_convention: "snake_case".to_string(),
-                actual_pattern: format!("Dominant: {} ({:.0}%)", naming.dominant, naming.adherence_rate * 100.0),
+                actual_pattern: format!(
+                    "Dominant: {} ({:.0}%)",
+                    naming.dominant,
+                    naming.adherence_rate * 100.0
+                ),
                 adherence_rate: naming
                     .conventions
                     .iter()
@@ -842,7 +852,11 @@ fn check_naming_rules(
             drifted.push(DriftedRule {
                 source: source.to_string(),
                 stated_convention: "camelCase".to_string(),
-                actual_pattern: format!("Dominant: {} ({:.0}%)", naming.dominant, naming.adherence_rate * 100.0),
+                actual_pattern: format!(
+                    "Dominant: {} ({:.0}%)",
+                    naming.dominant,
+                    naming.adherence_rate * 100.0
+                ),
                 adherence_rate: naming
                     .conventions
                     .iter()
@@ -865,9 +879,7 @@ async fn find_root_module(
     let modules = store.find_nodes(&mod_filter).await?;
 
     // Root module is typically "." or the shortest-named module
-    let root = modules
-        .iter()
-        .min_by_key(|m| m.name.len());
+    let root = modules.iter().min_by_key(|m| m.name.len());
 
     Ok(root.map(|m| m.id))
 }
@@ -878,8 +890,9 @@ async fn store_result<T: Serialize>(
     kind: AnalysisKind,
     data: &T,
 ) -> crate::error::Result<()> {
-    let json = serde_json::to_value(data)
-        .map_err(|e| crate::error::HomerError::Render(crate::error::RenderError::Template(e.to_string())))?;
+    let json = serde_json::to_value(data).map_err(|e| {
+        crate::error::HomerError::Render(crate::error::RenderError::Template(e.to_string()))
+    })?;
 
     store
         .store_analysis(&AnalysisResult {
@@ -1019,7 +1032,10 @@ mod tests {
             .get_analysis(root.id, AnalysisKind::TestingPattern)
             .await
             .unwrap();
-        assert!(testing_result.is_some(), "Should have testing pattern result");
+        assert!(
+            testing_result.is_some(),
+            "Should have testing pattern result"
+        );
 
         let test_data = testing_result.unwrap();
         let framework = test_data.data.get("framework").unwrap();

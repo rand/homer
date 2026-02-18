@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::Args;
 
-use homer_core::store::sqlite::SqliteStore;
 use homer_core::store::HomerStore;
+use homer_core::store::sqlite::SqliteStore;
 use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
 
 #[derive(Args, Debug)]
@@ -70,7 +70,12 @@ async fn find_entity(
     }
 
     // Try partial match
-    for kind in [NodeKind::File, NodeKind::Function, NodeKind::Type, NodeKind::Module] {
+    for kind in [
+        NodeKind::File,
+        NodeKind::Function,
+        NodeKind::Type,
+        NodeKind::Module,
+    ] {
         let nodes = db
             .find_nodes(&NodeFilter {
                 kind: Some(kind),
@@ -87,6 +92,7 @@ async fn find_entity(
     Ok(None)
 }
 
+#[allow(clippy::too_many_lines)]
 async fn print_text_metrics(
     db: &SqliteStore,
     node: &homer_core::types::Node,
@@ -99,9 +105,15 @@ async fn print_text_metrics(
     println!();
     println!("Metrics:");
 
-    if let Some(sal) = db.get_analysis(node.id, AnalysisKind::CompositeSalience).await? {
+    if let Some(sal) = db
+        .get_analysis(node.id, AnalysisKind::CompositeSalience)
+        .await?
+    {
         let val = sal.data.get("score").and_then(serde_json::Value::as_f64);
-        let cls = sal.data.get("classification").and_then(serde_json::Value::as_str);
+        let cls = sal
+            .data
+            .get("classification")
+            .and_then(serde_json::Value::as_str);
         if let (Some(v), Some(c)) = (val, cls) {
             println!("  Composite Salience: {v:.2} ({c})");
         }
@@ -116,9 +128,18 @@ async fn print_text_metrics(
     }
 
     if let Some(hits) = db.get_analysis(node.id, AnalysisKind::HITSScore).await? {
-        let hub = hits.data.get("hub_score").and_then(serde_json::Value::as_f64);
-        let auth = hits.data.get("authority_score").and_then(serde_json::Value::as_f64);
-        let cls = hits.data.get("classification").and_then(serde_json::Value::as_str);
+        let hub = hits
+            .data
+            .get("hub_score")
+            .and_then(serde_json::Value::as_f64);
+        let auth = hits
+            .data
+            .get("authority_score")
+            .and_then(serde_json::Value::as_f64);
+        let cls = hits
+            .data
+            .get("classification")
+            .and_then(serde_json::Value::as_str);
         if let (Some(h), Some(a)) = (hub, auth) {
             print!("  HITS: hub={h:.4}, authority={a:.4}");
             if let Some(c) = cls {
@@ -128,27 +149,53 @@ async fn print_text_metrics(
         }
     }
 
-    if let Some(freq) = db.get_analysis(node.id, AnalysisKind::ChangeFrequency).await? {
+    if let Some(freq) = db
+        .get_analysis(node.id, AnalysisKind::ChangeFrequency)
+        .await?
+    {
         if let Some(t) = freq.data.get("total").and_then(serde_json::Value::as_u64) {
             println!("  Change Frequency: {t} total commits");
         }
     }
 
-    if let Some(bus) = db.get_analysis(node.id, AnalysisKind::ContributorConcentration).await? {
-        if let Some(b) = bus.data.get("bus_factor").and_then(serde_json::Value::as_u64) {
+    if let Some(bus) = db
+        .get_analysis(node.id, AnalysisKind::ContributorConcentration)
+        .await?
+    {
+        if let Some(b) = bus
+            .data
+            .get("bus_factor")
+            .and_then(serde_json::Value::as_u64)
+        {
             println!("  Bus Factor: {b}");
         }
     }
 
-    if let Some(stab) = db.get_analysis(node.id, AnalysisKind::StabilityClassification).await? {
-        if let Some(c) = stab.data.get("classification").and_then(serde_json::Value::as_str) {
+    if let Some(stab) = db
+        .get_analysis(node.id, AnalysisKind::StabilityClassification)
+        .await?
+    {
+        if let Some(c) = stab
+            .data
+            .get("classification")
+            .and_then(serde_json::Value::as_str)
+        {
             println!("  Stability: {c}");
         }
     }
 
-    if let Some(comm) = db.get_analysis(node.id, AnalysisKind::CommunityAssignment).await? {
-        let cid = comm.data.get("community_id").and_then(serde_json::Value::as_u64);
-        let aligned = comm.data.get("directory_aligned").and_then(serde_json::Value::as_bool);
+    if let Some(comm) = db
+        .get_analysis(node.id, AnalysisKind::CommunityAssignment)
+        .await?
+    {
+        let cid = comm
+            .data
+            .get("community_id")
+            .and_then(serde_json::Value::as_u64);
+        let aligned = comm
+            .data
+            .get("directory_aligned")
+            .and_then(serde_json::Value::as_bool);
         if let Some(id) = cid {
             print!("  Community: {id}");
             if aligned == Some(false) {
@@ -161,13 +208,13 @@ async fn print_text_metrics(
     Ok(())
 }
 
-async fn print_text_edges(
-    db: &SqliteStore,
-    node: &homer_core::types::Node,
-) -> anyhow::Result<()> {
+async fn print_text_edges(db: &SqliteStore, node: &homer_core::types::Node) -> anyhow::Result<()> {
     let edges = db.get_edges_involving(node.id).await?;
 
-    let call_edges: Vec<_> = edges.iter().filter(|e| e.kind == HyperedgeKind::Calls).collect();
+    let call_edges: Vec<_> = edges
+        .iter()
+        .filter(|e| e.kind == HyperedgeKind::Calls)
+        .collect();
     if !call_edges.is_empty() {
         println!();
         println!("Call Graph:");
@@ -186,7 +233,10 @@ async fn print_text_edges(
         }
     }
 
-    let import_edges: Vec<_> = edges.iter().filter(|e| e.kind == HyperedgeKind::Imports).collect();
+    let import_edges: Vec<_> = edges
+        .iter()
+        .filter(|e| e.kind == HyperedgeKind::Imports)
+        .collect();
     if !import_edges.is_empty() {
         println!();
         println!("Imports:");
@@ -208,10 +258,7 @@ async fn print_text_edges(
     Ok(())
 }
 
-async fn print_json(
-    db: &SqliteStore,
-    node: &homer_core::types::Node,
-) -> anyhow::Result<()> {
+async fn print_json(db: &SqliteStore, node: &homer_core::types::Node) -> anyhow::Result<()> {
     let mut data = serde_json::json!({
         "kind": node.kind.as_str(),
         "name": node.name,

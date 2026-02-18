@@ -17,13 +17,12 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     let repo_path = std::fs::canonicalize(&args.path)
         .with_context(|| format!("Cannot resolve path: {}", args.path.display()))?;
 
-    let db_path = homer_mcp::resolve_db_path(&repo_path)
-        .with_context(|| {
-            format!(
-                "Homer is not initialized in {}. Run `homer init` first.",
-                repo_path.display()
-            )
-        })?;
+    let db_path = homer_mcp::resolve_db_path(&repo_path).with_context(|| {
+        format!(
+            "Homer is not initialized in {}. Run `homer init` first.",
+            repo_path.display()
+        )
+    })?;
 
     match args.transport.as_str() {
         "stdio" => {

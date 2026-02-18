@@ -163,8 +163,7 @@ impl GitHubExtractor {
                 max_number = max_number.max(pr.number);
                 fetched += 1;
 
-                let pr_node_id =
-                    self.store_pull_request(store, stats, pr).await?;
+                let pr_node_id = self.store_pull_request(store, stats, pr).await?;
 
                 if gh_config.include_reviews {
                     if let Err(e) = self
@@ -176,10 +175,7 @@ impl GitHubExtractor {
                 }
 
                 if gh_config.include_comments {
-                    if let Err(e) = self
-                        .fetch_pr_comments(store, pr.number, pr_node_id)
-                        .await
-                    {
+                    if let Err(e) = self.fetch_pr_comments(store, pr.number, pr_node_id).await {
                         debug!(pr = pr.number, error = %e, "Failed to fetch comments");
                     }
                 }
@@ -260,10 +256,7 @@ impl GitHubExtractor {
             for issue_num in refs {
                 let issue_name = format!("Issue#{issue_num}");
                 // Get or create Issue node
-                let issue_id = match store
-                    .get_node_by_name(NodeKind::Issue, &issue_name)
-                    .await?
-                {
+                let issue_id = match store.get_node_by_name(NodeKind::Issue, &issue_name).await? {
                     Some(n) => n.id,
                     None => {
                         store
@@ -333,10 +326,7 @@ impl GitHubExtractor {
             let mut edge_meta = HashMap::new();
             edge_meta.insert("state".to_string(), serde_json::json!(review.state));
             if let Some(submitted) = &review.submitted_at {
-                edge_meta.insert(
-                    "submitted_at".to_string(),
-                    serde_json::json!(submitted),
-                );
+                edge_meta.insert("submitted_at".to_string(), serde_json::json!(submitted));
             }
             if let Some(body) = &review.body {
                 if !body.is_empty() {
@@ -402,10 +392,8 @@ impl GitHubExtractor {
 
         // Fetch current node, add comments to metadata, re-upsert
         if let Some(mut node) = store.get_node(pr_node_id).await? {
-            node.metadata.insert(
-                "comments".to_string(),
-                serde_json::json!(comment_data),
-            );
+            node.metadata
+                .insert("comments".to_string(), serde_json::json!(comment_data));
             node.metadata.insert(
                 "comment_count".to_string(),
                 serde_json::json!(comment_data.len()),
@@ -491,10 +479,7 @@ impl GitHubExtractor {
 
     // ── HTTP Client ─────────────────────────────────────────────────
 
-    async fn api_get<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> crate::error::Result<T> {
+    async fn api_get<T: serde::de::DeserializeOwned>(&self, path: &str) -> crate::error::Result<T> {
         let url = format!("https://api.github.com{path}");
 
         let mut req = self
@@ -595,10 +580,7 @@ async fn ensure_contributor(
     stats: &mut ExtractStats,
     login: &str,
 ) -> crate::error::Result<NodeId> {
-    if let Some(node) = store
-        .get_node_by_name(NodeKind::Contributor, login)
-        .await?
-    {
+    if let Some(node) = store.get_node_by_name(NodeKind::Contributor, login).await? {
         return Ok(node.id);
     }
 
@@ -623,9 +605,15 @@ fn parse_issue_refs(text: &str) -> Vec<u64> {
     let mut refs = Vec::new();
 
     let patterns = [
-        "close ", "closes ", "closed ",
-        "fix ", "fixes ", "fixed ",
-        "resolve ", "resolves ", "resolved ",
+        "close ",
+        "closes ",
+        "closed ",
+        "fix ",
+        "fixes ",
+        "fixed ",
+        "resolve ",
+        "resolves ",
+        "resolved ",
     ];
 
     for pattern in &patterns {

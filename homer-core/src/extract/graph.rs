@@ -61,10 +61,7 @@ impl GraphExtractor {
             };
 
             // Check if this file's extension is included in configured patterns
-            let file_ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let file_ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let is_included = config
                 .extraction
                 .structure
@@ -73,17 +70,14 @@ impl GraphExtractor {
                 .any(|p| p.contains(&format!("*.{file_ext}")));
             if !is_included && !file_ext.is_empty() {
                 // Also check if a language-supported extension is in the patterns
-                let lang_included = lang
-                    .extensions()
-                    .iter()
-                    .any(|ext| {
-                        config
-                            .extraction
-                            .structure
-                            .include_patterns
-                            .iter()
-                            .any(|p| p.contains(&format!("*.{ext}")))
-                    });
+                let lang_included = lang.extensions().iter().any(|ext| {
+                    config
+                        .extraction
+                        .structure
+                        .include_patterns
+                        .iter()
+                        .any(|p| p.contains(&format!("*.{ext}")))
+                });
                 if !lang_included {
                     continue;
                 }
@@ -190,10 +184,7 @@ impl GraphExtractor {
                 if lang.tier() != ResolutionTier::Precise {
                     return None;
                 }
-                let file_ext = file_path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("");
+                let file_ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 let lang_included = lang.extensions().iter().any(|ext| {
                     config
                         .extraction
@@ -218,7 +209,9 @@ impl GraphExtractor {
                 let mut parser = tree_sitter::Parser::new();
                 parser.set_language(&lang.tree_sitter_language()).ok()?;
                 let tree = parser.parse(&source, None)?;
-                lang.build_scope_graph(&tree, &source, file_path).ok().flatten()
+                lang.build_scope_graph(&tree, &source, file_path)
+                    .ok()
+                    .flatten()
             })
             .collect();
 
@@ -236,7 +229,6 @@ impl GraphExtractor {
                     all_enclosing.insert(new_ref, new_func);
                 }
             }
-
         }
 
         let resolved = scope_graph.resolve_all();
@@ -253,10 +245,7 @@ impl GraphExtractor {
 
         // Store high-confidence call edges from scope graph resolution
         for edge in &cg.edges {
-            if let Err(e) = self
-                .store_resolved_call(store, stats, edge)
-                .await
-            {
+            if let Err(e) = self.store_resolved_call(store, stats, edge).await {
                 debug!(error = %e, "Failed to store resolved call edge");
             }
         }
@@ -293,10 +282,7 @@ impl GraphExtractor {
         };
 
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "resolution".to_string(),
-            serde_json::json!("scope_graph"),
-        );
+        metadata.insert("resolution".to_string(), serde_json::json!("scope_graph"));
         if let Some(span) = edge.call_span {
             metadata.insert(
                 "span".to_string(),
@@ -508,9 +494,7 @@ impl GraphExtractor {
 
             // Resolve import target to a file node for proper directed edges.
             // Try target_path first, then fall back to heuristic name matching.
-            let target_node_id = self
-                .resolve_import_target(store, import, file_node)
-                .await;
+            let target_node_id = self.resolve_import_target(store, import, file_node).await;
 
             let members = if let Some(target_id) = target_node_id {
                 // Skip self-imports
@@ -567,10 +551,7 @@ impl GraphExtractor {
                 .strip_prefix(&self.repo_path)
                 .unwrap_or(target_path);
             let rel_str = rel.to_string_lossy();
-            if let Ok(Some(node)) = store
-                .get_node_by_name(NodeKind::File, &rel_str)
-                .await
-            {
+            if let Ok(Some(node)) = store.get_node_by_name(NodeKind::File, &rel_str).await {
                 return Some(node.id);
             }
         }
@@ -584,7 +565,9 @@ impl GraphExtractor {
 
         // 3. Rust super imports: super::foo → parent module
         if import_name.starts_with("super::") {
-            return self.resolve_rust_super_import(store, import_name, file_node).await;
+            return self
+                .resolve_rust_super_import(store, import_name, file_node)
+                .await;
         }
 
         // 4. Python/JS style: dotted or slash paths
@@ -631,9 +614,7 @@ impl GraphExtractor {
 
         // Determine the crate root from the file's path (e.g., "homer-core/src/...")
         let file_name = &file_node.name;
-        let crate_prefix = file_name
-            .find("/src/")
-            .map(|i| &file_name[..i])?;
+        let crate_prefix = file_name.find("/src/").map(|i| &file_name[..i])?;
 
         // Try progressively fewer segments (last segment might be a type name, not a module)
         for take in (1..=segments.len()).rev() {

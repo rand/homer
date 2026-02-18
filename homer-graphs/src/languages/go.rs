@@ -42,7 +42,13 @@ impl LanguageSupport for GoSupport {
         let root = builder.root();
         let mut exported_defs = Vec::new();
 
-        scope_walk(tree.root_node(), source, root, &mut builder, &mut exported_defs);
+        scope_walk(
+            tree.root_node(),
+            source,
+            root,
+            &mut builder,
+            &mut exported_defs,
+        );
 
         for def_id in &exported_defs {
             builder.mark_exported(*def_id);
@@ -290,7 +296,10 @@ fn scope_func_decl(
     };
     let name = node_text(name_node, source);
     let def_id = builder.add_definition(
-        scope, name, Some(node_range(name_node)), Some(SymbolKind::Function),
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Function),
     );
     if is_exported(name) {
         exported.push(def_id);
@@ -317,7 +326,10 @@ fn scope_method_decl(
     };
     let name = node_text(name_node, source);
     let def_id = builder.add_definition(
-        scope, name, Some(node_range(name_node)), Some(SymbolKind::Function),
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Function),
     );
     if is_exported(name) {
         exported.push(def_id);
@@ -330,7 +342,10 @@ fn scope_method_decl(
         if let Some(type_node) = find_type_identifier_recursive(receiver) {
             let type_name = node_text(type_node, source);
             builder.add_reference(
-                scope, type_name, Some(node_range(type_node)), Some(SymbolKind::Type),
+                scope,
+                type_name,
+                Some(node_range(type_node)),
+                Some(SymbolKind::Type),
             );
         }
     }
@@ -361,7 +376,10 @@ fn scope_type_decl(
             if let Some(name_node) = child_by_field(child, "name") {
                 let name = node_text(name_node, source);
                 let def_id = builder.add_definition(
-                    scope, name, Some(node_range(name_node)), Some(SymbolKind::Type),
+                    scope,
+                    name,
+                    Some(node_range(name_node)),
+                    Some(SymbolKind::Type),
                 );
                 if is_exported(name) {
                     exported.push(def_id);
@@ -400,7 +418,10 @@ fn collect_type_members(
             if let Some(name_node) = child_by_field(node, "name") {
                 let name = node_text(name_node, source);
                 builder.add_definition(
-                    scope, name, Some(node_range(name_node)), Some(SymbolKind::Field),
+                    scope,
+                    name,
+                    Some(node_range(name_node)),
+                    Some(SymbolKind::Field),
                 );
             }
         }
@@ -409,7 +430,10 @@ fn collect_type_members(
             if let Some(name_node) = child_by_field(node, "name") {
                 let name = node_text(name_node, source);
                 builder.add_definition(
-                    scope, name, Some(node_range(name_node)), Some(SymbolKind::Function),
+                    scope,
+                    name,
+                    Some(node_range(name_node)),
+                    Some(SymbolKind::Function),
                 );
             }
         }
@@ -462,7 +486,12 @@ fn scope_import(
                 if !pkg.is_empty() {
                     let import_scope = builder.add_import_scope();
                     builder.add_import_reference(import_scope, &pkg, Some(node_range(child)));
-                    builder.add_definition(scope, &pkg, Some(node_range(child)), Some(SymbolKind::Module));
+                    builder.add_definition(
+                        scope,
+                        &pkg,
+                        Some(node_range(child)),
+                        Some(SymbolKind::Module),
+                    );
                 }
             }
             _ => {}
@@ -485,26 +514,26 @@ fn scope_single_import(
     }
 
     // Check for alias: import alias "path"
-    let alias = child_by_field(node, "name")
-        .map(|n| node_text(n, source).to_string());
+    let alias = child_by_field(node, "name").map(|n| node_text(n, source).to_string());
 
     let import_scope = builder.add_import_scope();
     builder.add_import_reference(import_scope, &pkg, Some(node_range(node)));
 
     let local_name = alias.as_deref().unwrap_or(&pkg);
     if local_name != "." && local_name != "_" {
-        builder.add_definition(scope, local_name, Some(node_range(node)), Some(SymbolKind::Module));
+        builder.add_definition(
+            scope,
+            local_name,
+            Some(node_range(node)),
+            Some(SymbolKind::Module),
+        );
     }
 }
 
 /// Extract the package name from a Go import path (last segment).
 fn import_pkg_name(path: &str) -> String {
     let trimmed = path.trim_matches('"');
-    trimmed
-        .rsplit('/')
-        .next()
-        .unwrap_or(trimmed)
-        .to_string()
+    trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
 
 fn scope_call(
@@ -525,7 +554,12 @@ fn scope_call(
         _ => None,
     };
     if let Some(name) = target {
-        builder.add_reference(scope, &name, Some(node_range(func)), Some(SymbolKind::Function));
+        builder.add_reference(
+            scope,
+            &name,
+            Some(node_range(func)),
+            Some(SymbolKind::Function),
+        );
     }
 }
 
@@ -542,7 +576,10 @@ fn scope_var_decl(
             if child.kind() == "identifier" {
                 let name = node_text(child, source);
                 builder.add_definition(
-                    scope, name, Some(node_range(child)), Some(SymbolKind::Variable),
+                    scope,
+                    name,
+                    Some(node_range(child)),
+                    Some(SymbolKind::Variable),
                 );
             }
         }
@@ -555,7 +592,10 @@ fn scope_var_decl(
             if let Some(name_node) = child_by_field(child, "name") {
                 let name = node_text(name_node, source);
                 builder.add_definition(
-                    scope, name, Some(node_range(name_node)), Some(SymbolKind::Variable),
+                    scope,
+                    name,
+                    Some(node_range(name_node)),
+                    Some(SymbolKind::Variable),
                 );
             }
         }
@@ -574,7 +614,10 @@ fn scope_params(
             if let Some(name_node) = child_by_field(child, "name") {
                 let name = node_text(name_node, source);
                 builder.add_definition(
-                    func_scope, name, Some(node_range(name_node)), Some(SymbolKind::Variable),
+                    func_scope,
+                    name,
+                    Some(node_range(name_node)),
+                    Some(SymbolKind::Variable),
                 );
             }
         }
@@ -629,17 +672,25 @@ mod tests {
     }
 
     fn pop_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn push_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -647,8 +698,14 @@ mod tests {
         let sg = build_scope("package main\n\nfunc Greet(name string) {}\nfunc helper() {}\n");
         let defs = pop_symbols(&sg);
         assert!(defs.contains(&"Greet"), "Should have Greet, got: {defs:?}");
-        assert!(defs.contains(&"helper"), "Should have helper, got: {defs:?}");
-        assert!(defs.contains(&"name"), "Should have param name, got: {defs:?}");
+        assert!(
+            defs.contains(&"helper"),
+            "Should have helper, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"name"),
+            "Should have param name, got: {defs:?}"
+        );
     }
 
     #[test]
@@ -672,33 +729,53 @@ mod tests {
     fn scope_graph_type_struct() {
         let sg = build_scope("package main\n\ntype Point struct {\n\tX int\n\tY int\n}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Point"), "Should have type Point, got: {defs:?}");
+        assert!(
+            defs.contains(&"Point"),
+            "Should have type Point, got: {defs:?}"
+        );
         assert!(defs.contains(&"X"), "Should have field X, got: {defs:?}");
         assert!(defs.contains(&"Y"), "Should have field Y, got: {defs:?}");
     }
 
     #[test]
     fn scope_graph_type_interface() {
-        let sg = build_scope("package main\n\ntype Reader interface {\n\tRead(p []byte) (int, error)\n}\n");
+        let sg = build_scope(
+            "package main\n\ntype Reader interface {\n\tRead(p []byte) (int, error)\n}\n",
+        );
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Reader"), "Should have interface Reader, got: {defs:?}");
-        assert!(defs.contains(&"Read"), "Should have method spec Read, got: {defs:?}");
+        assert!(
+            defs.contains(&"Reader"),
+            "Should have interface Reader, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"Read"),
+            "Should have method spec Read, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_method_with_receiver() {
         let sg = build_scope("package main\n\ntype Foo struct{}\n\nfunc (f *Foo) Bar() {}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Bar"), "Should have method Bar, got: {defs:?}");
+        assert!(
+            defs.contains(&"Bar"),
+            "Should have method Bar, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"Foo"), "Should reference receiver type Foo, got: {refs:?}");
+        assert!(
+            refs.contains(&"Foo"),
+            "Should reference receiver type Foo, got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_import_single() {
         let sg = build_scope("package main\n\nimport \"fmt\"\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"fmt"), "Should bind import fmt, got: {defs:?}");
+        assert!(
+            defs.contains(&"fmt"),
+            "Should bind import fmt, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
         assert!(refs.contains(&"fmt"), "Should reference fmt, got: {refs:?}");
     }
@@ -722,14 +799,21 @@ mod tests {
     fn scope_graph_call_expression() {
         let sg = build_scope("package main\n\nfunc foo() {}\nfunc bar() { foo() }\n");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"foo"), "Should reference foo(), got: {refs:?}");
+        assert!(
+            refs.contains(&"foo"),
+            "Should reference foo(), got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_selector_call() {
-        let sg = build_scope("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n");
+        let sg =
+            build_scope("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"Println"), "Should reference Println, got: {refs:?}");
+        assert!(
+            refs.contains(&"Println"),
+            "Should reference Println, got: {refs:?}"
+        );
     }
 
     #[test]
@@ -754,18 +838,27 @@ mod tests {
         let source_a = "package main\n\nfunc Run() {}\n";
         let sg_a = {
             let tree = parse_go(source_a);
-            GoSupport.build_scope_graph(&tree, source_a, Path::new("a.go")).unwrap().unwrap()
+            GoSupport
+                .build_scope_graph(&tree, source_a, Path::new("a.go"))
+                .unwrap()
+                .unwrap()
         };
         let source_b = "package main\n\nfunc Greet() {}\n";
         let sg_b = {
             let tree = parse_go(source_b);
-            GoSupport.build_scope_graph(&tree, source_b, Path::new("b.go")).unwrap().unwrap()
+            GoSupport
+                .build_scope_graph(&tree, source_b, Path::new("b.go"))
+                .unwrap()
+                .unwrap()
         };
 
         // Both files should have their exported functions
         assert!(
             sg_a.export_nodes.iter().any(|&id| {
-                sg_a.nodes.iter().any(|n| n.id == id && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "Run"))
+                sg_a.nodes.iter().any(|n| {
+                    n.id == id
+                        && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "Run")
+                })
             }),
             "a.go should export Run"
         );

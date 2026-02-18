@@ -42,7 +42,13 @@ impl LanguageSupport for JavaSupport {
         let root = builder.root();
         let mut exported_defs = Vec::new();
 
-        scope_walk(tree.root_node(), source, root, &mut builder, &mut exported_defs);
+        scope_walk(
+            tree.root_node(),
+            source,
+            root,
+            &mut builder,
+            &mut exported_defs,
+        );
 
         for def_id in &exported_defs {
             builder.mark_exported(*def_id);
@@ -322,13 +328,19 @@ fn collect_type_refs(
             // e.g. List<String> — reference the outer type name
             if let Some(name_node) = find_child_by_kind(node, "type_identifier") {
                 let name = node_text(name_node, source);
-                builder.add_reference(scope, name, Some(node_range(name_node)), Some(SymbolKind::Type));
+                builder.add_reference(
+                    scope,
+                    name,
+                    Some(node_range(name_node)),
+                    Some(SymbolKind::Type),
+                );
             }
         }
         "scoped_type_identifier" => {
             // e.g. Map.Entry — reference the last segment
             let mut cursor = node.walk();
-            if let Some(last) = node.children(&mut cursor)
+            if let Some(last) = node
+                .children(&mut cursor)
                 .filter(|c| c.kind() == "type_identifier")
                 .last()
             {
@@ -417,10 +429,7 @@ fn scope_import(
         builder.add_import_reference(import_scope, "*", Some(node_range(node)));
     } else {
         // Named import: last segment is the symbol name
-        let symbol = import_path
-            .rsplit('.')
-            .next()
-            .unwrap_or(import_path);
+        let symbol = import_path.rsplit('.').next().unwrap_or(import_path);
 
         let import_scope = builder.add_import_scope();
         builder.add_import_reference(import_scope, symbol, Some(node_range(node)));
@@ -439,7 +448,12 @@ fn scope_call(
         return;
     };
     let name = node_text(name_node, source);
-    builder.add_reference(scope, name, Some(node_range(name_node)), Some(SymbolKind::Function));
+    builder.add_reference(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Function),
+    );
 }
 
 fn scope_params(
@@ -513,63 +527,98 @@ mod tests {
     }
 
     fn pop_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn push_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
     fn scope_graph_class_and_method() {
         let sg = build_scope("public class Foo {\n    public void bar() {}\n}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Foo"), "Should have class Foo, got: {defs:?}");
-        assert!(defs.contains(&"bar"), "Should have method bar, got: {defs:?}");
+        assert!(
+            defs.contains(&"Foo"),
+            "Should have class Foo, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"bar"),
+            "Should have method bar, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_interface() {
         let sg = build_scope("public interface Runnable {\n    void run();\n}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Runnable"), "Should have interface Runnable, got: {defs:?}");
+        assert!(
+            defs.contains(&"Runnable"),
+            "Should have interface Runnable, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_enum() {
         let sg = build_scope("public enum Color { RED, GREEN, BLUE }\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Color"), "Should have enum Color, got: {defs:?}");
+        assert!(
+            defs.contains(&"Color"),
+            "Should have enum Color, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_import_named() {
         let sg = build_scope("import java.util.List;\npublic class Foo {}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"List"), "Import should bind List, got: {defs:?}");
+        assert!(
+            defs.contains(&"List"),
+            "Import should bind List, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"List"), "Import should reference List, got: {refs:?}");
+        assert!(
+            refs.contains(&"List"),
+            "Import should reference List, got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_import_wildcard() {
         let sg = build_scope("import java.util.*;\npublic class Foo {}\n");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"*"), "Wildcard import should reference *, got: {refs:?}");
+        assert!(
+            refs.contains(&"*"),
+            "Wildcard import should reference *, got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_method_params() {
         let sg = build_scope("public class Foo {\n    void bar(String name, int count) {}\n}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"name"), "Should have param name, got: {defs:?}");
-        assert!(defs.contains(&"count"), "Should have param count, got: {defs:?}");
+        assert!(
+            defs.contains(&"name"),
+            "Should have param name, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"count"),
+            "Should have param count, got: {defs:?}"
+        );
     }
 
     #[test]
@@ -577,22 +626,34 @@ mod tests {
         let sg = build_scope("public class Foo {\n    private int x;\n    String name;\n}\n");
         let defs = pop_symbols(&sg);
         assert!(defs.contains(&"x"), "Should have field x, got: {defs:?}");
-        assert!(defs.contains(&"name"), "Should have field name, got: {defs:?}");
+        assert!(
+            defs.contains(&"name"),
+            "Should have field name, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_extends_reference() {
         let sg = build_scope("class Foo extends Bar {}\n");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"Bar"), "Should reference superclass Bar, got: {refs:?}");
+        assert!(
+            refs.contains(&"Bar"),
+            "Should reference superclass Bar, got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_implements_reference() {
         let sg = build_scope("class Foo implements Runnable, Serializable {}\n");
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"Runnable"), "Should ref Runnable, got: {refs:?}");
-        assert!(refs.contains(&"Serializable"), "Should ref Serializable, got: {refs:?}");
+        assert!(
+            refs.contains(&"Runnable"),
+            "Should ref Runnable, got: {refs:?}"
+        );
+        assert!(
+            refs.contains(&"Serializable"),
+            "Should ref Serializable, got: {refs:?}"
+        );
     }
 
     #[test]
@@ -600,15 +661,24 @@ mod tests {
         let source = "public class Foo {\n    void bar() { baz(); }\n    void baz() {}\n}\n";
         let sg = build_scope(source);
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"baz"), "Should reference baz(), got: {refs:?}");
+        assert!(
+            refs.contains(&"baz"),
+            "Should reference baz(), got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_constructor() {
         let sg = build_scope("public class Foo {\n    public Foo(String name) {}\n}\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Foo"), "Should have class Foo, got: {defs:?}");
-        assert!(defs.contains(&"name"), "Should have constructor param, got: {defs:?}");
+        assert!(
+            defs.contains(&"Foo"),
+            "Should have class Foo, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"name"),
+            "Should have constructor param, got: {defs:?}"
+        );
     }
 
     #[test]
@@ -616,7 +686,10 @@ mod tests {
         let sg = build_scope("public class Foo {\n    public void bar() {}\n}\n");
         assert!(
             sg.export_nodes.iter().any(|&id| {
-                sg.nodes.iter().any(|n| n.id == id && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "Foo"))
+                sg.nodes.iter().any(|n| {
+                    n.id == id
+                        && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "Foo")
+                })
             }),
             "public class Foo should be exported"
         );
@@ -638,16 +711,23 @@ mod tests {
     #[test]
     fn scope_graph_cross_file_resolution() {
         // File A imports and uses a class from file B
-        let source_a = "import com.example.Bar;\npublic class Foo {\n    void run() { greet(); }\n}\n";
+        let source_a =
+            "import com.example.Bar;\npublic class Foo {\n    void run() { greet(); }\n}\n";
         let sg_a = {
             let tree = parse_java(source_a);
-            JavaSupport.build_scope_graph(&tree, source_a, Path::new("Foo.java")).unwrap().unwrap()
+            JavaSupport
+                .build_scope_graph(&tree, source_a, Path::new("Foo.java"))
+                .unwrap()
+                .unwrap()
         };
         // File B exports a public class with a greet method
         let source_b = "public class Bar {\n    public void greet() {}\n}\n";
         let sg_b = {
             let tree = parse_java(source_b);
-            JavaSupport.build_scope_graph(&tree, source_b, Path::new("Bar.java")).unwrap().unwrap()
+            JavaSupport
+                .build_scope_graph(&tree, source_b, Path::new("Bar.java"))
+                .unwrap()
+                .unwrap()
         };
 
         let mut scope_graph = ScopeGraph::new();
@@ -655,15 +735,23 @@ mod tests {
         scope_graph.add_file_graph(&sg_b);
         let resolved = scope_graph.resolve_all();
 
-        let cross_file: Vec<_> = resolved.iter()
-            .filter(|r| r.symbol == "Bar" && r.definition_file == std::path::PathBuf::from("Bar.java"))
+        let cross_file: Vec<_> = resolved
+            .iter()
+            .filter(|r| {
+                r.symbol == "Bar" && r.definition_file == std::path::PathBuf::from("Bar.java")
+            })
             .collect();
-        assert!(!cross_file.is_empty(), "import Bar should resolve cross-file, got: {resolved:?}");
+        assert!(
+            !cross_file.is_empty(),
+            "import Bar should resolve cross-file, got: {resolved:?}"
+        );
     }
 
     #[test]
     fn scope_graph_inner_class() {
-        let sg = build_scope("public class Outer {\n    class Inner {\n        void work() {}\n    }\n}\n");
+        let sg = build_scope(
+            "public class Outer {\n    class Inner {\n        void work() {}\n    }\n}\n",
+        );
         let defs = pop_symbols(&sg);
         assert!(defs.contains(&"Outer"), "Should have Outer, got: {defs:?}");
         assert!(defs.contains(&"Inner"), "Should have Inner, got: {defs:?}");

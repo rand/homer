@@ -16,9 +16,7 @@ use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
-use crate::types::{
-    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId,
-};
+use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId};
 
 use super::AnalyzeStats;
 use super::traits::Analyzer;
@@ -117,10 +115,7 @@ async fn compute_centrality_trends(
             .unwrap_or(0.0);
 
         // Build score history: previous scores + current
-        let mut scores = history
-            .get(&sr.node_id)
-            .cloned()
-            .unwrap_or_default();
+        let mut scores = history.get(&sr.node_id).cloned().unwrap_or_default();
         scores.push(current_score);
 
         // Keep last 10 snapshots
@@ -262,11 +257,7 @@ async fn compute_architectural_drift(
         .first()
         .and_then(|r| r.data.get("coupling_ratio_history"))
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(serde_json::Value::as_f64)
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(serde_json::Value::as_f64).collect())
         .unwrap_or_default();
 
     ratio_history.push(coupling_ratio);
@@ -288,9 +279,7 @@ async fn compute_architectural_drift(
 
     // Store as a single architectural drift result.
     // Attach to the first node with a community assignment (project-level metric).
-    let anchor_node = community_results
-        .first()
-        .map_or(NodeId(1), |r| r.node_id);
+    let anchor_node = community_results.first().map_or(NodeId(1), |r| r.node_id);
 
     let result = AnalysisResult {
         id: AnalysisResultId(0),
@@ -335,10 +324,7 @@ async fn enhance_stability(
     let trends: HashMap<NodeId, &str> = trend_results
         .iter()
         .filter_map(|r| {
-            let trend = r
-                .data
-                .get("trend")
-                .and_then(serde_json::Value::as_str)?;
+            let trend = r.data.get("trend").and_then(serde_json::Value::as_str)?;
             Some((r.node_id, trend))
         })
         .collect();
@@ -355,13 +341,12 @@ async fn enhance_stability(
         let trend = trends.get(&sr.node_id).copied().unwrap_or("Stable");
 
         // Upgrade to Declining if centrality is falling and not already ActiveCritical/Volatile
-        let enhanced_class = if trend == "Falling"
-            && !matches!(current_class, "ActiveCritical" | "Volatile")
-        {
-            "Declining"
-        } else {
-            current_class
-        };
+        let enhanced_class =
+            if trend == "Falling" && !matches!(current_class, "ActiveCritical" | "Volatile") {
+                "Declining"
+            } else {
+                current_class
+            };
 
         // Only update if classification changed
         if enhanced_class != current_class {
@@ -404,9 +389,7 @@ mod tests {
     use super::*;
     use crate::config::HomerConfig;
     use crate::store::sqlite::SqliteStore;
-    use crate::types::{
-        Hyperedge, HyperedgeId, HyperedgeMember, Node, NodeKind,
-    };
+    use crate::types::{Hyperedge, HyperedgeId, HyperedgeMember, Node, NodeKind};
     use std::collections::HashMap;
 
     #[test]

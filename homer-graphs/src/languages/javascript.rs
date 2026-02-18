@@ -43,7 +43,12 @@ impl LanguageSupport for JavaScriptSupport {
         let mut module_defs = Vec::new();
 
         super::ecma_scope::walk_scope(
-            tree.root_node(), source, root, &mut builder, &mut module_defs, true,
+            tree.root_node(),
+            source,
+            root,
+            &mut builder,
+            &mut module_defs,
+            true,
         );
 
         for def_id in &module_defs {
@@ -244,17 +249,25 @@ mod tests {
     }
 
     fn pop_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn push_symbols(graph: &FileScopeGraph) -> Vec<&str> {
-        graph.nodes.iter().filter_map(|n| match &n.kind {
-            ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
-            _ => None,
-        }).collect()
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -263,7 +276,10 @@ mod tests {
         let defs = pop_symbols(&sg);
         assert!(defs.contains(&"greet"), "Should have greet, got: {defs:?}");
         assert!(defs.contains(&"Foo"), "Should have Foo, got: {defs:?}");
-        assert!(defs.contains(&"bar"), "Should have method bar, got: {defs:?}");
+        assert!(
+            defs.contains(&"bar"),
+            "Should have method bar, got: {defs:?}"
+        );
     }
 
     #[test]
@@ -279,10 +295,19 @@ mod tests {
     fn scope_graph_arrow_function() {
         let sg = build_scope("const handler = (req, res) => { process(req); };\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"handler"), "Should have handler, got: {defs:?}");
-        assert!(defs.contains(&"req"), "Should have param req, got: {defs:?}");
+        assert!(
+            defs.contains(&"handler"),
+            "Should have handler, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"req"),
+            "Should have param req, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"process"), "Should reference process, got: {refs:?}");
+        assert!(
+            refs.contains(&"process"),
+            "Should reference process, got: {refs:?}"
+        );
     }
 
     #[test]
@@ -303,12 +328,18 @@ mod tests {
         let source_a = "import { greet } from './b';\ngreet();\n";
         let sg_a = {
             let tree = parse_js(source_a);
-            JavaScriptSupport.build_scope_graph(&tree, source_a, Path::new("a.js")).unwrap().unwrap()
+            JavaScriptSupport
+                .build_scope_graph(&tree, source_a, Path::new("a.js"))
+                .unwrap()
+                .unwrap()
         };
         let source_b = "export function greet() {}\n";
         let sg_b = {
             let tree = parse_js(source_b);
-            JavaScriptSupport.build_scope_graph(&tree, source_b, Path::new("b.js")).unwrap().unwrap()
+            JavaScriptSupport
+                .build_scope_graph(&tree, source_b, Path::new("b.js"))
+                .unwrap()
+                .unwrap()
         };
 
         let mut scope_graph = ScopeGraph::new();
@@ -316,9 +347,15 @@ mod tests {
         scope_graph.add_file_graph(&sg_b);
         let resolved = scope_graph.resolve_all();
 
-        let cross_file: Vec<_> = resolved.iter()
-            .filter(|r| r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.js"))
+        let cross_file: Vec<_> = resolved
+            .iter()
+            .filter(|r| {
+                r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.js")
+            })
             .collect();
-        assert!(!cross_file.is_empty(), "Should resolve cross-file, got: {resolved:?}");
+        assert!(
+            !cross_file.is_empty(),
+            "Should resolve cross-file, got: {resolved:?}"
+        );
     }
 }

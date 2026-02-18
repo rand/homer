@@ -3,7 +3,11 @@
 // Sections: Executive Summary, Architecture Diagram, Hotspot Map,
 // Coupling Analysis, Risk Assessment, Documentation Health.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -221,10 +225,7 @@ async fn load_coupling_pairs(
             pairs.push((source.clone(), target.to_string(), conf));
         }
     }
-    pairs.sort_by(|a, b| {
-        b.2.partial_cmp(&a.2)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    pairs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     pairs.dedup_by(|a, b| (a.0 == b.0 && a.1 == b.1) || (a.0 == b.1 && a.1 == b.0));
     pairs.truncate(10);
     Ok(pairs)
@@ -360,13 +361,25 @@ fn render_html(data: &ReportData) -> String {
     writeln!(h, "<html lang=\"en\">").unwrap();
     writeln!(h, "<head>").unwrap();
     writeln!(h, "<meta charset=\"utf-8\">").unwrap();
-    writeln!(h, "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">").unwrap();
+    writeln!(
+        h,
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    )
+    .unwrap();
     writeln!(h, "<title>Homer Report</title>").unwrap();
-    writeln!(h, "<script src=\"https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js\"></script>").unwrap();
+    writeln!(
+        h,
+        "<script src=\"https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js\"></script>"
+    )
+    .unwrap();
     writeln!(h, "<style>{REPORT_CSS}</style>").unwrap();
     writeln!(h, "</head>").unwrap();
     writeln!(h, "<body>").unwrap();
-    writeln!(h, "<script>mermaid.initialize({{startOnLoad:true}});</script>").unwrap();
+    writeln!(
+        h,
+        "<script>mermaid.initialize({{startOnLoad:true}});</script>"
+    )
+    .unwrap();
 
     render_executive_summary(&mut h, data);
     render_architecture_diagram(&mut h, data);

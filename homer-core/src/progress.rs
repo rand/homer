@@ -60,21 +60,18 @@ impl ProgressReporter for IndicatifReporter {
         self.completed.store(0, Ordering::Relaxed);
         if let Some(total) = total {
             self.bar.set_length(total);
-            self.bar
-                .set_style(
-                    ProgressStyle::with_template(
-                        "{spinner:.green} {msg} [{bar:30.cyan/blue}] {pos}/{len} ({eta})",
-                    )
-                    .unwrap()
-                    .progress_chars("=> "),
-                );
+            self.bar.set_style(
+                ProgressStyle::with_template(
+                    "{spinner:.green} {msg} [{bar:30.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("=> "),
+            );
         } else {
             self.bar.set_length(0);
-            self.bar
-                .set_style(
-                    ProgressStyle::with_template("{spinner:.green} {msg} {pos} items")
-                        .unwrap(),
-                );
+            self.bar.set_style(
+                ProgressStyle::with_template("{spinner:.green} {msg} {pos} items").unwrap(),
+            );
         }
         self.bar.set_message(task.to_string());
         self.bar.reset();

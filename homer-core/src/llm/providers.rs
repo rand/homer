@@ -111,10 +111,7 @@ impl LlmProvider for AnthropicProvider {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            return Err(HomerError::Llm(LlmError::ApiError {
-                status,
-                body: text,
-            }));
+            return Err(HomerError::Llm(LlmError::ApiError { status, body: text }));
         }
 
         let result: AnthropicResponse = resp
@@ -269,10 +266,7 @@ impl LlmProvider for OpenAiProvider {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            return Err(HomerError::Llm(LlmError::ApiError {
-                status,
-                body: text,
-            }));
+            return Err(HomerError::Llm(LlmError::ApiError { status, body: text }));
         }
 
         let result: OpenAiResponse = resp
@@ -382,7 +376,12 @@ mod tests {
         let p = create_provider("openai", "gpt-4o", "key", None).unwrap();
         assert_eq!(p.name(), "openai");
 
-        let p = create_provider("custom", "local-model", "key", Some("http://localhost:8080"));
+        let p = create_provider(
+            "custom",
+            "local-model",
+            "key",
+            Some("http://localhost:8080"),
+        );
         assert!(p.is_ok());
 
         let p = create_provider("invalid", "model", "key", None);

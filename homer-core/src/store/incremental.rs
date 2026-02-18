@@ -34,7 +34,9 @@ pub async fn upsert_if_changed(
     node: &Node,
 ) -> crate::error::Result<(NodeId, bool)> {
     // Check existing hash before upserting
-    let existing = store.get_node_by_name(node.kind.clone(), &node.name).await?;
+    let existing = store
+        .get_node_by_name(node.kind.clone(), &node.name)
+        .await?;
     let changed = match &existing {
         Some(e) => e.content_hash != node.content_hash,
         None => true,

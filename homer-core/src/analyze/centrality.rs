@@ -74,10 +74,8 @@ impl InMemoryGraph {
         // Pre-allocate with capacity hints based on edge count
         let estimated_nodes = edges.len(); // ~1 unique node per edge as lower bound
         let mut graph = DiGraph::<NodeId, f64>::with_capacity(estimated_nodes, edges.len());
-        let mut node_to_index: HashMap<NodeId, NodeIndex> =
-            HashMap::with_capacity(estimated_nodes);
-        let mut index_to_node: HashMap<NodeIndex, NodeId> =
-            HashMap::with_capacity(estimated_nodes);
+        let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::with_capacity(estimated_nodes);
+        let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::with_capacity(estimated_nodes);
 
         // Ensure all member nodes are in the graph
         for edge in &edges {
@@ -118,9 +116,7 @@ impl InMemoryGraph {
 
 /// Extract a directed (source, target) pair from hyperedge members.
 /// Uses roles ("caller"/"callee", "source"/"target") or falls back to position ordering.
-fn extract_directed_pair(
-    members: &[crate::types::HyperedgeMember],
-) -> (NodeId, NodeId) {
+fn extract_directed_pair(members: &[crate::types::HyperedgeMember]) -> (NodeId, NodeId) {
     if members.len() < 2 {
         // Degenerate — self-loop or single member
         let id = members.first().map_or(NodeId(0), |m| m.node_id);
@@ -294,11 +290,7 @@ fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
     } else {
         // Deterministic sampling: evenly spaced nodes
         let step = n / k;
-        graph
-            .node_indices()
-            .step_by(step.max(1))
-            .take(k)
-            .collect()
+        graph.node_indices().step_by(step.max(1)).take(k).collect()
     };
 
     for &s in &sources {
@@ -352,11 +344,7 @@ fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
     }
 
     // Normalize: if approximate, scale by n/k
-    let scale = if k < n {
-        n as f64 / k as f64
-    } else {
-        1.0
-    };
+    let scale = if k < n { n as f64 / k as f64 } else { 1.0 };
 
     // Normalize to [0, 1] range
     let max_cb = cb.iter().copied().fold(0.0_f64, f64::max);
@@ -380,10 +368,7 @@ fn compute_hits(graph: &InMemoryGraph, config: &CentralityConfig) -> (Vec<f64>, 
 
 /// HITS algorithm via power iteration.
 /// Returns (`hub_scores`, `authority_scores`), both normalized to [0, 1].
-fn hits_power_iteration(
-    graph: &DiGraph<NodeId, f64>,
-    max_iter: usize,
-) -> (Vec<f64>, Vec<f64>) {
+fn hits_power_iteration(graph: &DiGraph<NodeId, f64>, max_iter: usize) -> (Vec<f64>, Vec<f64>) {
     let n = graph.node_count();
     if n == 0 {
         return (vec![], vec![]);
@@ -803,17 +788,18 @@ fn is_test_file(path: &str) -> bool {
         || name_lower.ends_with(".spec.tsx")
         || name_lower.ends_with("_test.go")
         || (name_lower.ends_with("test.java") || name_lower.ends_with("tests.java"))
-        || path.contains("/tests/") || path.starts_with("tests/")
-        || path.contains("/test/") || path.starts_with("test/")
-        || path.contains("/__tests__/") || path.starts_with("__tests__/")
+        || path.contains("/tests/")
+        || path.starts_with("tests/")
+        || path.contains("/test/")
+        || path.starts_with("test/")
+        || path.contains("/__tests__/")
+        || path.starts_with("__tests__/")
 }
 
 /// Infer the source file that a test file covers.
 fn infer_source_from_test(test_path: &str) -> Option<String> {
     let name = test_path.rsplit('/').next().unwrap_or(test_path);
-    let dir = test_path
-        .rsplit_once('/')
-        .map_or("", |(dir, _)| dir);
+    let dir = test_path.rsplit_once('/').map_or("", |(dir, _)| dir);
 
     // *_test.rs → *.rs (same dir or parent src/)
     if let Some(base) = name.strip_suffix("_test.rs") {
@@ -1199,7 +1185,11 @@ mod tests {
             .get_analyses_by_kind(AnalysisKind::PageRank)
             .await
             .unwrap();
-        assert_eq!(pr_results.len(), 5, "Should have PageRank for each function");
+        assert_eq!(
+            pr_results.len(),
+            5,
+            "Should have PageRank for each function"
+        );
 
         // Verify HITS results
         let hits_results = store
@@ -1213,7 +1203,11 @@ mod tests {
             .get_analyses_by_kind(AnalysisKind::BetweennessCentrality)
             .await
             .unwrap();
-        assert_eq!(bc_results.len(), 4, "Should have betweenness for each module");
+        assert_eq!(
+            bc_results.len(),
+            4,
+            "Should have betweenness for each module"
+        );
 
         // Verify composite salience (should cover nodes from both graphs)
         let salience_results = store
@@ -1249,7 +1243,10 @@ mod tests {
         let config = HomerConfig::default();
         let stats = analyzer.analyze(&store, &config).await.unwrap();
 
-        assert_eq!(stats.results_stored, 0, "Empty graph should produce 0 results");
+        assert_eq!(
+            stats.results_stored, 0,
+            "Empty graph should produce 0 results"
+        );
     }
 
     #[test]

@@ -77,11 +77,14 @@ struct ModuleData {
 
 // ── Data loading ─────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleData> {
     let salience = load_salience_map(db).await?;
-    let stability = load_string_analysis(db, AnalysisKind::StabilityClassification, "classification").await?;
+    let stability =
+        load_string_analysis(db, AnalysisKind::StabilityClassification, "classification").await?;
     let freq = load_u64_analysis(db, AnalysisKind::ChangeFrequency, "total").await?;
-    let bus_factor = load_u64_analysis(db, AnalysisKind::ContributorConcentration, "bus_factor").await?;
+    let bus_factor =
+        load_u64_analysis(db, AnalysisKind::ContributorConcentration, "bus_factor").await?;
 
     let module_files = load_belongs_to(db).await?;
     let (imports_from, imported_by) = load_import_relationships(db).await?;
@@ -89,16 +92,24 @@ async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleDat
     let dir_entities = load_dir_entities(db, &salience).await?;
 
     let files = db
-        .find_nodes(&NodeFilter { kind: Some(NodeKind::File), ..Default::default() })
+        .find_nodes(&NodeFilter {
+            kind: Some(NodeKind::File),
+            ..Default::default()
+        })
         .await?;
     let file_ids: HashMap<String, NodeId> = files.iter().map(|f| (f.name.clone(), f.id)).collect();
 
     // Semantic summaries (from SemanticSummary analysis)
-    let summary_results = db.get_analyses_by_kind(AnalysisKind::SemanticSummary).await?;
-    let summaries: HashMap<_, _> = summary_results.iter().filter_map(|r| {
-        let s = r.data.get("summary").and_then(serde_json::Value::as_str)?;
-        Some((r.node_id, s.to_string()))
-    }).collect();
+    let summary_results = db
+        .get_analyses_by_kind(AnalysisKind::SemanticSummary)
+        .await?;
+    let summaries: HashMap<_, _> = summary_results
+        .iter()
+        .filter_map(|r| {
+            let s = r.data.get("summary").and_then(serde_json::Value::as_str)?;
+            Some((r.node_id, s.to_string()))
+        })
+        .collect();
 
     // Document references per directory
     let doc_edges = db.get_edges_by_kind(HyperedgeKind::Documents).await?;
@@ -123,9 +134,16 @@ async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleDat
     let co_change_edges = db.get_edges_by_kind(HyperedgeKind::CoChanges).await?;
     let mut co_changes: HashMap<String, Vec<String>> = HashMap::new();
     for edge in &co_change_edges {
-        let dirs: Vec<String> = edge.members.iter().filter_map(|m| {
-            file_ids.iter().find(|&(_, id)| *id ==m.node_id).map(|(name, _)| dir_of(name).to_string())
-        }).collect();
+        let dirs: Vec<String> = edge
+            .members
+            .iter()
+            .filter_map(|m| {
+                file_ids
+                    .iter()
+                    .find(|&(_, id)| *id == m.node_id)
+                    .map(|(name, _)| dir_of(name).to_string())
+            })
+            .collect();
         for dir in &dirs {
             for other in &dirs {
                 if dir != other {
@@ -147,10 +165,17 @@ async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleDat
         let commit_member = edge.members.iter().find(|m| m.role == "commit");
         let file_members: Vec<_> = edge.members.iter().filter(|m| m.role == "file").collect();
         if let Some(cm) = commit_member {
-            let commit_name = db.get_node(cm.node_id).await?.map_or_else(|| "?".to_string(), |n| n.name);
+            let commit_name = db
+                .get_node(cm.node_id)
+                .await?
+                .map_or_else(|| "?".to_string(), |n| n.name);
             let date = edge.last_updated.format("%Y-%m-%d").to_string();
             for fm in &file_members {
-                if let Some(fname) = file_ids.iter().find(|&(_, id)| *id ==fm.node_id).map(|(n, _)| n.clone()) {
+                if let Some(fname) = file_ids
+                    .iter()
+                    .find(|&(_, id)| *id == fm.node_id)
+                    .map(|(n, _)| n.clone())
+                {
                     let dir = dir_of(&fname).to_string();
                     let entry = recent_commits.entry(dir).or_default();
                     if entry.len() < 5 {
@@ -165,31 +190,62 @@ async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleDat
     }
 
     // Global naming convention
-    let mod_filter = NodeFilter { kind: Some(NodeKind::Module), ..Default::default() };
+    let mod_filter = NodeFilter {
+        kind: Some(NodeKind::Module),
+        ..Default::default()
+    };
     let modules = db.find_nodes(&mod_filter).await?;
     let root_id = modules.iter().min_by_key(|m| m.name.len()).map(|m| m.id);
     let naming_convention = if let Some(rid) = root_id {
-        db.get_analysis(rid, AnalysisKind::NamingPattern).await?.and_then(|r| {
-            r.data.get("dominant").and_then(serde_json::Value::as_str).map(String::from)
-        })
+        db.get_analysis(rid, AnalysisKind::NamingPattern)
+            .await?
+            .and_then(|r| {
+                r.data
+                    .get("dominant")
+                    .and_then(serde_json::Value::as_str)
+                    .map(String::from)
+            })
     } else {
         None
     };
 
     Ok(ModuleData {
-        salience, stability, freq, bus_factor,
-        module_files, dir_entities, imports_from, imported_by, ext_deps, file_ids,
-        summaries, doc_refs, co_changes, recent_commits, naming_convention,
+        salience,
+        stability,
+        freq,
+        bus_factor,
+        module_files,
+        dir_entities,
+        imports_from,
+        imported_by,
+        ext_deps,
+        file_ids,
+        summaries,
+        doc_refs,
+        co_changes,
+        recent_commits,
+        naming_convention,
     })
 }
 
-async fn load_salience_map(db: &dyn HomerStore) -> crate::error::Result<HashMap<NodeId, (f64, String)>> {
-    let results = db.get_analyses_by_kind(AnalysisKind::CompositeSalience).await?;
-    Ok(results.iter().filter_map(|r| {
-        let val = r.data.get("score")?.as_f64()?;
-        let cls = r.data.get("classification").and_then(serde_json::Value::as_str).unwrap_or("Unknown");
-        Some((r.node_id, (val, cls.to_string())))
-    }).collect())
+async fn load_salience_map(
+    db: &dyn HomerStore,
+) -> crate::error::Result<HashMap<NodeId, (f64, String)>> {
+    let results = db
+        .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+        .await?;
+    Ok(results
+        .iter()
+        .filter_map(|r| {
+            let val = r.data.get("score")?.as_f64()?;
+            let cls = r
+                .data
+                .get("classification")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Unknown");
+            Some((r.node_id, (val, cls.to_string())))
+        })
+        .collect())
 }
 
 async fn load_string_analysis(
@@ -198,10 +254,13 @@ async fn load_string_analysis(
     field: &str,
 ) -> crate::error::Result<HashMap<NodeId, String>> {
     let results = db.get_analyses_by_kind(kind).await?;
-    Ok(results.iter().filter_map(|r| {
-        let val = r.data.get(field).and_then(serde_json::Value::as_str)?;
-        Some((r.node_id, val.to_string()))
-    }).collect())
+    Ok(results
+        .iter()
+        .filter_map(|r| {
+            let val = r.data.get(field).and_then(serde_json::Value::as_str)?;
+            Some((r.node_id, val.to_string()))
+        })
+        .collect())
 }
 
 async fn load_u64_analysis(
@@ -210,13 +269,18 @@ async fn load_u64_analysis(
     field: &str,
 ) -> crate::error::Result<HashMap<NodeId, u64>> {
     let results = db.get_analyses_by_kind(kind).await?;
-    Ok(results.iter().filter_map(|r| {
-        let val = r.data.get(field)?.as_u64()?;
-        Some((r.node_id, val))
-    }).collect())
+    Ok(results
+        .iter()
+        .filter_map(|r| {
+            let val = r.data.get(field)?.as_u64()?;
+            Some((r.node_id, val))
+        })
+        .collect())
 }
 
-async fn load_belongs_to(db: &dyn HomerStore) -> crate::error::Result<HashMap<String, Vec<String>>> {
+async fn load_belongs_to(
+    db: &dyn HomerStore,
+) -> crate::error::Result<HashMap<String, Vec<String>>> {
     let edges = db.get_edges_by_kind(HyperedgeKind::BelongsTo).await?;
     let mut result: HashMap<String, Vec<String>> = HashMap::new();
     for edge in &edges {
@@ -227,7 +291,10 @@ async fn load_belongs_to(db: &dyn HomerStore) -> crate::error::Result<HashMap<St
             let mn = db.get_node(m.node_id).await?;
             if let (Some(cn), Some(mn)) = (cn, mn) {
                 if cn.kind == NodeKind::Module && mn.kind == NodeKind::File {
-                    result.entry(cn.name.clone()).or_default().push(mn.name.clone());
+                    result
+                        .entry(cn.name.clone())
+                        .or_default()
+                        .push(mn.name.clone());
                 }
             }
         }
@@ -261,7 +328,9 @@ async fn load_import_relationships(
     Ok((from, by))
 }
 
-async fn load_external_deps(db: &dyn HomerStore) -> crate::error::Result<HashMap<String, Vec<String>>> {
+async fn load_external_deps(
+    db: &dyn HomerStore,
+) -> crate::error::Result<HashMap<String, Vec<String>>> {
     let edges = db.get_edges_by_kind(HyperedgeKind::DependsOn).await?;
     let mut result: HashMap<String, Vec<String>> = HashMap::new();
     for edge in &edges {
@@ -272,7 +341,10 @@ async fn load_external_deps(db: &dyn HomerStore) -> crate::error::Result<HashMap
             let dn = db.get_node(d.node_id).await?;
             if let (Some(un), Some(dn)) = (un, dn) {
                 if dn.kind == NodeKind::ExternalDep {
-                    result.entry(un.name.clone()).or_default().push(dn.name.clone());
+                    result
+                        .entry(un.name.clone())
+                        .or_default()
+                        .push(dn.name.clone());
                 }
             }
         }
@@ -287,12 +359,24 @@ async fn load_dir_entities(
     let mut result: HashMap<String, Vec<EntityEntry>> = HashMap::new();
 
     for kind in [NodeKind::Function, NodeKind::Type] {
-        let nodes = db.find_nodes(&NodeFilter { kind: Some(kind), ..Default::default() }).await?;
+        let nodes = db
+            .find_nodes(&NodeFilter {
+                kind: Some(kind),
+                ..Default::default()
+            })
+            .await?;
         for node in &nodes {
-            let file = node.metadata.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            let file = node
+                .metadata
+                .get("file")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let dir = dir_of(file).to_string();
             let sal = salience.get(&node.id).cloned();
-            result.entry(dir).or_default().push((node.name.clone(), sal));
+            result
+                .entry(dir)
+                .or_default()
+                .push((node.name.clone(), sal));
         }
     }
     Ok(result)
@@ -306,7 +390,10 @@ async fn render_all_module_contexts(
     repo_root: &Path,
 ) -> crate::error::Result<u32> {
     let modules = db
-        .find_nodes(&NodeFilter { kind: Some(NodeKind::Module), ..Default::default() })
+        .find_nodes(&NodeFilter {
+            kind: Some(NodeKind::Module),
+            ..Default::default()
+        })
         .await?;
 
     if modules.is_empty() {
@@ -333,9 +420,8 @@ async fn render_all_module_contexts(
                 crate::error::HomerError::Extract(crate::error::ExtractError::Io(e))
             })?;
         }
-        std::fs::write(&output_path, content).map_err(|e| {
-            crate::error::HomerError::Extract(crate::error::ExtractError::Io(e))
-        })?;
+        std::fs::write(&output_path, content)
+            .map_err(|e| crate::error::HomerError::Extract(crate::error::ExtractError::Io(e)))?;
         count += 1;
     }
 
@@ -388,26 +474,27 @@ fn render_purpose(out: &mut String, dir: &str, data: &ModuleData) {
                 .collect();
             writeln!(out, "## Purpose").unwrap();
             writeln!(out).unwrap();
-            writeln!(
-                out,
-                "Module containing: {}",
-                top_names.join(", ")
-            )
-            .unwrap();
+            writeln!(out, "Module containing: {}", top_names.join(", ")).unwrap();
             writeln!(out).unwrap();
         }
     }
 }
 
 fn render_key_entities(out: &mut String, dir: &str, data: &ModuleData) {
-    let Some(ents) = data.dir_entities.get(dir) else { return };
-    if ents.is_empty() { return; }
+    let Some(ents) = data.dir_entities.get(dir) else {
+        return;
+    };
+    if ents.is_empty() {
+        return;
+    }
 
     let mut sorted: Vec<_> = ents.iter().collect();
     sorted.sort_by(|a, b| {
         let sa = a.1.as_ref().map_or(0.0, |s| s.0);
         let sb = b.1.as_ref().map_or(0.0, |s| s.0);
-        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0))
+        sb.partial_cmp(&sa)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
     });
 
     writeln!(out, "## Key Entities").unwrap();
@@ -442,7 +529,9 @@ fn render_dep_list(out: &mut String, label: &str, items: Option<&Vec<String>>) {
     let mut unique: Vec<_> = list.iter().collect();
     unique.sort();
     unique.dedup();
-    if unique.is_empty() { return; }
+    if unique.is_empty() {
+        return;
+    }
 
     write!(out, "- **{label}**: ").unwrap();
     let names: Vec<_> = unique.iter().map(|d| format!("`{d}`")).collect();
@@ -450,8 +539,12 @@ fn render_dep_list(out: &mut String, label: &str, items: Option<&Vec<String>>) {
 }
 
 fn render_related_docs(out: &mut String, dir: &str, data: &ModuleData) {
-    let Some(docs) = data.doc_refs.get(dir) else { return };
-    if docs.is_empty() { return; }
+    let Some(docs) = data.doc_refs.get(dir) else {
+        return;
+    };
+    if docs.is_empty() {
+        return;
+    }
 
     writeln!(out, "## Related Documentation").unwrap();
     writeln!(out).unwrap();
@@ -523,11 +616,17 @@ fn render_change_profile(out: &mut String, dir: &str, data: &ModuleData) {
 
 fn render_conventions(out: &mut String, dir: &str, data: &ModuleData) {
     // Show project-wide naming convention as baseline
-    let Some(convention) = &data.naming_convention else { return };
+    let Some(convention) = &data.naming_convention else {
+        return;
+    };
 
     // Check if this directory has any entities that deviate
-    let Some(ents) = data.dir_entities.get(dir) else { return };
-    if ents.is_empty() { return; }
+    let Some(ents) = data.dir_entities.get(dir) else {
+        return;
+    };
+    if ents.is_empty() {
+        return;
+    }
 
     writeln!(out, "## Conventions").unwrap();
     writeln!(out).unwrap();
@@ -536,8 +635,12 @@ fn render_conventions(out: &mut String, dir: &str, data: &ModuleData) {
 }
 
 fn render_recent_changes(out: &mut String, dir: &str, data: &ModuleData) {
-    let Some(commits) = data.recent_commits.get(dir) else { return };
-    if commits.is_empty() { return; }
+    let Some(commits) = data.recent_commits.get(dir) else {
+        return;
+    };
+    if commits.is_empty() {
+        return;
+    }
 
     writeln!(out, "## Recent Significant Changes").unwrap();
     writeln!(out).unwrap();
@@ -649,11 +752,23 @@ mod tests {
 
         let content = std::fs::read_to_string(&ctx_path).unwrap();
         assert!(content.contains("# src"), "Should have module title");
-        assert!(content.contains("## Purpose"), "Should have purpose section: {content}");
-        assert!(content.contains("## Key Entities"), "Should have entities section");
+        assert!(
+            content.contains("## Purpose"),
+            "Should have purpose section: {content}"
+        );
+        assert!(
+            content.contains("## Key Entities"),
+            "Should have entities section"
+        );
         assert!(content.contains("main"), "Should list main function");
-        assert!(content.contains("## Dependencies"), "Should have dependencies section");
-        assert!(content.contains("## Change Profile"), "Should have change profile");
+        assert!(
+            content.contains("## Dependencies"),
+            "Should have dependencies section"
+        );
+        assert!(
+            content.contains("## Change Profile"),
+            "Should have change profile"
+        );
     }
 
     #[tokio::test]
@@ -680,7 +795,10 @@ mod tests {
         renderer.write(&store, &config, tmp.path()).await.unwrap();
 
         let ctx_path = tmp.path().join("empty/.context.md");
-        assert!(!ctx_path.exists(), "Should not create .context.md for empty module");
+        assert!(
+            !ctx_path.exists(),
+            "Should not create .context.md for empty module"
+        );
     }
 
     #[test]

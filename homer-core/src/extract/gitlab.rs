@@ -57,11 +57,7 @@ impl GitLabExtractor {
     }
 
     /// Create with explicit project path (for testing).
-    pub fn new(
-        project_path: String,
-        api_base: String,
-        token: Option<String>,
-    ) -> Self {
+    pub fn new(project_path: String, api_base: String, token: Option<String>) -> Self {
         let display = project_path.replace("%2F", "/");
         Self {
             project_path,
@@ -213,8 +209,7 @@ impl GitLabExtractor {
         stats.nodes_created += 1;
 
         // Authored edge
-        let contrib_id =
-            ensure_contributor(store, stats, &mr.author.username).await?;
+        let contrib_id = ensure_contributor(store, stats, &mr.author.username).await?;
         store
             .upsert_hyperedge(&Hyperedge {
                 id: HyperedgeId(0),
@@ -249,10 +244,7 @@ impl GitLabExtractor {
             let refs = parse_issue_refs(desc);
             for issue_iid in refs {
                 let issue_name = format!("GLIssue#{issue_iid}");
-                let issue_id = match store
-                    .get_node_by_name(NodeKind::Issue, &issue_name)
-                    .await?
-                {
+                let issue_id = match store.get_node_by_name(NodeKind::Issue, &issue_name).await? {
                     Some(n) => n.id,
                     None => {
                         store
@@ -319,8 +311,7 @@ impl GitLabExtractor {
         };
 
         for approver in &approvals.approved_by {
-            let reviewer_id =
-                ensure_contributor(store, stats, &approver.user.username).await?;
+            let reviewer_id = ensure_contributor(store, stats, &approver.user.username).await?;
 
             let mut meta = HashMap::new();
             meta.insert("forge".to_string(), serde_json::json!("gitlab"));
@@ -418,10 +409,7 @@ impl GitLabExtractor {
 
     // ── HTTP Client ─────────────────────────────────────────────────
 
-    async fn api_get<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> crate::error::Result<T> {
+    async fn api_get<T: serde::de::DeserializeOwned>(&self, path: &str) -> crate::error::Result<T> {
         let url = format!("{}{path}", self.api_base);
 
         let mut req = self
@@ -436,9 +424,10 @@ impl GitLabExtractor {
 
         debug!(url = %url, "GitLab API request");
 
-        let resp = req.send().await.map_err(|e| {
-            HomerError::Extract(ExtractError::Git(format!("GitLab API: {e}")))
-        })?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| HomerError::Extract(ExtractError::Git(format!("GitLab API: {e}"))))?;
 
         // Check rate limit headers
         if let Some(remaining) = resp
@@ -460,9 +449,9 @@ impl GitLabExtractor {
             ))));
         }
 
-        resp.json().await.map_err(|e| {
-            HomerError::Extract(ExtractError::Git(format!("Parse response: {e}")))
-        })
+        resp.json()
+            .await
+            .map_err(|e| HomerError::Extract(ExtractError::Git(format!("Parse response: {e}"))))
     }
 }
 
@@ -545,9 +534,15 @@ fn parse_issue_refs(text: &str) -> Vec<u64> {
     let mut refs = Vec::new();
 
     let patterns = [
-        "close ", "closes ", "closed ",
-        "fix ", "fixes ", "fixed ",
-        "resolve ", "resolves ", "resolved ",
+        "close ",
+        "closes ",
+        "closed ",
+        "fix ",
+        "fixes ",
+        "fixed ",
+        "resolve ",
+        "resolves ",
+        "resolved ",
     ];
 
     for pattern in &patterns {
@@ -635,8 +630,7 @@ mod tests {
 
     #[test]
     fn parse_ssh_gitlab_url() {
-        let (base, owner, repo) =
-            parse_gitlab_url("git@gitlab.com:myorg/myrepo.git").unwrap();
+        let (base, owner, repo) = parse_gitlab_url("git@gitlab.com:myorg/myrepo.git").unwrap();
         assert_eq!(base, "https://gitlab.com");
         assert_eq!(owner, "myorg");
         assert_eq!(repo, "myrepo");
@@ -644,8 +638,7 @@ mod tests {
 
     #[test]
     fn parse_https_gitlab_url() {
-        let (base, owner, repo) =
-            parse_gitlab_url("https://gitlab.com/myorg/myrepo.git").unwrap();
+        let (base, owner, repo) = parse_gitlab_url("https://gitlab.com/myorg/myrepo.git").unwrap();
         assert_eq!(base, "https://gitlab.com");
         assert_eq!(owner, "myorg");
         assert_eq!(repo, "myrepo");
@@ -653,8 +646,7 @@ mod tests {
 
     #[test]
     fn parse_https_no_git_suffix() {
-        let (_, owner, repo) =
-            parse_gitlab_url("https://gitlab.com/foo/bar").unwrap();
+        let (_, owner, repo) = parse_gitlab_url("https://gitlab.com/foo/bar").unwrap();
         assert_eq!(owner, "foo");
         assert_eq!(repo, "bar");
     }

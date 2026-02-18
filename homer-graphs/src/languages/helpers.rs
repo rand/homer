@@ -203,7 +203,14 @@ impl ScopeGraphBuilder {
         kind: Option<SymbolKind>,
     ) -> ScopeNodeId {
         let id = self.alloc_id();
-        self.push_node(id, ScopeNodeKind::PopSymbol { symbol: symbol.to_string() }, span, kind);
+        self.push_node(
+            id,
+            ScopeNodeKind::PopSymbol {
+                symbol: symbol.to_string(),
+            },
+            span,
+            kind,
+        );
         self.add_edge(scope, id, 0); // scope → definition
         id
     }
@@ -217,7 +224,14 @@ impl ScopeGraphBuilder {
         kind: Option<SymbolKind>,
     ) -> ScopeNodeId {
         let id = self.alloc_id();
-        self.push_node(id, ScopeNodeKind::PushSymbol { symbol: symbol.to_string() }, span, kind);
+        self.push_node(
+            id,
+            ScopeNodeKind::PushSymbol {
+                symbol: symbol.to_string(),
+            },
+            span,
+            kind,
+        );
         self.add_edge(id, scope, 0); // reference → scope (lookup direction)
         id
     }
@@ -240,7 +254,9 @@ impl ScopeGraphBuilder {
         let id = self.alloc_id();
         self.push_node(
             id,
-            ScopeNodeKind::PushSymbol { symbol: symbol.to_string() },
+            ScopeNodeKind::PushSymbol {
+                symbol: symbol.to_string(),
+            },
             span,
             None,
         );

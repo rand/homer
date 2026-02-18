@@ -42,7 +42,14 @@ impl LanguageSupport for PythonSupport {
         let root = builder.root();
         let mut module_defs = Vec::new();
 
-        walk_scope(tree.root_node(), source, root, &mut builder, &mut module_defs, true);
+        walk_scope(
+            tree.root_node(),
+            source,
+            root,
+            &mut builder,
+            &mut module_defs,
+            true,
+        );
 
         for def_id in &module_defs {
             builder.mark_exported(*def_id);
@@ -315,12 +322,22 @@ fn walk_scope(
                     match def.kind() {
                         "function_definition" => {
                             scope_function_def(
-                                def, source, scope, builder, module_defs, is_module_level,
+                                def,
+                                source,
+                                scope,
+                                builder,
+                                module_defs,
+                                is_module_level,
                             );
                         }
                         _ => {
                             scope_class_def(
-                                def, source, scope, builder, module_defs, is_module_level,
+                                def,
+                                source,
+                                scope,
+                                builder,
+                                module_defs,
+                                is_module_level,
                             );
                         }
                     }
@@ -361,7 +378,12 @@ fn scope_function_def(
         return;
     };
     let name = node_text(name_node, source);
-    let def_id = builder.add_definition(scope, name, Some(node_range(name_node)), Some(SymbolKind::Function));
+    let def_id = builder.add_definition(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Function),
+    );
     if is_module_level {
         module_defs.push(def_id);
     }
@@ -392,7 +414,12 @@ fn scope_class_def(
         return;
     };
     let name = node_text(name_node, source);
-    let def_id = builder.add_definition(scope, name, Some(node_range(name_node)), Some(SymbolKind::Type));
+    let def_id = builder.add_definition(
+        scope,
+        name,
+        Some(node_range(name_node)),
+        Some(SymbolKind::Type),
+    );
     if is_module_level {
         module_defs.push(def_id);
     }
@@ -423,21 +450,25 @@ fn scope_import(
                 let import_scope = builder.add_import_scope();
                 builder.add_import_reference(import_scope, full_name, Some(node_range(child)));
                 let def_id = builder.add_definition(
-                    scope, local_name, Some(node_range(child)), Some(SymbolKind::Module),
+                    scope,
+                    local_name,
+                    Some(node_range(child)),
+                    Some(SymbolKind::Module),
                 );
                 if is_module_level {
                     module_defs.push(def_id);
                 }
             }
             "aliased_import" => {
-                let name = child_by_field(child, "name")
-                    .map_or("", |n| node_text(n, source));
-                let alias = child_by_field(child, "alias")
-                    .map_or(name, |n| node_text(n, source));
+                let name = child_by_field(child, "name").map_or("", |n| node_text(n, source));
+                let alias = child_by_field(child, "alias").map_or(name, |n| node_text(n, source));
                 let import_scope = builder.add_import_scope();
                 builder.add_import_reference(import_scope, name, Some(node_range(child)));
                 let def_id = builder.add_definition(
-                    scope, alias, Some(node_range(child)), Some(SymbolKind::Module),
+                    scope,
+                    alias,
+                    Some(node_range(child)),
+                    Some(SymbolKind::Module),
                 );
                 if is_module_level {
                     module_defs.push(def_id);
@@ -477,10 +508,8 @@ fn scope_from_import(
                 }
             }
             "aliased_import" => {
-                let name = child_by_field(child, "name")
-                    .map_or("", |n| node_text(n, source));
-                let alias = child_by_field(child, "alias")
-                    .map_or(name, |n| node_text(n, source));
+                let name = child_by_field(child, "name").map_or("", |n| node_text(n, source));
+                let alias = child_by_field(child, "alias").map_or(name, |n| node_text(n, source));
                 builder.add_import_reference(import_scope, name, Some(node_range(child)));
                 let def_id = builder.add_definition(scope, alias, Some(node_range(child)), None);
                 if is_module_level {
@@ -510,7 +539,12 @@ fn scope_call(
         _ => None,
     };
     if let Some(name) = target {
-        builder.add_reference(scope, &name, Some(node_range(func)), Some(SymbolKind::Function));
+        builder.add_reference(
+            scope,
+            &name,
+            Some(node_range(func)),
+            Some(SymbolKind::Function),
+        );
     }
 }
 
@@ -527,7 +561,10 @@ fn scope_module_assignment(
     if left.kind() == "identifier" {
         let name = node_text(left, source);
         let def_id = builder.add_definition(
-            scope, name, Some(node_range(left)), Some(SymbolKind::Variable),
+            scope,
+            name,
+            Some(node_range(left)),
+            Some(SymbolKind::Variable),
         );
         module_defs.push(def_id);
     }
@@ -552,7 +589,12 @@ fn scope_params(
             _ => None,
         };
         if let Some(name) = name {
-            builder.add_definition(func_scope, name, Some(node_range(child)), Some(SymbolKind::Variable));
+            builder.add_definition(
+                func_scope,
+                name,
+                Some(node_range(child)),
+                Some(SymbolKind::Variable),
+            );
         }
     }
 }
@@ -651,14 +693,20 @@ from pathlib import Path
     fn scope_graph_function_def_creates_pop_symbol() {
         let sg = build_scope("def hello():\n    pass\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"hello"), "Should have PopSymbol for hello, got: {defs:?}");
+        assert!(
+            defs.contains(&"hello"),
+            "Should have PopSymbol for hello, got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_class_def_creates_pop_symbol() {
         let sg = build_scope("class Greeter:\n    pass\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Greeter"), "Should have PopSymbol for Greeter, got: {defs:?}");
+        assert!(
+            defs.contains(&"Greeter"),
+            "Should have PopSymbol for Greeter, got: {defs:?}"
+        );
     }
 
     #[test]
@@ -666,15 +714,25 @@ from pathlib import Path
         let source = "def foo():\n    pass\nfoo()\n";
         let sg = build_scope(source);
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"foo"), "Should have PushSymbol for foo(), got: {refs:?}");
+        assert!(
+            refs.contains(&"foo"),
+            "Should have PushSymbol for foo(), got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_import_creates_local_binding() {
         let sg = build_scope("import os\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"os"), "import should create PopSymbol for os, got: {defs:?}");
-        let imports: Vec<_> = sg.nodes.iter().filter(|n| matches!(n.kind, ScopeNodeKind::ImportScope)).collect();
+        assert!(
+            defs.contains(&"os"),
+            "import should create PopSymbol for os, got: {defs:?}"
+        );
+        let imports: Vec<_> = sg
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.kind, ScopeNodeKind::ImportScope))
+            .collect();
         assert!(!imports.is_empty(), "Should have ImportScope node");
     }
 
@@ -682,33 +740,54 @@ from pathlib import Path
     fn scope_graph_from_import_creates_local_binding() {
         let sg = build_scope("from pathlib import Path\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"Path"), "from-import should create PopSymbol for Path, got: {defs:?}");
+        assert!(
+            defs.contains(&"Path"),
+            "from-import should create PopSymbol for Path, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"Path"), "from-import should create PushSymbol for cross-file ref, got: {refs:?}");
+        assert!(
+            refs.contains(&"Path"),
+            "from-import should create PushSymbol for cross-file ref, got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_aliased_import() {
         let sg = build_scope("from pathlib import Path as P\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"P"), "aliased import should bind local name P, got: {defs:?}");
+        assert!(
+            defs.contains(&"P"),
+            "aliased import should bind local name P, got: {defs:?}"
+        );
         let refs = push_symbols(&sg);
-        assert!(refs.contains(&"Path"), "aliased import should reference original name Path, got: {refs:?}");
+        assert!(
+            refs.contains(&"Path"),
+            "aliased import should reference original name Path, got: {refs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_params_create_definitions() {
         let sg = build_scope("def greet(name, greeting='hi'):\n    pass\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"name"), "Should have param 'name', got: {defs:?}");
-        assert!(defs.contains(&"greeting"), "Should have param 'greeting', got: {defs:?}");
+        assert!(
+            defs.contains(&"name"),
+            "Should have param 'name', got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"greeting"),
+            "Should have param 'greeting', got: {defs:?}"
+        );
     }
 
     #[test]
     fn scope_graph_module_assignment_exported() {
         let sg = build_scope("MAX_RETRIES = 5\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"MAX_RETRIES"), "Should have PopSymbol for assignment, got: {defs:?}");
+        assert!(
+            defs.contains(&"MAX_RETRIES"),
+            "Should have PopSymbol for assignment, got: {defs:?}"
+        );
         assert!(
             sg.export_nodes.iter().any(|&id| {
                 sg.nodes.iter().any(|n| n.id == id && matches!(&n.kind, ScopeNodeKind::PopSymbol { symbol } if symbol == "MAX_RETRIES"))
@@ -795,7 +874,9 @@ from pathlib import Path
         // The import's PushSymbol("greet") should resolve to b.py's PopSymbol("greet")
         let cross_file: Vec<_> = resolved
             .iter()
-            .filter(|r| r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.py"))
+            .filter(|r| {
+                r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.py")
+            })
             .collect();
         assert!(
             !cross_file.is_empty(),
@@ -807,7 +888,10 @@ from pathlib import Path
     fn scope_graph_decorated_function() {
         let sg = build_scope("@staticmethod\ndef compute():\n    pass\n");
         let defs = pop_symbols(&sg);
-        assert!(defs.contains(&"compute"), "Decorated function should create PopSymbol, got: {defs:?}");
+        assert!(
+            defs.contains(&"compute"),
+            "Decorated function should create PopSymbol, got: {defs:?}"
+        );
     }
 
     #[test]

@@ -108,8 +108,7 @@ pub fn louvain_full(graph: &InMemoryGraph) -> LouvainResult {
         }
 
         // Phase 1: local moves on current (possibly contracted) graph
-        let (community, improved) =
-            louvain_phase1(&current_adj, current_n, current_total_weight);
+        let (community, improved) = louvain_phase1(&current_adj, current_n, current_total_weight);
 
         if !improved && levels > 0 {
             break;
@@ -173,11 +172,7 @@ pub fn louvain_full(graph: &InMemoryGraph) -> LouvainResult {
 }
 
 /// Louvain Phase 1: greedy local moves. Returns `(community assignment, did_improve)`.
-fn louvain_phase1(
-    adj: &AdjList,
-    n: usize,
-    total_weight: f64,
-) -> (Vec<u32>, bool) {
+fn louvain_phase1(adj: &AdjList, n: usize, total_weight: f64) -> (Vec<u32>, bool) {
     let mut community: Vec<u32> = (0..n).map(|i| i as u32).collect();
 
     // Compute node weights (sum of incident edge weights)
@@ -274,11 +269,7 @@ fn louvain_phase1(
 /// Returns (new adjacency, number of super-nodes, total weight).
 /// Self-loops (intra-community edges) are preserved — they represent internal
 /// cohesion and are essential for correct modularity computation in later passes.
-fn contract_graph(
-    adj: &AdjList,
-    community: &[u32],
-    _n: usize,
-) -> (AdjList, usize, f64) {
+fn contract_graph(adj: &AdjList, community: &[u32], _n: usize) -> (AdjList, usize, f64) {
     let num_communities = community.iter().copied().max().map_or(0, |m| m + 1) as usize;
 
     // Build super-node adjacency: aggregate edge weights between communities
@@ -320,12 +311,7 @@ fn contract_graph(
 }
 
 /// Compute modularity Q for a given community assignment.
-fn compute_modularity(
-    community: &[u32],
-    adj: &AdjList,
-    n: usize,
-    total_weight: f64,
-) -> f64 {
+fn compute_modularity(community: &[u32], adj: &AdjList, n: usize, total_weight: f64) -> f64 {
     if total_weight == 0.0 {
         return 0.0;
     }
@@ -389,11 +375,7 @@ pub fn modularity_contributions<S: BuildHasher>(
     }
 
     if total_weight == 0.0 {
-        return graph
-            .graph
-            .node_indices()
-            .map(|idx| (idx, 0.0))
-            .collect();
+        return graph.graph.node_indices().map(|idx| (idx, 0.0)).collect();
     }
 
     let m2 = 2.0 * total_weight;
@@ -545,8 +527,7 @@ impl Analyzer for CommunityAnalyzer {
         let mut stats = AnalyzeStats::default();
 
         // Load import graph for community detection
-        let import_graph =
-            InMemoryGraph::from_store(store, HyperedgeKind::Imports).await?;
+        let import_graph = InMemoryGraph::from_store(store, HyperedgeKind::Imports).await?;
 
         if import_graph.node_count() == 0 {
             info!("No import graph data, skipping community detection");
@@ -882,8 +863,13 @@ mod tests {
                 .and_then(serde_json::Value::as_str)
                 .unwrap();
             assert!(
-                ["StableCore", "ActiveCritical", "ReliableBackground", "Volatile"]
-                    .contains(&cls),
+                [
+                    "StableCore",
+                    "ActiveCritical",
+                    "ReliableBackground",
+                    "Volatile"
+                ]
+                .contains(&cls),
                 "Invalid stability: {cls}"
             );
         }

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::Args;
 
-use homer_core::store::sqlite::SqliteStore;
 use homer_core::store::HomerStore;
+use homer_core::store::sqlite::SqliteStore;
 use homer_core::types::{AnalysisKind, NodeFilter, NodeKind};
 
 #[derive(Args, Debug)]

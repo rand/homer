@@ -7,8 +7,8 @@ use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::convention::ConventionAnalyzer;
-use crate::analyze::temporal::TemporalAnalyzer;
 use crate::analyze::task_pattern::TaskPatternAnalyzer;
+use crate::analyze::temporal::TemporalAnalyzer;
 use crate::analyze::traits::Analyzer;
 use crate::config::HomerConfig;
 use crate::extract::document::DocumentExtractor;
@@ -18,14 +18,14 @@ use crate::extract::gitlab::GitLabExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
+use crate::progress::ProgressReporter;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
-use crate::render::risk_map::RiskMapRenderer;
 use crate::render::report::ReportRenderer;
+use crate::render::risk_map::RiskMapRenderer;
 use crate::render::skills::SkillsRenderer;
 use crate::render::topos_spec::ToposSpecRenderer;
 use crate::render::traits::Renderer;
-use crate::progress::ProgressReporter;
 use crate::store::HomerStore;
 
 /// Result of a full pipeline run.
