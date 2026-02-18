@@ -17,7 +17,7 @@ use tracing::info;
 
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
-use homer_core::types::{AnalysisKind, NodeFilter, NodeKind};
+use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
 
 // ── Tool parameter types ──────────────────────────────────────────
 
@@ -46,6 +46,27 @@ pub struct RiskParams {
     /// File path relative to repo root
     #[schemars(description = "File path relative to repo root")]
     pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CoChangesParams {
+    /// File path to find co-change partners for (omit for top global pairs)
+    #[schemars(
+        description = "File path to find co-change partners for (omit for top global pairs)"
+    )]
+    pub path: Option<String>,
+    /// Maximum co-change pairs to return (default: 10)
+    #[schemars(description = "Maximum co-change pairs to return (default: 10)")]
+    pub top: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConventionsParams {
+    /// Convention category filter
+    #[schemars(
+        description = "Convention type: naming, testing, error_handling, documentation, agent_rules (default: all)"
+    )]
+    pub category: Option<String>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────
@@ -113,6 +134,28 @@ impl HomerMcpServer {
             Err(e) => format!("Error: {e}"),
         }
     }
+
+    #[tool(
+        name = "homer_co_changes",
+        description = "Find files that frequently change together. Use when planning modifications to understand ripple effects."
+    )]
+    async fn co_changes(&self, Parameters(params): Parameters<CoChangesParams>) -> String {
+        match self.do_co_changes(params).await {
+            Ok(s) => s,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(
+        name = "homer_conventions",
+        description = "Get project conventions (naming, testing, error handling, documentation). Use to understand and follow established patterns."
+    )]
+    async fn conventions(&self, Parameters(params): Parameters<ConventionsParams>) -> String {
+        match self.do_conventions(params).await {
+            Ok(s) => s,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
 }
 
 impl ServerHandler for HomerMcpServer {
@@ -121,7 +164,8 @@ impl ServerHandler for HomerMcpServer {
             instructions: Some(
                 "Homer MCP server — codebase intelligence tools for AI agents. \
                  Use homer_query to look up entities, homer_graph for centrality metrics, \
-                 and homer_risk to assess modification risk."
+                 homer_risk to assess modification risk, homer_co_changes to find files \
+                 that change together, and homer_conventions to understand project patterns."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -271,6 +315,163 @@ impl HomerMcpServer {
         risk["risk_level"] = serde_json::json!(compute_risk_level(&risk));
 
         serde_json::to_string_pretty(&risk).map_err(|e| format!("JSON error: {e}"))
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    async fn do_co_changes(&self, params: CoChangesParams) -> Result<String, String> {
+        let top_n = params.top.unwrap_or(10) as usize;
+
+        // Validate file path first (before querying edges)
+        let target_node_id = if let Some(ref path) = params.path {
+            let node = self
+                .store
+                .get_node_by_name(NodeKind::File, path)
+                .await
+                .map_err(|e| format!("Store error: {e}"))?;
+            match node {
+                Some(n) => Some(n.id),
+                None => {
+                    return Ok(format!("File '{path}' not found in Homer database"));
+                }
+            }
+        } else {
+            None
+        };
+
+        let edges = self
+            .store
+            .get_edges_by_kind(HyperedgeKind::CoChanges)
+            .await
+            .map_err(|e| format!("Store error: {e}"))?;
+
+        if edges.is_empty() {
+            return Ok(r#"{"count": 0, "results": [], "note": "No co-change data. Run `homer update` first."}"#.to_string());
+        }
+
+        let filtered: Vec<_> = if let Some(target) = target_node_id {
+            edges
+                .iter()
+                .filter(|e| e.members.iter().any(|m| m.node_id == target))
+                .collect()
+        } else {
+            edges.iter().collect()
+        };
+
+        let mut scored: Vec<_> = filtered.iter().map(|e| (e, e.confidence)).collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut results = Vec::new();
+        for (edge, confidence) in scored.iter().take(top_n) {
+            let mut member_names = Vec::new();
+            for member in &edge.members {
+                let name = self
+                    .store
+                    .get_node(member.node_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map_or_else(|| format!("node:{}", member.node_id.0), |n| n.name);
+                member_names.push(name);
+            }
+
+            let mut entry = serde_json::json!({
+                "files": member_names,
+                "confidence": confidence,
+            });
+
+            if let Some(co_occ) = edge.metadata.get("co_occurrences") {
+                entry["co_occurrences"] = co_occ.clone();
+            }
+            if let Some(support) = edge.metadata.get("support") {
+                entry["support"] = support.clone();
+            }
+
+            results.push(entry);
+        }
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "count": results.len(),
+            "results": results,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
+    }
+
+    async fn do_conventions(&self, params: ConventionsParams) -> Result<String, String> {
+        let kinds: Vec<(AnalysisKind, &str)> = match params.category.as_deref() {
+            Some("naming") => vec![(AnalysisKind::NamingPattern, "naming")],
+            Some("testing") => vec![(AnalysisKind::TestingPattern, "testing")],
+            Some("error_handling") => {
+                vec![(AnalysisKind::ErrorHandlingPattern, "error_handling")]
+            }
+            Some("documentation") => {
+                vec![(AnalysisKind::DocumentationStylePattern, "documentation")]
+            }
+            Some("agent_rules") => vec![(AnalysisKind::AgentRuleValidation, "agent_rules")],
+            Some(other) => {
+                return Ok(format!(
+                    "Unknown category '{other}'. Use: naming, testing, error_handling, documentation, agent_rules"
+                ));
+            }
+            None => vec![
+                (AnalysisKind::NamingPattern, "naming"),
+                (AnalysisKind::TestingPattern, "testing"),
+                (AnalysisKind::ErrorHandlingPattern, "error_handling"),
+                (AnalysisKind::DocumentationStylePattern, "documentation"),
+                (AnalysisKind::AgentRuleValidation, "agent_rules"),
+            ],
+        };
+
+        let mut categories = serde_json::Map::new();
+
+        for (kind, label) in &kinds {
+            let analyses = self
+                .store
+                .get_analyses_by_kind(kind.clone())
+                .await
+                .map_err(|e| format!("Store error: {e}"))?;
+
+            if analyses.is_empty() {
+                continue;
+            }
+
+            // Aggregate per-file convention data into a project-wide summary
+            let mut patterns: Vec<serde_json::Value> = Vec::new();
+            for analysis in &analyses {
+                let node_name = self
+                    .store
+                    .get_node(analysis.node_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map_or_else(|| format!("node:{}", analysis.node_id.0), |n| n.name);
+
+                patterns.push(serde_json::json!({
+                    "file": node_name,
+                    "data": analysis.data,
+                }));
+            }
+
+            categories.insert(
+                (*label).to_string(),
+                serde_json::json!({
+                    "count": patterns.len(),
+                    "patterns": patterns,
+                }),
+            );
+        }
+
+        if categories.is_empty() {
+            return Ok(
+                r#"{"count": 0, "categories": {}, "note": "No convention data. Run `homer update` first."}"#
+                    .to_string(),
+            );
+        }
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "count": categories.len(),
+            "categories": categories,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
     }
 }
 
@@ -422,5 +623,65 @@ mod tests {
             .unwrap();
 
         assert!(result.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn server_co_changes_empty_store() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_co_changes(CoChangesParams {
+                path: None,
+                top: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("\"count\": 0"));
+    }
+
+    #[tokio::test]
+    async fn server_co_changes_missing_file() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_co_changes(CoChangesParams {
+                path: Some("nonexistent.rs".to_string()),
+                top: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn server_conventions_empty_store() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_conventions(ConventionsParams { category: None })
+            .await
+            .unwrap();
+
+        assert!(result.contains("\"count\": 0"));
+    }
+
+    #[tokio::test]
+    async fn server_conventions_unknown_category() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_conventions(ConventionsParams {
+                category: Some("bogus".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("Unknown category"));
     }
 }

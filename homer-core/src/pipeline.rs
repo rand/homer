@@ -457,6 +457,43 @@ impl HomerPipeline {
         }
     }
 
+    /// All known renderer names and their stage labels.
+    pub const ALL_RENDERER_NAMES: &[&str] = &[
+        "agents-md",
+        "module-ctx",
+        "risk-map",
+        "skills",
+        "report",
+        "topos-spec",
+    ];
+
+    /// Run only the named renderers against an existing store.
+    ///
+    /// Returns a `PipelineResult` with only the rendering fields populated.
+    #[instrument(skip_all)]
+    pub async fn run_renderers(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        renderer_names: &[&str],
+    ) -> crate::error::Result<PipelineResult> {
+        let start = Instant::now();
+        let mut result = PipelineResult {
+            extract_nodes: 0,
+            extract_edges: 0,
+            analysis_results: 0,
+            artifacts_written: 0,
+            errors: Vec::new(),
+            duration: std::time::Duration::ZERO,
+        };
+
+        self.run_selected_renderers(store, config, renderer_names, &mut result)
+            .await;
+
+        result.duration = start.elapsed();
+        Ok(result)
+    }
+
     #[instrument(skip_all)]
     async fn run_rendering(
         &self,
@@ -464,29 +501,37 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
+        self.run_selected_renderers(store, config, Self::ALL_RENDERER_NAMES, result)
+            .await;
+    }
+
+    async fn run_selected_renderers(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        names: &[&str],
+        result: &mut PipelineResult,
+    ) {
         let path = &self.repo_path;
 
-        // Run all renderers concurrently — they are independent of each other
-        let (agents, ctx, risk, skills, report, topos) = tokio::join!(
-            AgentsMdRenderer.write(store, config, path),
-            ModuleContextRenderer.write(store, config, path),
-            RiskMapRenderer.write(store, config, path),
-            SkillsRenderer.write(store, config, path),
-            ReportRenderer.write(store, config, path),
-            ToposSpecRenderer.write(store, config, path),
-        );
+        for name in names {
+            let (stage, renderer): (&str, Box<dyn Renderer>) = match *name {
+                "agents-md" => ("render:agents_md", Box::new(AgentsMdRenderer)),
+                "module-ctx" => ("render:module_context", Box::new(ModuleContextRenderer)),
+                "risk-map" => ("render:risk_map", Box::new(RiskMapRenderer)),
+                "skills" => ("render:skills", Box::new(SkillsRenderer)),
+                "report" => ("render:report", Box::new(ReportRenderer)),
+                "topos-spec" => ("render:topos_spec", Box::new(ToposSpecRenderer)),
+                unknown => {
+                    result.errors.push(PipelineError {
+                        stage: "render",
+                        message: format!("Unknown renderer: {unknown}"),
+                    });
+                    continue;
+                }
+            };
 
-        let outcomes: [(&str, crate::error::Result<()>); 6] = [
-            ("render:agents_md", agents),
-            ("render:module_context", ctx),
-            ("render:risk_map", risk),
-            ("render:skills", skills),
-            ("render:report", report),
-            ("render:topos_spec", topos),
-        ];
-
-        for (stage, outcome) in outcomes {
-            match outcome {
+            match renderer.write(store, config, path).await {
                 Ok(()) => result.artifacts_written += 1,
                 Err(e) => {
                     warn!(stage, error = %e, "Renderer failed");
