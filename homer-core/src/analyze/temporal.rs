@@ -481,7 +481,7 @@ mod tests {
             .await
             .unwrap();
 
-        let community = crate::analyze::community::CommunityAnalyzer::default();
+        let community = crate::analyze::community::CommunityAnalyzer;
         community
             .analyze(store, &HomerConfig::default())
             .await

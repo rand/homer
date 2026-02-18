@@ -1117,6 +1117,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn bus_factor_80_threshold() {
         // 3 authors: A=60%, B=25%, C=15% of 20 commits
         // With 80% threshold: need A+B (85%) → bus_factor = 2
@@ -1251,6 +1252,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn seed_and_grow_ternary_co_change() {
         // 3 files (A, B, C) always change together across 5 commits.
         // The seed-and-grow algorithm should produce a single ternary group.
@@ -1443,6 +1445,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn doc_freshness_detects_stale() {
         // File with documentation updated 60 days ago, but 4 commits since then
         let store = SqliteStore::in_memory().unwrap();

@@ -1523,7 +1523,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn render_agent_intelligence_sections() {
+        use crate::analyze::traits::Analyzer as _;
+
         let store = SqliteStore::in_memory().unwrap();
 
         // Create file node and module.
@@ -1640,7 +1643,6 @@ mod tests {
         // Run task pattern analyzer.
         let config = HomerConfig::default();
         let analyzer = crate::analyze::task_pattern::TaskPatternAnalyzer;
-        use crate::analyze::traits::Analyzer as _;
         analyzer.analyze(&store, &config).await.unwrap();
 
         // Verify analyses were stored.
@@ -1682,6 +1684,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn render_architecture_and_documents() {
         use crate::types::{AnalysisResult, AnalysisResultId};
 

@@ -1364,6 +1364,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn salience_includes_code_size_and_test_presence() {
         let store = SqliteStore::in_memory().unwrap();
 
@@ -1476,8 +1477,8 @@ mod tests {
             code_size > 0.0,
             "code_size should be > 0 for file with size_bytes, got {code_size}"
         );
-        assert_eq!(
-            test_presence, 1.0,
+        assert!(
+            (test_presence - 1.0).abs() < f64::EPSILON,
             "test_presence should be 1.0 since auth_test.rs covers auth.rs"
         );
     }

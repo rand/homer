@@ -548,6 +548,7 @@ mod tests {
     use crate::types::{Hyperedge, HyperedgeId, HyperedgeMember, Node};
     use std::collections::HashMap;
 
+    #[allow(clippy::too_many_lines)]
     async fn setup_prompt_data(store: &SqliteStore) -> (NodeId, NodeId, NodeId) {
         // Create file nodes.
         let file_a = store
@@ -699,7 +700,7 @@ mod tests {
         let ref_count = hs
             .data
             .get("reference_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         assert_eq!(ref_count, 3, "Should have 3 references from 3 sessions");
     }
@@ -726,7 +727,7 @@ mod tests {
         let count = ch
             .data
             .get("correction_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         assert!(count > 0, "Should have corrections");
     }

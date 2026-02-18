@@ -1012,7 +1012,7 @@ mod tests {
 
         assert_eq!(contribs.len(), 3);
         // All in same community with dense edges → positive contributions
-        for (_, &c) in &contribs {
+        for &c in contribs.values() {
             assert!(c >= 0.0, "Contribution should be non-negative, got {c}");
         }
     }

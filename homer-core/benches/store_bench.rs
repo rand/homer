@@ -13,19 +13,19 @@ fn bench_bulk_insert_nodes(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut group = c.benchmark_group("store_insert_nodes");
 
-    for count in [100, 1_000, 5_000] {
+    for count in [100_u32, 1_000, 5_000] {
         group.bench_with_input(BenchmarkId::new("count", count), &count, |b, &n| {
             b.iter(|| {
                 rt.block_on(async {
                     let store = SqliteStore::in_memory().unwrap();
                     let now = Utc::now();
-                    for i in 0..n {
+                    for i in 0..u64::from(n) {
                         store
                             .upsert_node(&Node {
                                 id: NodeId(0),
                                 kind: NodeKind::File,
                                 name: format!("src/file_{i}.rs"),
-                                content_hash: Some(i as u64),
+                                content_hash: Some(i),
                                 last_extracted: now,
                                 metadata: HashMap::new(),
                             })
@@ -46,13 +46,13 @@ fn bench_node_lookup(c: &mut Criterion) {
     let store = rt.block_on(async {
         let store = SqliteStore::in_memory().unwrap();
         let now = Utc::now();
-        for i in 0..1_000 {
+        for i in 0_u64..1_000 {
             store
                 .upsert_node(&Node {
                     id: NodeId(0),
                     kind: NodeKind::Function,
                     name: format!("src/mod_{}.rs::func_{}", i / 10, i),
-                    content_hash: Some(i as u64),
+                    content_hash: Some(i),
                     last_extracted: now,
                     metadata: HashMap::new(),
                 })

@@ -849,7 +849,7 @@ mod tests {
         let deleted: u32 = old_counts
             .values()
             .filter(|&&v| v > 0)
-            .map(|&v| v as u32)
+            .map(|&v| u32::try_from(v).unwrap_or(0))
             .sum();
 
         // "line2" deleted, "line2_modified" and "line4" added

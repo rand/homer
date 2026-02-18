@@ -14,7 +14,7 @@ fn build_synthetic_graph(node_count: usize, edge_factor: usize) -> DiGraph<NodeI
     let mut graph = DiGraph::<NodeId, f64>::with_capacity(node_count, node_count * edge_factor);
 
     for i in 0..node_count {
-        graph.add_node(NodeId(i as i64));
+        graph.add_node(NodeId(i64::try_from(i).expect("node count fits in i64")));
     }
 
     // Use several prime multipliers to create edges
@@ -71,6 +71,7 @@ fn bench_betweenness(c: &mut Criterion) {
     // Approximate betweenness at larger scales
     for node_count in [5_000, 10_000] {
         let graph = build_synthetic_graph(node_count, 3);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
         let k = (node_count as f64).sqrt() as usize;
 
         group.bench_with_input(

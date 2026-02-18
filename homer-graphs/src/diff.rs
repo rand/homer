@@ -146,6 +146,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::similar_names)]
     fn make_call(caller: &str, callee: &str) -> HeuristicCall {
         HeuristicCall {
             caller: caller.to_string(),

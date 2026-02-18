@@ -8,21 +8,25 @@ use rayon::prelude::*;
 use homer_graphs::LanguageRegistry;
 
 fn generate_rust_source(functions: usize) -> String {
+    use std::fmt::Write;
     let mut src = String::new();
     for i in 0..functions {
-        src.push_str(&format!(
+        let _ = write!(
+            src,
             "/// Doc comment for function {i}.\nfn func_{i}(x: i32) -> i32 {{\n    helper_{i}(x + 1)\n}}\n\n"
-        ));
+        );
     }
     src
 }
 
 fn generate_python_source(functions: usize) -> String {
+    use std::fmt::Write;
     let mut src = String::new();
     for i in 0..functions {
-        src.push_str(&format!(
+        let _ = write!(
+            src,
             "def func_{i}(x):\n    \"\"\"Doc for func_{i}.\"\"\"\n    return helper_{i}(x + 1)\n\n"
-        ));
+        );
     }
     src
 }

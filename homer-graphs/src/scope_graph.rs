@@ -404,12 +404,12 @@ impl ScopeGraph {
 mod tests {
     use super::*;
 
+    #[allow(clippy::similar_names)]
     fn make_file_graph(path: &str, nodes: Vec<ScopeNode>, edges: Vec<ScopeEdge>) -> FileScopeGraph {
         let root = nodes
             .iter()
             .find(|n| matches!(n.kind, ScopeNodeKind::Root))
-            .map(|n| n.id)
-            .unwrap_or(ScopeNodeId(0));
+            .map_or(ScopeNodeId(0), |n| n.id);
         let exports = nodes
             .iter()
             .filter(|n| matches!(n.kind, ScopeNodeKind::ExportScope))
@@ -494,10 +494,11 @@ mod tests {
         let resolved = sg.resolve_all();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].symbol, "foo");
-        assert_eq!(resolved[0].confidence, 1.0);
+        assert!((resolved[0].confidence - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
+    #[allow(clippy::similar_names)]
     fn cross_file_resolution() {
         // File A references `bar`, file B defines `bar`.
         // A: Root → PushSymbol("bar") → ImportScope
