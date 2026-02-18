@@ -11,12 +11,12 @@ use std::sync::Arc;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
-use rmcp::{schemars, tool, tool_router, ServerHandler, ServiceExt};
+use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_router};
 use serde::Deserialize;
 use tracing::info;
 
-use homer_core::store::sqlite::SqliteStore;
 use homer_core::store::HomerStore;
+use homer_core::store::sqlite::SqliteStore;
 use homer_core::types::{AnalysisKind, NodeFilter, NodeKind};
 
 // ── Tool parameter types ──────────────────────────────────────────
@@ -243,14 +243,20 @@ impl HomerMcpServer {
             .map_err(|e| format!("Store error: {e}"))?;
 
         let Some(file_node) = node else {
-            return Ok(format!("File '{}' not found in Homer database", params.path));
+            return Ok(format!(
+                "File '{}' not found in Homer database",
+                params.path
+            ));
         };
 
         let mut risk = serde_json::json!({ "file": params.path });
 
         let analyses = [
             (AnalysisKind::ChangeFrequency, "change_frequency"),
-            (AnalysisKind::ContributorConcentration, "contributor_concentration"),
+            (
+                AnalysisKind::ContributorConcentration,
+                "contributor_concentration",
+            ),
             (AnalysisKind::CompositeSalience, "salience"),
             (AnalysisKind::CommunityAssignment, "community"),
             (AnalysisKind::StabilityClassification, "stability"),
@@ -348,11 +354,7 @@ pub async fn serve_stdio(db_path: &std::path::Path) -> Result<(), Box<dyn std::e
 /// Resolve the Homer database path from a repo path.
 pub fn resolve_db_path(repo_path: &std::path::Path) -> Option<PathBuf> {
     let db = repo_path.join(".homer/homer.db");
-    if db.exists() {
-        Some(db)
-    } else {
-        None
-    }
+    if db.exists() { Some(db) } else { None }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────

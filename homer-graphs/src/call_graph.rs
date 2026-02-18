@@ -84,6 +84,68 @@ pub fn project_call_graph<S: BuildHasher>(
     CallGraph { edges }
 }
 
+/// Compute a map from each `PushSymbol` (reference) to its enclosing function
+/// (`PopSymbol` with `SymbolKind::Function`) using span containment.
+///
+/// Returns the map in terms of the file-level `ScopeNodeId`s. Caller should
+/// remap using the `id_map` returned by `ScopeGraph::add_file_graph`.
+pub fn compute_enclosing_functions(
+    file_graph: &crate::scope_graph::FileScopeGraph,
+) -> HashMap<ScopeNodeId, ScopeNodeId> {
+    use crate::scope_graph::ScopeNodeKind;
+
+    // Collect all function definitions with their spans
+    let functions: Vec<_> = file_graph
+        .nodes
+        .iter()
+        .filter(|n| {
+            n.symbol_kind == Some(SymbolKind::Function)
+                && matches!(n.kind, ScopeNodeKind::PopSymbol { .. })
+                && n.span.is_some()
+        })
+        .collect();
+
+    let mut enclosing = HashMap::new();
+
+    for node in &file_graph.nodes {
+        let ScopeNodeKind::PushSymbol { .. } = &node.kind else {
+            continue;
+        };
+        let Some(ref_span) = node.span else {
+            continue;
+        };
+
+        // Find the smallest enclosing function by span containment
+        let mut best: Option<(ScopeNodeId, usize)> = None;
+        for func in &functions {
+            let func_span = func.span.unwrap(); // filtered above
+            if span_contains(func_span, ref_span) {
+                let size = span_size(func_span);
+                if best.is_none_or(|(_, s)| size < s) {
+                    best = Some((func.id, size));
+                }
+            }
+        }
+
+        if let Some((func_id, _)) = best {
+            enclosing.insert(node.id, func_id);
+        }
+    }
+
+    enclosing
+}
+
+fn span_contains(outer: TextRange, inner: TextRange) -> bool {
+    (outer.start_row < inner.start_row
+        || (outer.start_row == inner.start_row && outer.start_col <= inner.start_col))
+        && (outer.end_row > inner.end_row
+            || (outer.end_row == inner.end_row && outer.end_col >= inner.end_col))
+}
+
+fn span_size(span: TextRange) -> usize {
+    (span.end_row - span.start_row + 1) * 1000 + (span.end_col - span.start_col)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]

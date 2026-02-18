@@ -156,7 +156,10 @@ impl ScopeGraph {
     ///
     /// Node IDs in the file subgraph are remapped to globally unique IDs.
     /// Returns the mapping from old IDs to new IDs.
-    pub fn add_file_graph(&mut self, file_graph: &FileScopeGraph) -> HashMap<ScopeNodeId, ScopeNodeId> {
+    pub fn add_file_graph(
+        &mut self,
+        file_graph: &FileScopeGraph,
+    ) -> HashMap<ScopeNodeId, ScopeNodeId> {
         let mut id_map: HashMap<ScopeNodeId, ScopeNodeId> = HashMap::new();
 
         // Allocate new IDs and insert nodes
@@ -238,9 +241,7 @@ impl ScopeGraph {
 
     /// Get all outgoing edges from a node.
     pub fn edges_from(&self, id: ScopeNodeId) -> &[ScopeEdge] {
-        self.edges_from
-            .get(&id)
-            .map_or(&[], Vec::as_slice)
+        self.edges_from.get(&id).map_or(&[], Vec::as_slice)
     }
 
     /// Find all push-symbol nodes (references) in the graph.
@@ -581,14 +582,8 @@ mod tests {
         let resolved = sg.resolve_all();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].symbol, "bar");
-        assert_eq!(
-            resolved[0].reference_file,
-            PathBuf::from("a.rs")
-        );
-        assert_eq!(
-            resolved[0].definition_file,
-            PathBuf::from("b.rs")
-        );
+        assert_eq!(resolved[0].reference_file, PathBuf::from("a.rs"));
+        assert_eq!(resolved[0].definition_file, PathBuf::from("b.rs"));
     }
 
     #[test]

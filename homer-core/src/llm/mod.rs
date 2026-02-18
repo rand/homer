@@ -67,9 +67,7 @@ pub enum AnalysisProvenance {
         confidence: ProvenanceConfidence,
     },
     /// Combined from multiple sources.
-    Composite {
-        sources: Vec<AnalysisProvenance>,
-    },
+    Composite { sources: Vec<AnalysisProvenance> },
 }
 
 /// Confidence level for LLM-derived analysis.

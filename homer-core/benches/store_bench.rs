@@ -7,9 +7,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
-use homer_core::types::{
-    AnalysisKind, AnalysisResult, AnalysisResultId, Node, NodeId, NodeKind,
-};
+use homer_core::types::{AnalysisKind, AnalysisResult, AnalysisResultId, Node, NodeId, NodeKind};
 
 fn bench_bulk_insert_nodes(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();

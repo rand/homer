@@ -1,6 +1,11 @@
+use std::path::{Path, PathBuf};
+
 use tree_sitter::Node;
 
-use crate::{DocCommentData, DocStyle, TextRange};
+use crate::scope_graph::{
+    FileScopeGraph, ScopeEdge, ScopeEdgeId, ScopeNode, ScopeNodeId, ScopeNodeKind,
+};
+use crate::{DocCommentData, DocStyle, SymbolKind, TextRange};
 
 /// Extract the source text for a tree-sitter node.
 pub fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
@@ -135,4 +140,178 @@ pub fn hash_string(s: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+// ── Scope Graph Builder ──────────────────────────────────────────────
+
+/// Builder for constructing `FileScopeGraph` instances from tree-sitter ASTs.
+///
+/// Manages node/edge ID allocation and provides helpers for common scope graph
+/// patterns (definitions, references, imports, exports).
+pub struct ScopeGraphBuilder {
+    file_path: PathBuf,
+    nodes: Vec<ScopeNode>,
+    edges: Vec<ScopeEdge>,
+    export_node_ids: Vec<ScopeNodeId>,
+    import_node_ids: Vec<ScopeNodeId>,
+    root_scope: ScopeNodeId,
+    next_node_id: u32,
+    next_edge_id: u32,
+}
+
+impl ScopeGraphBuilder {
+    /// Create a new builder with a root scope for the given file.
+    pub fn new(file_path: &Path) -> Self {
+        let root_id = ScopeNodeId(0);
+        let root = ScopeNode {
+            id: root_id,
+            kind: ScopeNodeKind::Root,
+            file_path: file_path.to_path_buf(),
+            span: None,
+            symbol_kind: None,
+        };
+        Self {
+            file_path: file_path.to_path_buf(),
+            nodes: vec![root],
+            edges: vec![],
+            export_node_ids: vec![],
+            import_node_ids: vec![],
+            root_scope: root_id,
+            next_node_id: 1,
+            next_edge_id: 0,
+        }
+    }
+
+    pub fn root(&self) -> ScopeNodeId {
+        self.root_scope
+    }
+
+    /// Add a child scope linked to its parent (for LEGB-style lookup chains).
+    pub fn add_scope(&mut self, parent: ScopeNodeId, span: Option<TextRange>) -> ScopeNodeId {
+        let id = self.alloc_id();
+        self.push_node(id, ScopeNodeKind::Scope, span, None);
+        self.add_edge(id, parent, 1); // child → parent for name lookup
+        id
+    }
+
+    /// Add a definition (`PopSymbol`) reachable from the given scope.
+    pub fn add_definition(
+        &mut self,
+        scope: ScopeNodeId,
+        symbol: &str,
+        span: Option<TextRange>,
+        kind: Option<SymbolKind>,
+    ) -> ScopeNodeId {
+        let id = self.alloc_id();
+        self.push_node(
+            id,
+            ScopeNodeKind::PopSymbol {
+                symbol: symbol.to_string(),
+            },
+            span,
+            kind,
+        );
+        self.add_edge(scope, id, 0); // scope → definition
+        id
+    }
+
+    /// Add a reference (`PushSymbol`) that looks up in the given scope.
+    pub fn add_reference(
+        &mut self,
+        scope: ScopeNodeId,
+        symbol: &str,
+        span: Option<TextRange>,
+        kind: Option<SymbolKind>,
+    ) -> ScopeNodeId {
+        let id = self.alloc_id();
+        self.push_node(
+            id,
+            ScopeNodeKind::PushSymbol {
+                symbol: symbol.to_string(),
+            },
+            span,
+            kind,
+        );
+        self.add_edge(id, scope, 0); // reference → scope (lookup direction)
+        id
+    }
+
+    /// Add an import scope boundary (for cross-file resolution).
+    pub fn add_import_scope(&mut self) -> ScopeNodeId {
+        let id = self.alloc_id();
+        self.push_node(id, ScopeNodeKind::ImportScope, None, None);
+        self.import_node_ids.push(id);
+        id
+    }
+
+    /// Add an import reference: a `PushSymbol` that points to an `ImportScope`.
+    pub fn add_import_reference(
+        &mut self,
+        import_scope: ScopeNodeId,
+        symbol: &str,
+        span: Option<TextRange>,
+    ) -> ScopeNodeId {
+        let id = self.alloc_id();
+        self.push_node(
+            id,
+            ScopeNodeKind::PushSymbol {
+                symbol: symbol.to_string(),
+            },
+            span,
+            None,
+        );
+        self.add_edge(id, import_scope, 0);
+        id
+    }
+
+    /// Mark a `PopSymbol` node as exported (available for cross-file resolution).
+    pub fn mark_exported(&mut self, node_id: ScopeNodeId) {
+        self.export_node_ids.push(node_id);
+    }
+
+    /// Add a raw edge between two nodes.
+    pub fn add_edge(&mut self, source: ScopeNodeId, target: ScopeNodeId, precedence: u8) {
+        let id = ScopeEdgeId(self.next_edge_id);
+        self.next_edge_id += 1;
+        self.edges.push(ScopeEdge {
+            id,
+            source,
+            target,
+            precedence,
+        });
+    }
+
+    /// Consume the builder and produce a `FileScopeGraph`.
+    pub fn build(self) -> FileScopeGraph {
+        FileScopeGraph {
+            file_path: self.file_path,
+            nodes: self.nodes,
+            edges: self.edges,
+            root_scope: self.root_scope,
+            export_nodes: self.export_node_ids,
+            import_nodes: self.import_node_ids,
+        }
+    }
+
+    fn alloc_id(&mut self) -> ScopeNodeId {
+        let id = ScopeNodeId(self.next_node_id);
+        self.next_node_id += 1;
+        id
+    }
+
+    fn push_node(
+        &mut self,
+        id: ScopeNodeId,
+        kind: ScopeNodeKind,
+        span: Option<TextRange>,
+        symbol_kind: Option<SymbolKind>,
+    ) {
+        self.nodes.push(ScopeNode {
+            id,
+            kind,
+            file_path: self.file_path.clone(),
+            span,
+            symbol_kind,
+        });
+    }
 }

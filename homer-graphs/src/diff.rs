@@ -71,10 +71,9 @@ pub fn diff_heuristic_graphs(old: &HeuristicGraph, new: &HeuristicGraph) -> Grap
     for &name in old_names.difference(&new_names) {
         let old_def = old_defs[name];
         // Check if this was renamed: look for a new def at the same span
-        let rename_target = new
-            .definitions
-            .iter()
-            .find(|d| spans_overlap(&d.span, &old_def.span) && !old_names.contains(d.qualified_name.as_str()));
+        let rename_target = new.definitions.iter().find(|d| {
+            spans_overlap(&d.span, &old_def.span) && !old_names.contains(d.qualified_name.as_str())
+        });
 
         if let Some(target) = rename_target {
             renamed_symbols.push((name.to_string(), target.qualified_name.clone()));
@@ -118,8 +117,7 @@ pub fn diff_heuristic_graphs(old: &HeuristicGraph, new: &HeuristicGraph) -> Grap
 /// Check if two spans overlap (same region of source code, suggesting a rename).
 fn spans_overlap(a: &TextRange, b: &TextRange) -> bool {
     // Same start row is a strong signal; within 2 rows is a weaker signal.
-    a.start_row == b.start_row
-        || (a.start_byte < b.end_byte && b.start_byte < a.end_byte)
+    a.start_row == b.start_row || (a.start_byte < b.end_byte && b.start_byte < a.end_byte)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -202,7 +200,10 @@ mod tests {
         };
 
         let diff = diff_heuristic_graphs(&old, &new);
-        assert!(diff.removed_definitions.is_empty(), "Renamed should not appear as removed");
+        assert!(
+            diff.removed_definitions.is_empty(),
+            "Renamed should not appear as removed"
+        );
         assert_eq!(diff.renamed_symbols.len(), 1);
         assert_eq!(diff.renamed_symbols[0].0, "old_name");
         assert_eq!(diff.renamed_symbols[0].1, "new_name");

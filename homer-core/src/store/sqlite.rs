@@ -8,9 +8,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::{HomerError, StoreError};
 use crate::types::{
-    AnalysisKind, AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeKind,
-    HyperedgeMember, Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId,
-    StoreStats,
+    AnalysisKind, AnalysisResult, AnalysisResultId, GraphDiff, Hyperedge, HyperedgeId,
+    HyperedgeKind, HyperedgeMember, Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope,
+    SnapshotId, StoreStats,
 };
 
 use super::HomerStore;
@@ -245,6 +245,84 @@ impl HomerStore for SqliteStore {
         )
         .map_err(StoreError::Sqlite)?;
         Ok(())
+    }
+
+    async fn delete_stale_nodes(&self, older_than: DateTime<Utc>) -> crate::error::Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let cutoff = older_than.to_rfc3339();
+        let count = conn
+            .execute(
+                "DELETE FROM nodes WHERE json_extract(metadata, '$.stale') = 1
+                 AND last_extracted < ?1",
+                params![cutoff],
+            )
+            .map_err(StoreError::Sqlite)?;
+        #[allow(clippy::cast_possible_truncation)]
+        Ok(count as u64)
+    }
+
+    async fn upsert_nodes_batch(&self, nodes: &[Node]) -> crate::error::Result<Vec<NodeId>> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction().map_err(StoreError::Sqlite)?;
+
+        let mut ids = Vec::with_capacity(nodes.len());
+        for chunk in nodes.chunks(1000) {
+            for node in chunk {
+                let kind_str = node.kind.as_str();
+                let metadata_json =
+                    serde_json::to_string(&node.metadata).map_err(StoreError::Serialization)?;
+                let last_extracted = node.last_extracted.to_rfc3339();
+                #[allow(clippy::cast_possible_wrap)]
+                let hash_i64: Option<i64> = node.content_hash.map(|h| h as i64);
+
+                tx.execute(
+                    "INSERT INTO nodes (kind, name, content_hash, last_extracted, metadata)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT(kind, name) DO UPDATE SET
+                        content_hash = excluded.content_hash,
+                        last_extracted = excluded.last_extracted,
+                        metadata = excluded.metadata",
+                    params![kind_str, node.name, hash_i64, last_extracted, metadata_json],
+                )
+                .map_err(StoreError::Sqlite)?;
+
+                let actual_id: i64 = tx
+                    .query_row(
+                        "SELECT id FROM nodes WHERE kind = ?1 AND name = ?2",
+                        params![kind_str, node.name],
+                        |row| row.get(0),
+                    )
+                    .map_err(StoreError::Sqlite)?;
+                ids.push(NodeId(actual_id));
+            }
+        }
+        tx.commit().map_err(StoreError::Sqlite)?;
+        Ok(ids)
+    }
+
+    async fn resolve_canonical(&self, node_id: NodeId) -> crate::error::Result<NodeId> {
+        let conn = self.conn.lock().unwrap();
+        // Follow Aliases edges: the "old" role points to "new" role.
+        // Walk the chain until no more aliases found (max 10 hops to prevent cycles).
+        let mut current = node_id;
+        for _ in 0..10 {
+            let next: Option<i64> = conn
+                .query_row(
+                    "SELECT m_new.node_id FROM hyperedges e
+                     JOIN hyperedge_members m_old ON e.id = m_old.hyperedge_id AND m_old.role = 'old'
+                     JOIN hyperedge_members m_new ON e.id = m_new.hyperedge_id AND m_new.role = 'new'
+                     WHERE e.kind = 'Aliases' AND m_old.node_id = ?1",
+                    params![current.0],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(StoreError::Sqlite)?;
+            match next {
+                Some(id) => current = NodeId(id),
+                None => break,
+            }
+        }
+        Ok(current)
     }
 
     // ── Hyperedge operations ───────────────────────────────────────
@@ -567,7 +645,88 @@ impl HomerStore for SqliteStore {
         )
         .map_err(StoreError::Sqlite)?;
 
-        Ok(SnapshotId(conn.last_insert_rowid()))
+        let snap_id = conn.last_insert_rowid();
+
+        // Record current node and edge membership for diff support
+        conn.execute(
+            "INSERT INTO snapshot_nodes (snapshot_id, node_id) SELECT ?1, id FROM nodes",
+            params![snap_id],
+        )
+        .map_err(StoreError::Sqlite)?;
+        conn.execute(
+            "INSERT INTO snapshot_edges (snapshot_id, edge_id) SELECT ?1, id FROM hyperedges",
+            params![snap_id],
+        )
+        .map_err(StoreError::Sqlite)?;
+
+        Ok(SnapshotId(snap_id))
+    }
+
+    async fn get_snapshot_diff(
+        &self,
+        from: SnapshotId,
+        to: SnapshotId,
+    ) -> crate::error::Result<GraphDiff> {
+        let conn = self.conn.lock().unwrap();
+
+        // Nodes added: in `to` but not in `from`
+        let added_nodes = conn
+            .prepare(
+                "SELECT sn.node_id FROM snapshot_nodes sn
+                 WHERE sn.snapshot_id = ?1
+                   AND sn.node_id NOT IN (SELECT node_id FROM snapshot_nodes WHERE snapshot_id = ?2)",
+            )
+            .map_err(StoreError::Sqlite)?
+            .query_map(params![to.0, from.0], |row| Ok(NodeId(row.get(0)?)))
+            .map_err(StoreError::Sqlite)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::Sqlite)?;
+
+        // Nodes removed: in `from` but not in `to`
+        let removed_nodes = conn
+            .prepare(
+                "SELECT sn.node_id FROM snapshot_nodes sn
+                 WHERE sn.snapshot_id = ?1
+                   AND sn.node_id NOT IN (SELECT node_id FROM snapshot_nodes WHERE snapshot_id = ?2)",
+            )
+            .map_err(StoreError::Sqlite)?
+            .query_map(params![from.0, to.0], |row| Ok(NodeId(row.get(0)?)))
+            .map_err(StoreError::Sqlite)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::Sqlite)?;
+
+        // Edges added
+        let added_edges = conn
+            .prepare(
+                "SELECT se.edge_id FROM snapshot_edges se
+                 WHERE se.snapshot_id = ?1
+                   AND se.edge_id NOT IN (SELECT edge_id FROM snapshot_edges WHERE snapshot_id = ?2)",
+            )
+            .map_err(StoreError::Sqlite)?
+            .query_map(params![to.0, from.0], |row| Ok(HyperedgeId(row.get(0)?)))
+            .map_err(StoreError::Sqlite)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::Sqlite)?;
+
+        // Edges removed
+        let removed_edges = conn
+            .prepare(
+                "SELECT se.edge_id FROM snapshot_edges se
+                 WHERE se.snapshot_id = ?1
+                   AND se.edge_id NOT IN (SELECT edge_id FROM snapshot_edges WHERE snapshot_id = ?2)",
+            )
+            .map_err(StoreError::Sqlite)?
+            .query_map(params![from.0, to.0], |row| Ok(HyperedgeId(row.get(0)?)))
+            .map_err(StoreError::Sqlite)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::Sqlite)?;
+
+        Ok(GraphDiff {
+            added_nodes,
+            removed_nodes,
+            added_edges,
+            removed_edges,
+        })
     }
 
     // ── Metrics ────────────────────────────────────────────────────
@@ -895,6 +1054,106 @@ mod tests {
         // Accept criteria: >10k nodes/sec — individual inserts without
         // transaction batching may be slower, but verifies correctness
         assert!(rate > 1000.0, "Insert rate too slow: {rate:.0} nodes/sec");
+    }
+
+    #[tokio::test]
+    async fn delete_stale_nodes_removes_old_stale() {
+        let store = SqliteStore::in_memory().unwrap();
+        let id = store
+            .upsert_node(&make_test_node(NodeKind::File, "old.rs"))
+            .await
+            .unwrap();
+        store.mark_node_stale(id).await.unwrap();
+
+        // Delete stale nodes older than far future — should delete
+        let deleted = store
+            .delete_stale_nodes(Utc::now() + chrono::Duration::hours(1))
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        assert!(store.get_node(id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn upsert_nodes_batch_transactional() {
+        let store = SqliteStore::in_memory().unwrap();
+        let nodes: Vec<Node> = (0..50)
+            .map(|i| make_test_node(NodeKind::File, &format!("batch/file_{i}.rs")))
+            .collect();
+
+        let ids = store.upsert_nodes_batch(&nodes).await.unwrap();
+        assert_eq!(ids.len(), 50);
+
+        let stats = store.stats().await.unwrap();
+        assert_eq!(stats.total_nodes, 50);
+    }
+
+    #[tokio::test]
+    async fn resolve_canonical_follows_alias_chain() {
+        let store = SqliteStore::in_memory().unwrap();
+        let old_id = store
+            .upsert_node(&make_test_node(NodeKind::File, "old_name.rs"))
+            .await
+            .unwrap();
+        let new_id = store
+            .upsert_node(&make_test_node(NodeKind::File, "new_name.rs"))
+            .await
+            .unwrap();
+
+        // Create alias edge: old -> new
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::Aliases,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: old_id,
+                        role: "old".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: new_id,
+                        role: "new".to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: 1.0,
+                last_updated: Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let resolved = store.resolve_canonical(old_id).await.unwrap();
+        assert_eq!(resolved, new_id);
+
+        // Already canonical — resolves to self
+        let self_resolved = store.resolve_canonical(new_id).await.unwrap();
+        assert_eq!(self_resolved, new_id);
+    }
+
+    #[tokio::test]
+    async fn snapshot_diff_detects_changes() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        // Snapshot 1: one node
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "a.rs"))
+            .await
+            .unwrap();
+        let snap1 = store.create_snapshot("v1").await.unwrap();
+
+        // Add another node, take snapshot 2
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "b.rs"))
+            .await
+            .unwrap();
+        let snap2 = store.create_snapshot("v2").await.unwrap();
+
+        let diff = store.get_snapshot_diff(snap1, snap2).await.unwrap();
+        assert_eq!(diff.added_nodes.len(), 1, "should detect 1 added node");
+        assert!(diff.removed_nodes.is_empty(), "no nodes removed");
     }
 }
 

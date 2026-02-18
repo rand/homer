@@ -243,10 +243,11 @@ async fn minimal_rust_has_centrality_analysis() {
             .unwrap();
         assert!(
             [
-                "ActiveHotspot",
+                "HotCritical",
+                "CriticalSilo",
                 "FoundationalStable",
-                "PeripheralActive",
-                "QuietLeaf"
+                "ActiveLocalized",
+                "Background"
             ]
             .contains(&classification),
             "Invalid salience classification: {classification}"
@@ -420,10 +421,7 @@ async fn pipeline_generates_module_context() {
     let (_result, _store) = run_pipeline_with_store(repo.path()).await;
 
     let src_ctx = repo.path().join("src/.context.md");
-    assert!(
-        src_ctx.exists(),
-        "src/.context.md should be created"
-    );
+    assert!(src_ctx.exists(), "src/.context.md should be created");
 
     let content = std::fs::read_to_string(&src_ctx).unwrap();
     assert!(content.contains("# src"), "Should have module title");

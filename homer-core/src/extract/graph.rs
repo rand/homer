@@ -3,9 +3,14 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info};
+use rayon::prelude::*;
+use tracing::{debug, info, instrument};
 
-use homer_graphs::{HeuristicGraph, LanguageRegistry, SymbolKind as GraphSymbolKind};
+use homer_graphs::scope_graph::{FileScopeGraph, ScopeGraph, ScopeNodeId};
+use homer_graphs::{
+    HeuristicGraph, LanguageRegistry, ResolutionTier, SymbolKind as GraphSymbolKind,
+    call_graph::{self, project_call_graph},
+};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -30,6 +35,7 @@ impl GraphExtractor {
         }
     }
 
+    #[instrument(skip_all, name = "graph_extract")]
     pub async fn extract(
         &self,
         store: &dyn HomerStore,
@@ -55,10 +61,7 @@ impl GraphExtractor {
             };
 
             // Check if this file's extension is included in configured patterns
-            let file_ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let file_ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let is_included = config
                 .extraction
                 .structure
@@ -67,17 +70,14 @@ impl GraphExtractor {
                 .any(|p| p.contains(&format!("*.{file_ext}")));
             if !is_included && !file_ext.is_empty() {
                 // Also check if a language-supported extension is in the patterns
-                let lang_included = lang
-                    .extensions()
-                    .iter()
-                    .any(|ext| {
-                        config
-                            .extraction
-                            .structure
-                            .include_patterns
-                            .iter()
-                            .any(|p| p.contains(&format!("*.{ext}")))
-                    });
+                let lang_included = lang.extensions().iter().any(|ext| {
+                    config
+                        .extraction
+                        .structure
+                        .include_patterns
+                        .iter()
+                        .any(|p| p.contains(&format!("*.{ext}")))
+                });
                 if !lang_included {
                     continue;
                 }
@@ -95,6 +95,12 @@ impl GraphExtractor {
                 }
             }
         }
+
+        // ── Scope graph resolution pass ──────────────────────────────
+        // Build scope graphs for Precise-tier languages, resolve cross-file
+        // references, and project high-confidence call edges.
+        self.resolve_scope_graphs(store, &mut stats, &file_nodes, config)
+            .await;
 
         // Save graph checkpoint using the git HEAD sha
         if let Ok(Some(git_sha)) = store.get_checkpoint("git_last_sha").await {
@@ -156,6 +162,159 @@ impl GraphExtractor {
             .await?;
         self.store_calls(store, stats, &graph, file_node).await?;
         self.store_imports(store, stats, &graph, file_node).await?;
+
+        Ok(())
+    }
+
+    async fn resolve_scope_graphs(
+        &self,
+        store: &dyn HomerStore,
+        stats: &mut ExtractStats,
+        file_nodes: &[Node],
+        config: &HomerConfig,
+    ) {
+        let mut scope_graph = ScopeGraph::new();
+
+        // Collect eligible files for scope graph building
+        let eligible_files: Vec<(&Node, PathBuf)> = file_nodes
+            .iter()
+            .filter_map(|file_node| {
+                let file_path = self.repo_path.join(&file_node.name);
+                let lang = self.registry.for_file(&file_path)?;
+                if lang.tier() != ResolutionTier::Precise {
+                    return None;
+                }
+                let file_ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                let lang_included = lang.extensions().iter().any(|ext| {
+                    config
+                        .extraction
+                        .structure
+                        .include_patterns
+                        .iter()
+                        .any(|p| p.contains(&format!("*.{ext}")))
+                });
+                if !lang_included && !file_ext.is_empty() {
+                    return None;
+                }
+                Some((file_node, file_path))
+            })
+            .collect();
+
+        // Parallel: read files, parse with tree-sitter, build scope graphs
+        let file_scope_graphs: Vec<FileScopeGraph> = eligible_files
+            .par_iter()
+            .filter_map(|(_, file_path)| {
+                let source = std::fs::read_to_string(file_path).ok()?;
+                let lang = self.registry.for_file(file_path)?;
+                let mut parser = tree_sitter::Parser::new();
+                parser.set_language(&lang.tree_sitter_language()).ok()?;
+                let tree = parser.parse(&source, None)?;
+                lang.build_scope_graph(&tree, &source, file_path)
+                    .ok()
+                    .flatten()
+            })
+            .collect();
+
+        // Merge all file scope graphs and compute enclosing functions
+        let mut all_enclosing: HashMap<ScopeNodeId, ScopeNodeId> = HashMap::new();
+
+        for fsg in &file_scope_graphs {
+            let per_file_enclosing = call_graph::compute_enclosing_functions(fsg);
+            let id_map = scope_graph.add_file_graph(fsg);
+
+            // Remap enclosing function IDs to global IDs
+            for (ref_id, func_id) in &per_file_enclosing {
+                if let (Some(&new_ref), Some(&new_func)) = (id_map.get(ref_id), id_map.get(func_id))
+                {
+                    all_enclosing.insert(new_ref, new_func);
+                }
+            }
+        }
+
+        let resolved = scope_graph.resolve_all();
+        if resolved.is_empty() {
+            return;
+        }
+
+        let cg = project_call_graph(&scope_graph, &resolved, &all_enclosing);
+        info!(
+            resolved_refs = resolved.len(),
+            call_edges = cg.edges.len(),
+            "Scope graph resolution complete"
+        );
+
+        // Store high-confidence call edges from scope graph resolution
+        for edge in &cg.edges {
+            if let Err(e) = self.store_resolved_call(store, stats, edge).await {
+                debug!(error = %e, "Failed to store resolved call edge");
+            }
+        }
+    }
+
+    async fn store_resolved_call(
+        &self,
+        store: &dyn HomerStore,
+        stats: &mut ExtractStats,
+        edge: &call_graph::CallEdge,
+    ) -> crate::error::Result<()> {
+        // Look up source (caller) and target (callee) by their scoped names
+        let src_rel = edge
+            .caller_file
+            .strip_prefix(&self.repo_path)
+            .unwrap_or(&edge.caller_file);
+        let dst_rel = edge
+            .callee_file
+            .strip_prefix(&self.repo_path)
+            .unwrap_or(&edge.callee_file);
+
+        let src_scoped = format!("{}::{}", src_rel.display(), edge.caller_name);
+        let dst_scoped = format!("{}::{}", dst_rel.display(), edge.callee_name);
+
+        let src_node = store
+            .get_node_by_name(NodeKind::Function, &src_scoped)
+            .await?;
+        let dst_node = store
+            .get_node_by_name(NodeKind::Function, &dst_scoped)
+            .await?;
+
+        let (Some(src), Some(dst)) = (src_node, dst_node) else {
+            return Ok(()); // One or both not found in store — skip
+        };
+
+        let mut metadata = HashMap::new();
+        metadata.insert("resolution".to_string(), serde_json::json!("scope_graph"));
+        if let Some(span) = edge.call_span {
+            metadata.insert(
+                "span".to_string(),
+                serde_json::json!({
+                    "start_row": span.start_row,
+                    "start_col": span.start_col,
+                }),
+            );
+        }
+
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::Calls,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: src.id,
+                        role: "caller".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: dst.id,
+                        role: "callee".to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: edge.confidence,
+                last_updated: Utc::now(),
+                metadata,
+            })
+            .await?;
+        stats.edges_created += 1;
 
         Ok(())
     }
@@ -335,9 +494,7 @@ impl GraphExtractor {
 
             // Resolve import target to a file node for proper directed edges.
             // Try target_path first, then fall back to heuristic name matching.
-            let target_node_id = self
-                .resolve_import_target(store, import, file_node)
-                .await;
+            let target_node_id = self.resolve_import_target(store, import, file_node).await;
 
             let members = if let Some(target_id) = target_node_id {
                 // Skip self-imports
@@ -394,10 +551,7 @@ impl GraphExtractor {
                 .strip_prefix(&self.repo_path)
                 .unwrap_or(target_path);
             let rel_str = rel.to_string_lossy();
-            if let Ok(Some(node)) = store
-                .get_node_by_name(NodeKind::File, &rel_str)
-                .await
-            {
+            if let Ok(Some(node)) = store.get_node_by_name(NodeKind::File, &rel_str).await {
                 return Some(node.id);
             }
         }
@@ -411,7 +565,9 @@ impl GraphExtractor {
 
         // 3. Rust super imports: super::foo → parent module
         if import_name.starts_with("super::") {
-            return self.resolve_rust_super_import(store, import_name, file_node).await;
+            return self
+                .resolve_rust_super_import(store, import_name, file_node)
+                .await;
         }
 
         // 4. Python/JS style: dotted or slash paths
@@ -458,9 +614,7 @@ impl GraphExtractor {
 
         // Determine the crate root from the file's path (e.g., "homer-core/src/...")
         let file_name = &file_node.name;
-        let crate_prefix = file_name
-            .find("/src/")
-            .map(|i| &file_name[..i])?;
+        let crate_prefix = file_name.find("/src/").map(|i| &file_name[..i])?;
 
         // Try progressively fewer segments (last segment might be a type name, not a module)
         for take in (1..=segments.len()).rev() {

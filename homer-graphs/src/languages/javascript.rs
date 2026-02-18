@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::scope_graph::FileScopeGraph;
 use crate::{
     DocStyle, HeuristicCall, HeuristicDef, HeuristicGraph, HeuristicImport, ResolutionTier, Result,
     SymbolKind,
@@ -7,7 +8,8 @@ use crate::{
 
 use super::LanguageSupport;
 use super::helpers::{
-    child_by_field, dotted_name, extract_block_doc_comment, node_range, node_text,
+    ScopeGraphBuilder, child_by_field, dotted_name, extract_block_doc_comment, node_range,
+    node_text,
 };
 
 #[derive(Debug)]
@@ -23,11 +25,37 @@ impl LanguageSupport for JavaScriptSupport {
     }
 
     fn tier(&self) -> ResolutionTier {
-        ResolutionTier::Heuristic
+        ResolutionTier::Precise
     }
 
     fn tree_sitter_language(&self) -> tree_sitter::Language {
         tree_sitter_javascript::LANGUAGE.into()
+    }
+
+    fn build_scope_graph(
+        &self,
+        tree: &tree_sitter::Tree,
+        source: &str,
+        path: &Path,
+    ) -> Result<Option<FileScopeGraph>> {
+        let mut builder = ScopeGraphBuilder::new(path);
+        let root = builder.root();
+        let mut module_defs = Vec::new();
+
+        super::ecma_scope::walk_scope(
+            tree.root_node(),
+            source,
+            root,
+            &mut builder,
+            &mut module_defs,
+            true,
+        );
+
+        for def_id in &module_defs {
+            builder.mark_exported(*def_id);
+        }
+
+        Ok(Some(builder.build()))
     }
 
     fn extract_heuristic(
@@ -206,5 +234,128 @@ mod tests {
         assert_eq!(fn_defs.len(), 2);
         assert_eq!(fn_defs[0].name, "greet");
         assert_eq!(fn_defs[1].qualified_name, "Foo.bar");
+    }
+
+    // ── Scope graph tests ──────────────────────────────────────────
+
+    use crate::scope_graph::{ScopeGraph, ScopeNodeKind};
+
+    fn build_scope(source: &str) -> FileScopeGraph {
+        let tree = parse_js(source);
+        JavaScriptSupport
+            .build_scope_graph(&tree, source, Path::new("test.js"))
+            .unwrap()
+            .expect("should produce a scope graph")
+    }
+
+    fn pop_symbols(graph: &FileScopeGraph) -> Vec<&str> {
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PopSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn push_symbols(graph: &FileScopeGraph) -> Vec<&str> {
+        graph
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                ScopeNodeKind::PushSymbol { symbol } => Some(symbol.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scope_graph_function_and_class() {
+        let sg = build_scope("function greet() {}\nclass Foo { bar() {} }\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"greet"), "Should have greet, got: {defs:?}");
+        assert!(defs.contains(&"Foo"), "Should have Foo, got: {defs:?}");
+        assert!(
+            defs.contains(&"bar"),
+            "Should have method bar, got: {defs:?}"
+        );
+    }
+
+    #[test]
+    fn scope_graph_es_module_import() {
+        let sg = build_scope("import { foo } from './bar';\n");
+        let defs = pop_symbols(&sg);
+        assert!(defs.contains(&"foo"), "Should bind foo, got: {defs:?}");
+        let refs = push_symbols(&sg);
+        assert!(refs.contains(&"foo"), "Should reference foo, got: {refs:?}");
+    }
+
+    #[test]
+    fn scope_graph_arrow_function() {
+        let sg = build_scope("const handler = (req, res) => { process(req); };\n");
+        let defs = pop_symbols(&sg);
+        assert!(
+            defs.contains(&"handler"),
+            "Should have handler, got: {defs:?}"
+        );
+        assert!(
+            defs.contains(&"req"),
+            "Should have param req, got: {defs:?}"
+        );
+        let refs = push_symbols(&sg);
+        assert!(
+            refs.contains(&"process"),
+            "Should reference process, got: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn scope_graph_within_file_resolution() {
+        let source = "function helper() {}\nhelper();\n";
+        let sg = build_scope(source);
+        let mut scope_graph = ScopeGraph::new();
+        scope_graph.add_file_graph(&sg);
+        let resolved = scope_graph.resolve_all();
+        assert!(
+            resolved.iter().any(|r| r.symbol == "helper"),
+            "helper() should resolve, got: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn scope_graph_cross_file_resolution() {
+        let source_a = "import { greet } from './b';\ngreet();\n";
+        let sg_a = {
+            let tree = parse_js(source_a);
+            JavaScriptSupport
+                .build_scope_graph(&tree, source_a, Path::new("a.js"))
+                .unwrap()
+                .unwrap()
+        };
+        let source_b = "export function greet() {}\n";
+        let sg_b = {
+            let tree = parse_js(source_b);
+            JavaScriptSupport
+                .build_scope_graph(&tree, source_b, Path::new("b.js"))
+                .unwrap()
+                .unwrap()
+        };
+
+        let mut scope_graph = ScopeGraph::new();
+        scope_graph.add_file_graph(&sg_a);
+        scope_graph.add_file_graph(&sg_b);
+        let resolved = scope_graph.resolve_all();
+
+        let cross_file: Vec<_> = resolved
+            .iter()
+            .filter(|r| {
+                r.symbol == "greet" && r.definition_file == std::path::PathBuf::from("b.js")
+            })
+            .collect();
+        assert!(
+            !cross_file.is_empty(),
+            "Should resolve cross-file, got: {resolved:?}"
+        );
     }
 }

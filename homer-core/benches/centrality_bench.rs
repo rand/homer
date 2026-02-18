@@ -39,15 +39,11 @@ fn bench_pagerank(c: &mut Criterion) {
     for node_count in [1_000, 10_000, 100_000] {
         let graph = build_synthetic_graph(node_count, 3);
 
-        group.bench_with_input(
-            BenchmarkId::new("nodes", node_count),
-            &graph,
-            |b, g| {
-                b.iter(|| {
-                    petgraph::algo::page_rank(g, 0.85, 100);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("nodes", node_count), &graph, |b, g| {
+            b.iter(|| {
+                petgraph::algo::page_rank(g, 0.85, 100);
+            });
+        });
     }
 
     group.finish();
@@ -97,15 +93,11 @@ fn bench_hits(c: &mut Criterion) {
     for node_count in [1_000, 10_000, 100_000] {
         let graph = build_synthetic_graph(node_count, 3);
 
-        group.bench_with_input(
-            BenchmarkId::new("nodes", node_count),
-            &graph,
-            |b, g| {
-                b.iter(|| {
-                    hits_power_iteration(g, 100);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("nodes", node_count), &graph, |b, g| {
+            b.iter(|| {
+                hits_power_iteration(g, 100);
+            });
+        });
     }
 
     group.finish();
@@ -134,11 +126,7 @@ fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
         graph.node_indices().collect()
     } else {
         let step = n / k;
-        graph
-            .node_indices()
-            .step_by(step.max(1))
-            .take(k)
-            .collect()
+        graph.node_indices().step_by(step.max(1)).take(k).collect()
     };
 
     for &s in &sources {
@@ -184,11 +172,7 @@ fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
         }
     }
 
-    let scale = if k < n {
-        n as f64 / k as f64
-    } else {
-        1.0
-    };
+    let scale = if k < n { n as f64 / k as f64 } else { 1.0 };
 
     let max_cb = cb.iter().copied().fold(0.0_f64, f64::max);
     if max_cb > 0.0 {
@@ -199,10 +183,7 @@ fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn hits_power_iteration(
-    graph: &DiGraph<NodeId, f64>,
-    max_iter: usize,
-) -> (Vec<f64>, Vec<f64>) {
+fn hits_power_iteration(graph: &DiGraph<NodeId, f64>, max_iter: usize) -> (Vec<f64>, Vec<f64>) {
     let n = graph.node_count();
     if n == 0 {
         return (vec![], vec![]);

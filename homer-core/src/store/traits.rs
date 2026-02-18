@@ -1,6 +1,8 @@
+use chrono::{DateTime, Utc};
+
 use crate::types::{
-    AnalysisKind, AnalysisResult, Hyperedge, HyperedgeId, HyperedgeKind, Node, NodeFilter, NodeId,
-    NodeKind, SearchHit, SearchScope, SnapshotId, StoreStats,
+    AnalysisKind, AnalysisResult, GraphDiff, Hyperedge, HyperedgeId, HyperedgeKind, Node,
+    NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, StoreStats,
 };
 
 /// The core store abstraction. All pipeline stages read/write through this trait.
@@ -26,6 +28,17 @@ pub trait HomerStore: Send + Sync {
 
     /// Mark a node as stale (soft delete).
     async fn mark_node_stale(&self, id: NodeId) -> crate::error::Result<()>;
+
+    /// Delete nodes marked stale before `older_than`. Returns count deleted.
+    async fn delete_stale_nodes(&self, older_than: DateTime<Utc>) -> crate::error::Result<u64>;
+
+    /// Batch upsert nodes within a single transaction. Returns IDs.
+    async fn upsert_nodes_batch(&self, nodes: &[Node]) -> crate::error::Result<Vec<NodeId>>;
+
+    // ── Entity aliasing ──────────────────────────────────────────
+
+    /// Resolve a node to its canonical (current) identity through alias chains.
+    async fn resolve_canonical(&self, node_id: NodeId) -> crate::error::Result<NodeId>;
 
     // ── Hyperedge operations ───────────────────────────────────────
 
@@ -101,6 +114,13 @@ pub trait HomerStore: Send + Sync {
 
     /// Create a named snapshot of current graph state.
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId>;
+
+    /// Compute the diff between two snapshots (added/removed nodes and edges).
+    async fn get_snapshot_diff(
+        &self,
+        from: SnapshotId,
+        to: SnapshotId,
+    ) -> crate::error::Result<GraphDiff>;
 
     // ── Metrics ────────────────────────────────────────────────────
 

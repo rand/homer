@@ -96,10 +96,7 @@ async fn render_spec(
 
 // ── Principles ──────────────────────────────────────────────────────────
 
-async fn render_principles(
-    out: &mut String,
-    db: &dyn HomerStore,
-) -> crate::error::Result<()> {
+async fn render_principles(out: &mut String, db: &dyn HomerStore) -> crate::error::Result<()> {
     let docs = db
         .find_nodes(&NodeFilter {
             kind: Some(NodeKind::Document),
@@ -146,7 +143,11 @@ async fn render_principles(
             .get_analysis(adr.id, AnalysisKind::SemanticSummary)
             .await?;
         if let Some(summary) = summaries {
-            if let Some(text) = summary.data.get("summary").and_then(serde_json::Value::as_str) {
+            if let Some(text) = summary
+                .data
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+            {
                 let _ = writeln!(out, "  context: {text}");
             }
         }
@@ -157,10 +158,7 @@ async fn render_principles(
 
 // ── Design ──────────────────────────────────────────────────────────────
 
-async fn render_design(
-    out: &mut String,
-    db: &dyn HomerStore,
-) -> crate::error::Result<()> {
+async fn render_design(out: &mut String, db: &dyn HomerStore) -> crate::error::Result<()> {
     let community_results = db
         .get_analyses_by_kind(AnalysisKind::CommunityAssignment)
         .await?;
@@ -240,11 +238,7 @@ fn infer_area_name(members: &[(String, f64)]) -> String {
         leaf_name(&members[0].0)
     } else {
         let trimmed = prefix.trim_end_matches('/');
-        trimmed
-            .rsplit('/')
-            .next()
-            .unwrap_or(trimmed)
-            .to_string()
+        trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
     }
 }
 
@@ -284,10 +278,7 @@ fn common_path_prefix(paths: &[&str]) -> String {
 
 // ── Concepts ────────────────────────────────────────────────────────────
 
-async fn render_concepts(
-    out: &mut String,
-    db: &dyn HomerStore,
-) -> crate::error::Result<()> {
+async fn render_concepts(out: &mut String, db: &dyn HomerStore) -> crate::error::Result<()> {
     let type_nodes = db
         .find_nodes(&NodeFilter {
             kind: Some(NodeKind::Type),
@@ -332,7 +323,11 @@ async fn render_concepts(
 
         let _ = writeln!(out, "\nConcept {short}:");
 
-        if let Some(file) = tnode.metadata.get("file").and_then(serde_json::Value::as_str) {
+        if let Some(file) = tnode
+            .metadata
+            .get("file")
+            .and_then(serde_json::Value::as_str)
+        {
             let _ = writeln!(out, "  file: {file}");
         }
 
@@ -362,7 +357,11 @@ async fn render_concepts(
             .get_analysis(tnode.id, AnalysisKind::InvariantDescription)
             .await?;
         if let Some(inv) = invariant {
-            if let Some(text) = inv.data.get("invariant").and_then(serde_json::Value::as_str) {
+            if let Some(text) = inv
+                .data
+                .get("invariant")
+                .and_then(serde_json::Value::as_str)
+            {
                 let _ = writeln!(out, "  invariant: {text}");
             }
         }
@@ -373,10 +372,7 @@ async fn render_concepts(
 
 // ── Requirements ────────────────────────────────────────────────────────
 
-async fn render_requirements(
-    out: &mut String,
-    db: &dyn HomerStore,
-) -> crate::error::Result<()> {
+async fn render_requirements(out: &mut String, db: &dyn HomerStore) -> crate::error::Result<()> {
     let issues = db
         .find_nodes(&NodeFilter {
             kind: Some(NodeKind::Issue),
@@ -464,7 +460,11 @@ async fn render_requirements(
                 .unwrap_or(&pr.name);
             let _ = writeln!(out, "\n## {}: {title}", pr.name);
             out.push_str("status: done\n");
-            if let Some(at) = pr.metadata.get("merged_at").and_then(serde_json::Value::as_str) {
+            if let Some(at) = pr
+                .metadata
+                .get("merged_at")
+                .and_then(serde_json::Value::as_str)
+            {
                 let _ = writeln!(out, "merged: {at}");
             }
         }
@@ -478,7 +478,13 @@ async fn render_requirements(
 fn sanitize_identifier(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if cleaned.is_empty() {
         "project".to_string()
@@ -506,7 +512,11 @@ mod tests {
 
     #[test]
     fn common_prefix_paths() {
-        let paths = vec!["src/auth/login.rs", "src/auth/logout.rs", "src/auth/token.rs"];
+        let paths = vec![
+            "src/auth/login.rs",
+            "src/auth/logout.rs",
+            "src/auth/token.rs",
+        ];
         assert_eq!(common_path_prefix(&paths), "src/auth/");
     }
 

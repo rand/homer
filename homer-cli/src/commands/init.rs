@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::Args;
-use indicatif::{ProgressBar, ProgressStyle};
 use tracing::info;
 
 use homer_core::config::{AnalysisDepth, HomerConfig};
 use homer_core::pipeline::HomerPipeline;
+use homer_core::progress::IndicatifReporter;
 use homer_core::store::sqlite::SqliteStore;
 
 #[derive(Args, Debug)]
@@ -85,24 +85,13 @@ pub async fn run(args: InitArgs) -> anyhow::Result<()> {
 
     info!(db_path = %db_path.display(), "Opened database");
 
-    // Show progress
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.cyan} {msg}")
-            .expect("valid template"),
-    );
-    pb.set_message("Running Homer pipeline...");
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
-    // Run pipeline
+    // Run pipeline with progress reporting
+    let progress = IndicatifReporter::new();
     let pipeline = HomerPipeline::new(&repo_path);
     let result = pipeline
-        .run(&store, &config)
+        .run_with_progress(&store, &config, &progress)
         .await
         .context("Pipeline execution failed")?;
-
-    pb.finish_and_clear();
 
     // Report results
     println!("Homer initialized in {}", repo_path.display());

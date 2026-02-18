@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -24,6 +24,7 @@ impl Analyzer for TaskPatternAnalyzer {
         "task_pattern"
     }
 
+    #[instrument(skip_all, name = "task_pattern_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,
@@ -117,7 +118,10 @@ async fn collect_prompt_data(store: &dyn HomerStore) -> crate::error::Result<Pro
     // Build session → files maps.
     let mut session_ref_map: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     for edge in &ref_edges {
-        let session = edge.members.iter().find(|m| m.role == "session" || m.role == "rule");
+        let session = edge
+            .members
+            .iter()
+            .find(|m| m.role == "session" || m.role == "rule");
         let file = edge.members.iter().find(|m| m.role == "file");
         if let (Some(s), Some(f)) = (session, file) {
             session_ref_map
@@ -140,8 +144,14 @@ async fn collect_prompt_data(store: &dyn HomerStore) -> crate::error::Result<Pro
     }
 
     for session in &sessions {
-        let refs = session_ref_map.get(&session.id).cloned().unwrap_or_default();
-        let mods = session_mod_map.get(&session.id).cloned().unwrap_or_default();
+        let refs = session_ref_map
+            .get(&session.id)
+            .cloned()
+            .unwrap_or_default();
+        let mods = session_mod_map
+            .get(&session.id)
+            .cloned()
+            .unwrap_or_default();
 
         let correction_count = session
             .metadata
@@ -315,8 +325,14 @@ async fn compute_task_patterns(
 
     // Sort by frequency (descending).
     patterns.sort_by(|a, b| {
-        let fa = a.get("frequency").and_then(serde_json::Value::as_u64).unwrap_or(0);
-        let fb = b.get("frequency").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let fa = a
+            .get("frequency")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let fb = b
+            .get("frequency")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         fb.cmp(&fa)
     });
 
@@ -375,7 +391,10 @@ fn infer_pattern_name(file_names: &[String]) -> String {
     // Fallback: use the most common file extension.
     let mut ext_counts: HashMap<&str, u32> = HashMap::new();
     for name in file_names {
-        if let Some(ext) = std::path::Path::new(name).extension().and_then(|e| e.to_str()) {
+        if let Some(ext) = std::path::Path::new(name)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
             *ext_counts.entry(ext).or_default() += 1;
         }
     }
@@ -449,7 +468,10 @@ async fn compute_domain_vocabulary(
         };
 
         let ref_count = data.file_ref_counts.get(file_id).copied().unwrap_or(0);
-        let entities = file_entities.get(&file_node.name).cloned().unwrap_or_default();
+        let entities = file_entities
+            .get(&file_node.name)
+            .cloned()
+            .unwrap_or_default();
 
         if entities.is_empty() {
             continue;
@@ -467,8 +489,14 @@ async fn compute_domain_vocabulary(
     }
 
     vocabulary.sort_by(|a, b| {
-        let ra = a.get("reference_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
-        let rb = b.get("reference_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let ra = a
+            .get("reference_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let rb = b
+            .get("reference_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         rb.cmp(&ra)
     });
 
@@ -668,7 +696,11 @@ mod tests {
             .unwrap();
         assert!(hotspot.is_some(), "Should have PromptHotspot for auth.rs");
         let hs = hotspot.unwrap();
-        let ref_count = hs.data.get("reference_count").and_then(|v| v.as_u64()).unwrap_or(0);
+        let ref_count = hs
+            .data
+            .get("reference_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         assert_eq!(ref_count, 3, "Should have 3 references from 3 sessions");
     }
 
@@ -716,10 +748,7 @@ mod tests {
         assert!(patterns.is_some(), "Should have TaskPattern on root module");
         let tp = patterns.unwrap();
         let pattern_list = tp.data.get("patterns").and_then(|v| v.as_array());
-        assert!(
-            pattern_list.is_some(),
-            "Should have patterns array"
-        );
+        assert!(pattern_list.is_some(), "Should have patterns array");
     }
 
     #[tokio::test]

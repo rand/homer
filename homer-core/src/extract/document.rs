@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -27,6 +27,7 @@ impl DocumentExtractor {
         }
     }
 
+    #[instrument(skip_all, name = "document_extract")]
     pub async fn extract(
         &self,
         store: &dyn HomerStore,

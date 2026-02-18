@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::Args;
 
-use homer_core::store::sqlite::SqliteStore;
 use homer_core::store::HomerStore;
+use homer_core::store::sqlite::SqliteStore;
 use homer_core::types::AnalysisKind;
 
 #[derive(Args, Debug)]
@@ -74,16 +74,30 @@ async fn show_metric_ranking(
         "betweenness" => (AnalysisKind::BetweennessCentrality, "betweenness"),
         "hits" => (AnalysisKind::HITSScore, "authority_score"),
         "salience" => (AnalysisKind::CompositeSalience, "score"),
-        other => anyhow::bail!("Unknown metric: {other}. Use: pagerank, betweenness, hits, salience"),
+        other => {
+            anyhow::bail!("Unknown metric: {other}. Use: pagerank, betweenness, hits, salience")
+        }
     };
 
     let results = db.get_analyses_by_kind(kind).await?;
 
     let mut entries: Vec<(String, f64, String)> = Vec::new();
     for r in &results {
-        let val = r.data.get(field).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-        let cls = r.data.get("classification").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
-        let name = db.get_node(r.node_id).await?.map_or_else(|| format!("node:{}", r.node_id.0), |n| n.name);
+        let val = r
+            .data
+            .get(field)
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let cls = r
+            .data
+            .get("classification")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let name = db
+            .get_node(r.node_id)
+            .await?
+            .map_or_else(|| format!("node:{}", r.node_id.0), |n| n.name);
         entries.push((name, val, cls));
     }
 
@@ -123,10 +137,7 @@ fn print_ranking_text(entries: &[(String, f64, String)], metric: &str) {
     }
 }
 
-fn print_ranking_json(
-    entries: &[(String, f64, String)],
-    metric: &str,
-) -> anyhow::Result<()> {
+fn print_ranking_json(entries: &[(String, f64, String)], metric: &str) -> anyhow::Result<()> {
     let json = serde_json::json!({
         "metric": metric,
         "entries": entries.iter().enumerate().map(|(i, (name, val, cls))| {
@@ -171,12 +182,22 @@ fn print_ranking_mermaid(entries: &[(String, f64, String)], metric: &str) {
 // ── Community Listing ────────────────────────────────────────────────
 
 async fn list_communities(db: &SqliteStore, format: &str) -> anyhow::Result<()> {
-    let results = db.get_analyses_by_kind(AnalysisKind::CommunityAssignment).await?;
+    let results = db
+        .get_analyses_by_kind(AnalysisKind::CommunityAssignment)
+        .await?;
 
-    let mut communities: std::collections::HashMap<u64, Vec<String>> = std::collections::HashMap::new();
+    let mut communities: std::collections::HashMap<u64, Vec<String>> =
+        std::collections::HashMap::new();
     for r in &results {
-        let cid = r.data.get("community_id").and_then(serde_json::Value::as_u64).unwrap_or(0);
-        let name = db.get_node(r.node_id).await?.map_or_else(|| format!("node:{}", r.node_id.0), |n| n.name);
+        let cid = r
+            .data
+            .get("community_id")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let name = db
+            .get_node(r.node_id)
+            .await?
+            .map_or_else(|| format!("node:{}", r.node_id.0), |n| n.name);
         communities.entry(cid).or_default().push(name);
     }
 
@@ -215,14 +236,27 @@ async fn list_communities(db: &SqliteStore, format: &str) -> anyhow::Result<()> 
 }
 
 async fn show_community(db: &SqliteStore, cid: u64, format: &str) -> anyhow::Result<()> {
-    let results = db.get_analyses_by_kind(AnalysisKind::CommunityAssignment).await?;
+    let results = db
+        .get_analyses_by_kind(AnalysisKind::CommunityAssignment)
+        .await?;
 
     let mut members = Vec::new();
     for r in &results {
-        let this_cid = r.data.get("community_id").and_then(serde_json::Value::as_u64).unwrap_or(u64::MAX);
+        let this_cid = r
+            .data
+            .get("community_id")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(u64::MAX);
         if this_cid == cid {
-            let aligned = r.data.get("directory_aligned").and_then(serde_json::Value::as_bool).unwrap_or(true);
-            let name = db.get_node(r.node_id).await?.map_or_else(|| format!("node:{}", r.node_id.0), |n| n.name);
+            let aligned = r
+                .data
+                .get("directory_aligned")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            let name = db
+                .get_node(r.node_id)
+                .await?
+                .map_or_else(|| format!("node:{}", r.node_id.0), |n| n.name);
             members.push((name, aligned));
         }
     }

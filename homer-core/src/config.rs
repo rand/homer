@@ -68,6 +68,8 @@ pub struct ExtractionSection {
     #[serde(default)]
     pub prompts: PromptExtractionConfig,
     #[serde(default)]
+    pub github: GitHubExtractionConfig,
+    #[serde(default)]
     pub gitlab: GitLabExtractionConfig,
 }
 
@@ -78,6 +80,7 @@ impl Default for ExtractionSection {
             structure: StructureExtractionConfig::default(),
             documents: DocumentExtractionConfig::default(),
             prompts: PromptExtractionConfig::default(),
+            github: GitHubExtractionConfig::default(),
             gitlab: GitLabExtractionConfig::default(),
         }
     }
@@ -158,6 +161,32 @@ impl Default for PromptExtractionConfig {
             redact_sensitive: true,
             store_full_text: false,
             hash_session_ids: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubExtractionConfig {
+    /// Environment variable holding the GitHub personal access token.
+    pub token_env: String,
+    /// Max PRs to fetch on initial run.
+    pub max_pr_history: u32,
+    /// Max issues to fetch on initial run.
+    pub max_issue_history: u32,
+    /// Whether to fetch PR/issue comments as metadata.
+    pub include_comments: bool,
+    /// Whether to fetch PR reviews and create Reviewed edges.
+    pub include_reviews: bool,
+}
+
+impl Default for GitHubExtractionConfig {
+    fn default() -> Self {
+        Self {
+            token_env: "GITHUB_TOKEN".to_string(),
+            max_pr_history: 500,
+            max_issue_history: 1000,
+            include_comments: true,
+            include_reviews: true,
         }
     }
 }

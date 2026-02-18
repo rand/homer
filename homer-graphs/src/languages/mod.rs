@@ -1,3 +1,4 @@
+mod ecma_scope;
 pub mod fallback;
 pub mod go;
 mod helpers;

@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::convention::ConventionAnalyzer;
 use crate::analyze::task_pattern::TaskPatternAnalyzer;
+use crate::analyze::temporal::TemporalAnalyzer;
 use crate::analyze::traits::Analyzer;
 use crate::config::HomerConfig;
 use crate::extract::document::DocumentExtractor;
@@ -17,9 +18,12 @@ use crate::extract::gitlab::GitLabExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
+use crate::progress::ProgressReporter;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
+use crate::render::report::ReportRenderer;
 use crate::render::risk_map::RiskMapRenderer;
+use crate::render::skills::SkillsRenderer;
 use crate::render::topos_spec::ToposSpecRenderer;
 use crate::render::traits::Renderer;
 use crate::store::HomerStore;
@@ -67,6 +71,18 @@ impl HomerPipeline {
         store: &dyn HomerStore,
         config: &HomerConfig,
     ) -> crate::error::Result<PipelineResult> {
+        self.run_with_progress(store, config, &crate::progress::NoopReporter)
+            .await
+    }
+
+    /// Run the full pipeline with a progress reporter for user-visible feedback.
+    #[instrument(skip(self, store, config, progress), fields(repo = %self.repo_path.display()))]
+    pub async fn run_with_progress(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        progress: &dyn ProgressReporter,
+    ) -> crate::error::Result<PipelineResult> {
         let start = Instant::now();
         let mut result = PipelineResult {
             extract_nodes: 0,
@@ -80,13 +96,25 @@ impl HomerPipeline {
         info!(repo = %self.repo_path.display(), "Starting Homer pipeline");
 
         // ── Phase 1: Extraction ───────────────────────────────────
+        progress.start("Extracting", None);
         self.run_extraction(store, config, &mut result).await;
+        progress.message(&format!(
+            "Extracted {} nodes, {} edges",
+            result.extract_nodes, result.extract_edges
+        ));
+        progress.finish();
 
         // ── Phase 2: Analysis ─────────────────────────────────────
+        progress.start("Analyzing", None);
         self.run_analysis(store, config, &mut result).await;
+        progress.message(&format!("{} analyses computed", result.analysis_results));
+        progress.finish();
 
         // ── Phase 3: Rendering ────────────────────────────────────
+        progress.start("Rendering", None);
         self.run_rendering(store, config, &mut result).await;
+        progress.message(&format!("{} artifacts written", result.artifacts_written));
+        progress.finish();
 
         result.duration = start.elapsed();
 
@@ -103,6 +131,7 @@ impl HomerPipeline {
         Ok(result)
     }
 
+    #[instrument(skip_all)]
     async fn run_extraction(
         &self,
         store: &dyn HomerStore,
@@ -293,6 +322,8 @@ impl HomerPipeline {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
+    #[instrument(skip_all)]
     async fn run_analysis(
         &self,
         store: &dyn HomerStore,
@@ -362,6 +393,27 @@ impl HomerPipeline {
             }
         }
 
+        // Temporal analysis (centrality trends, drift, enhanced stability)
+        let temporal = TemporalAnalyzer;
+        match temporal.analyze(store, config).await {
+            Ok(stats) => {
+                result.analysis_results += stats.results_stored;
+                for (desc, err) in stats.errors {
+                    result.errors.push(PipelineError {
+                        stage: "analyze:temporal",
+                        message: format!("{desc}: {err}"),
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Temporal analysis failed");
+                result.errors.push(PipelineError {
+                    stage: "analyze:temporal",
+                    message: e.to_string(),
+                });
+            }
+        }
+
         // Convention analysis (naming, testing, error handling, doc style, agent rules)
         let convention = ConventionAnalyzer::new(&self.repo_path);
         match convention.analyze(store, config).await {
@@ -405,69 +457,44 @@ impl HomerPipeline {
         }
     }
 
+    #[instrument(skip_all)]
     async fn run_rendering(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        // AGENTS.md
-        let renderer = AgentsMdRenderer;
-        match renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "AGENTS.md rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:agents_md",
-                    message: e.to_string(),
-                });
-            }
-        }
+        let path = &self.repo_path;
 
-        // Per-directory .context.md files
-        let ctx_renderer = ModuleContextRenderer;
-        match ctx_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Module context rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:module_context",
-                    message: e.to_string(),
-                });
-            }
-        }
+        // Run all renderers concurrently — they are independent of each other
+        let (agents, ctx, risk, skills, report, topos) = tokio::join!(
+            AgentsMdRenderer.write(store, config, path),
+            ModuleContextRenderer.write(store, config, path),
+            RiskMapRenderer.write(store, config, path),
+            SkillsRenderer.write(store, config, path),
+            ReportRenderer.write(store, config, path),
+            ToposSpecRenderer.write(store, config, path),
+        );
 
-        // homer-risk.json
-        let risk_renderer = RiskMapRenderer;
-        match risk_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Risk map rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:risk_map",
-                    message: e.to_string(),
-                });
-            }
-        }
+        let outcomes: [(&str, crate::error::Result<()>); 6] = [
+            ("render:agents_md", agents),
+            ("render:module_context", ctx),
+            ("render:risk_map", risk),
+            ("render:skills", skills),
+            ("render:report", report),
+            ("render:topos_spec", topos),
+        ];
 
-        // spec/homer-spec.tps (Topos format)
-        let topos_renderer = ToposSpecRenderer;
-        match topos_renderer.write(store, config, &self.repo_path).await {
-            Ok(()) => {
-                result.artifacts_written += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Topos spec rendering failed");
-                result.errors.push(PipelineError {
-                    stage: "render:topos_spec",
-                    message: e.to_string(),
-                });
+        for (stage, outcome) in outcomes {
+            match outcome {
+                Ok(()) => result.artifacts_written += 1,
+                Err(e) => {
+                    warn!(stage, error = %e, "Renderer failed");
+                    result.errors.push(PipelineError {
+                        stage,
+                        message: e.to_string(),
+                    });
+                }
             }
         }
     }
