@@ -231,16 +231,11 @@ impl Default for GraphSection {
 }
 
 /// Language selection: `"auto"` to detect from file extensions, or an explicit list.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum LanguageConfig {
+    #[default]
     Auto,
     Explicit(Vec<String>),
-}
-
-impl Default for LanguageConfig {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl Serialize for LanguageConfig {
