@@ -853,6 +853,27 @@ impl HomerStore for SqliteStore {
         Ok(())
     }
 
+    async fn clear_analyses_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<()> {
+        if kinds.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<&str> = kinds.iter().map(|_| "?").collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE kind IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let params: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        stmt.execute(param_refs.as_slice())
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
     // ── Graph snapshots ────────────────────────────────────────────
 
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId> {

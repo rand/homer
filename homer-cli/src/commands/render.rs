@@ -24,6 +24,14 @@ pub struct RenderArgs {
     /// Comma-separated renderers to exclude (used with --all)
     #[arg(long)]
     pub exclude: Option<String>,
+
+    /// Output directory (default: repo root)
+    #[arg(long)]
+    pub output_dir: Option<PathBuf>,
+
+    /// Show what would be generated without writing files
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
@@ -79,7 +87,17 @@ pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
 
     let name_refs: Vec<&str> = filtered.iter().map(String::as_str).collect();
 
-    let pipeline = HomerPipeline::new(&repo_path);
+    let output_root = args.output_dir.as_deref().unwrap_or(&repo_path);
+
+    if args.dry_run {
+        println!("Dry run — would render to: {}", output_root.display());
+        for name in &name_refs {
+            println!("  - {name}");
+        }
+        return Ok(());
+    }
+
+    let pipeline = HomerPipeline::new(output_root);
     let result = pipeline
         .run_renderers(&store, &config, &name_refs)
         .await

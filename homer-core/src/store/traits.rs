@@ -133,6 +133,9 @@ pub trait HomerStore: Send + Sync {
     /// Clear all analysis results (for --force-analysis).
     async fn clear_analyses(&self) -> crate::error::Result<()>;
 
+    /// Clear analysis results for specific kinds (for --force-semantic).
+    async fn clear_analyses_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<()>;
+
     // ── Graph snapshots ────────────────────────────────────────────
 
     /// Create a named snapshot of current graph state.

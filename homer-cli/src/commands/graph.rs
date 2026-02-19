@@ -14,6 +14,10 @@ pub struct GraphArgs {
     #[arg(long, default_value = ".")]
     pub path: PathBuf,
 
+    /// Graph type: call, import, combined
+    #[arg(long, default_value = "call", value_parser = ["call", "import", "combined"])]
+    pub r#type: String,
+
     /// Metric to display: pagerank, betweenness, hits, salience
     #[arg(long, default_value = "salience")]
     pub metric: String,
@@ -58,7 +62,7 @@ pub async fn run(args: GraphArgs) -> anyhow::Result<()> {
         return show_community(&db, cid, &args.format).await;
     }
 
-    show_metric_ranking(&db, &args.metric, args.top, &args.format).await
+    show_metric_ranking(&db, &args.metric, &args.r#type, args.top, &args.format).await
 }
 
 // ── Metric Ranking ───────────────────────────────────────────────────
@@ -66,6 +70,7 @@ pub async fn run(args: GraphArgs) -> anyhow::Result<()> {
 async fn show_metric_ranking(
     db: &SqliteStore,
     metric: &str,
+    graph_type: &str,
     top: usize,
     format: &str,
 ) -> anyhow::Result<()> {
@@ -105,7 +110,7 @@ async fn show_metric_ranking(
     let top_entries: Vec<_> = entries.into_iter().take(top).collect();
 
     match format {
-        "json" => print_ranking_json(&top_entries, metric),
+        "json" => print_ranking_json(&top_entries, metric, graph_type),
         "dot" => {
             print_ranking_dot(&top_entries, metric);
             Ok(())
@@ -115,14 +120,17 @@ async fn show_metric_ranking(
             Ok(())
         }
         _ => {
-            print_ranking_text(&top_entries, metric);
+            print_ranking_text(&top_entries, metric, graph_type);
             Ok(())
         }
     }
 }
 
-fn print_ranking_text(entries: &[(String, f64, String)], metric: &str) {
-    println!("Top {} entities by {metric}:", entries.len());
+fn print_ranking_text(entries: &[(String, f64, String)], metric: &str, graph_type: &str) {
+    println!(
+        "Top {} entities by {metric} ({graph_type} graph):",
+        entries.len()
+    );
     println!();
     println!("{:<4} {:<50} {:>10} Class", "#", "Entity", "Score");
     println!("{:-<80}", "");
@@ -137,9 +145,14 @@ fn print_ranking_text(entries: &[(String, f64, String)], metric: &str) {
     }
 }
 
-fn print_ranking_json(entries: &[(String, f64, String)], metric: &str) -> anyhow::Result<()> {
+fn print_ranking_json(
+    entries: &[(String, f64, String)],
+    metric: &str,
+    graph_type: &str,
+) -> anyhow::Result<()> {
     let json = serde_json::json!({
         "metric": metric,
+        "graph_type": graph_type,
         "entries": entries.iter().enumerate().map(|(i, (name, val, cls))| {
             serde_json::json!({ "rank": i + 1, "name": name, "score": val, "classification": cls })
         }).collect::<Vec<_>>(),
