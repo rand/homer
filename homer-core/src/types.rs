@@ -424,6 +424,21 @@ pub struct FileDiffStats {
     pub status: DiffStatus,
     pub lines_added: u32,
     pub lines_deleted: u32,
+    /// Per-hunk diff metadata for fine-grained analysis.
+    pub hunks: Vec<DiffHunk>,
+}
+
+/// A contiguous region of changes within a file diff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffHunk {
+    /// Starting line number in the old file (1-based).
+    pub old_start: u32,
+    /// Number of lines from the old file in this hunk.
+    pub old_lines: u32,
+    /// Starting line number in the new file (1-based).
+    pub new_start: u32,
+    /// Number of lines from the new file in this hunk.
+    pub new_lines: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

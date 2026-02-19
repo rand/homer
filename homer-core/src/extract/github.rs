@@ -199,6 +199,7 @@ impl GitHubExtractor {
         Ok(max_number)
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn store_pull_request(
         &self,
         store: &dyn HomerStore,
@@ -214,6 +215,9 @@ impl GitHubExtractor {
         }
         if let Some(merged) = &pr.merged_at {
             metadata.insert("merged_at".to_string(), serde_json::json!(merged));
+        }
+        if let Some(sha) = &pr.merge_commit_sha {
+            metadata.insert("merge_commit_sha".to_string(), serde_json::json!(sha));
         }
         if let Some(user) = &pr.user {
             metadata.insert("author".to_string(), serde_json::json!(user.login));
@@ -298,6 +302,34 @@ impl GitHubExtractor {
                             },
                         ],
                         confidence: 0.9,
+                        last_updated: Utc::now(),
+                        metadata: HashMap::new(),
+                    })
+                    .await?;
+                stats.edges_created += 1;
+            }
+        }
+
+        // Link PR to its merge commit if available
+        if let Some(sha) = &pr.merge_commit_sha {
+            if let Some(commit_node) = store.get_node_by_name(NodeKind::Commit, sha).await? {
+                store
+                    .upsert_hyperedge(&Hyperedge {
+                        id: HyperedgeId(0),
+                        kind: HyperedgeKind::Includes,
+                        members: vec![
+                            HyperedgeMember {
+                                node_id: pr_node_id,
+                                role: "pull_request".to_string(),
+                                position: 0,
+                            },
+                            HyperedgeMember {
+                                node_id: commit_node.id,
+                                role: "merge_commit".to_string(),
+                                position: 1,
+                            },
+                        ],
+                        confidence: 1.0,
                         last_updated: Utc::now(),
                         metadata: HashMap::new(),
                     })
@@ -543,6 +575,7 @@ struct GhPullRequest {
     state: String,
     body: Option<String>,
     merged_at: Option<String>,
+    merge_commit_sha: Option<String>,
     user: Option<GhUser>,
 }
 

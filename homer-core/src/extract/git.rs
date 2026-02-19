@@ -10,8 +10,8 @@ use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
 use crate::store::HomerStore;
 use crate::types::{
-    DiffStatus, FileDiffStats, Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node,
-    NodeId, NodeKind,
+    DiffHunk, DiffStatus, FileDiffStats, Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember,
+    Node, NodeId, NodeKind,
 };
 
 use super::traits::{ExtractStats, Extractor};
@@ -605,25 +605,45 @@ fn compute_diff(
         })
         .map_err(|e| HomerError::Extract(ExtractError::Git(format!("diff error: {e}"))))?;
 
-    // Post-process: compute line stats from blob contents
+    // Post-process: compute line stats and hunks from blob contents
     let diff_stats = raw_entries
         .into_iter()
         .map(|entry| {
-            let (lines_added, lines_deleted) = match entry.status {
+            let (lines_added, lines_deleted, hunks) = match entry.status {
                 DiffStatus::Added => {
                     let added = entry.new_blob.map_or(0, |id| count_blob_lines(repo, id));
-                    (added, 0)
+                    let hunks = if added > 0 {
+                        vec![DiffHunk {
+                            old_start: 0,
+                            old_lines: 0,
+                            new_start: 1,
+                            new_lines: added,
+                        }]
+                    } else {
+                        Vec::new()
+                    };
+                    (added, 0, hunks)
                 }
                 DiffStatus::Deleted => {
                     let deleted = entry.old_blob.map_or(0, |id| count_blob_lines(repo, id));
-                    (0, deleted)
+                    let hunks = if deleted > 0 {
+                        vec![DiffHunk {
+                            old_start: 1,
+                            old_lines: deleted,
+                            new_start: 0,
+                            new_lines: 0,
+                        }]
+                    } else {
+                        Vec::new()
+                    };
+                    (0, deleted, hunks)
                 }
                 DiffStatus::Modified | DiffStatus::Renamed | DiffStatus::Copied => {
                     match (entry.old_blob, entry.new_blob) {
                         (Some(old_id), Some(new_id)) => {
-                            compute_blob_line_diff(repo, old_id, new_id)
+                            compute_blob_diff_with_hunks(repo, old_id, new_id)
                         }
-                        _ => (0, 0),
+                        _ => (0, 0, Vec::new()),
                     }
                 }
             };
@@ -633,6 +653,7 @@ fn compute_diff(
                 status: entry.status,
                 lines_added,
                 lines_deleted,
+                hunks,
             }
         })
         .collect();
@@ -652,52 +673,78 @@ fn count_blob_lines(repo: &gix::Repository, id: gix::ObjectId) -> u32 {
     count_newlines(&data)
 }
 
-/// Compute added/deleted line counts between two blobs using hash-based line diff.
-fn compute_blob_line_diff(
+/// Compute added/deleted line counts and hunks between two blobs using `similar`.
+fn compute_blob_diff_with_hunks(
     repo: &gix::Repository,
     old_id: gix::ObjectId,
     new_id: gix::ObjectId,
-) -> (u32, u32) {
+) -> (u32, u32, Vec<DiffHunk>) {
     let Ok(old_obj) = repo.find_object(old_id) else {
-        return (0, 0);
+        return (0, 0, Vec::new());
     };
     let old_data = old_obj.detach().data;
 
     let Ok(new_obj) = repo.find_object(new_id) else {
-        return (0, 0);
+        return (0, 0, Vec::new());
     };
     let new_data = new_obj.detach().data;
 
     if is_likely_binary(&old_data) || is_likely_binary(&new_data) {
-        return (0, 0);
+        return (0, 0, Vec::new());
     }
 
-    // Hash-based line diff: track occurrences of each line
-    let mut old_counts: HashMap<&[u8], i32> = HashMap::new();
-    for line in old_data.split(|&b| b == b'\n') {
-        *old_counts.entry(line).or_default() += 1;
-    }
+    let old_text = String::from_utf8_lossy(&old_data);
+    let new_text = String::from_utf8_lossy(&new_data);
 
-    let mut added = 0u32;
-    for line in new_data.split(|&b| b == b'\n') {
-        if let Some(count) = old_counts.get_mut(line) {
-            if *count > 0 {
-                *count -= 1;
-            } else {
-                added += 1;
+    let diff = similar::TextDiff::from_lines(old_text.as_ref(), new_text.as_ref());
+
+    let mut total_added = 0u32;
+    let mut total_deleted = 0u32;
+    let mut hunks = Vec::new();
+
+    for group in diff.grouped_ops(3) {
+        let mut hunk_old_start = u32::MAX;
+        let mut hunk_old_end = 0u32;
+        let mut hunk_new_start = u32::MAX;
+        let mut hunk_new_end = 0u32;
+
+        for op in &group {
+            let old_range = op.old_range();
+            let new_range = op.new_range();
+
+            #[allow(clippy::cast_possible_truncation)]
+            let (os, oe, ns, ne) = (
+                old_range.start as u32,
+                old_range.end as u32,
+                new_range.start as u32,
+                new_range.end as u32,
+            );
+
+            hunk_old_start = hunk_old_start.min(os);
+            hunk_old_end = hunk_old_end.max(oe);
+            hunk_new_start = hunk_new_start.min(ns);
+            hunk_new_end = hunk_new_end.max(ne);
+
+            match op.tag() {
+                similar::DiffTag::Insert => total_added += ne - ns,
+                similar::DiffTag::Delete => total_deleted += oe - os,
+                similar::DiffTag::Replace => {
+                    total_added += ne - ns;
+                    total_deleted += oe - os;
+                }
+                similar::DiffTag::Equal => {}
             }
-        } else {
-            added += 1;
         }
+
+        hunks.push(DiffHunk {
+            old_start: hunk_old_start + 1, // 1-based
+            old_lines: hunk_old_end - hunk_old_start,
+            new_start: hunk_new_start + 1,
+            new_lines: hunk_new_end - hunk_new_start,
+        });
     }
 
-    let deleted: u32 = old_counts
-        .values()
-        .filter(|&&v| v > 0)
-        .map(|&v| u32::try_from(v).unwrap_or(u32::MAX))
-        .sum();
-
-    (added, deleted)
+    (total_added, total_deleted, hunks)
 }
 
 /// Check if data appears binary (NUL byte in first 8KB).
