@@ -9,7 +9,10 @@ pub mod snapshot;
 pub mod status;
 pub mod update;
 
+use std::path::Path;
+
 use clap::Subcommand;
+use homer_core::config::HomerConfig;
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
@@ -33,6 +36,14 @@ pub enum Command {
     RiskCheck(risk_check::RiskCheckArgs),
     /// Start MCP server for AI agent integration
     Serve(serve::ServeArgs),
+}
+
+/// Load `HomerConfig` from `.homer/config.toml` relative to the repo root.
+/// Returns `None` if the file doesn't exist or can't be parsed.
+pub fn load_config(repo_path: &Path) -> Option<HomerConfig> {
+    let config_path = repo_path.join(".homer/config.toml");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    toml::from_str(&content).ok()
 }
 
 pub async fn run(cmd: Command) -> anyhow::Result<()> {

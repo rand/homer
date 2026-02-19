@@ -5,9 +5,15 @@ use clap::Args;
 
 #[derive(Args, Debug)]
 pub struct ServeArgs {
-    /// Transport type: stdio
-    #[arg(long, default_value = "stdio")]
-    pub transport: String,
+    /// Transport type: stdio, sse (overrides config)
+    #[arg(long)]
+    pub transport: Option<String>,
+    /// Host for SSE transport (overrides config)
+    #[arg(long)]
+    pub host: Option<String>,
+    /// Port for SSE transport (overrides config)
+    #[arg(long)]
+    pub port: Option<u16>,
     /// Path to git repository (default: current directory)
     #[arg(long, default_value = ".")]
     pub path: PathBuf,
@@ -24,7 +30,14 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
         )
     })?;
 
-    match args.transport.as_str() {
+    // Load config for MCP defaults; fall back to defaults if missing.
+    let config = super::load_config(&repo_path).unwrap_or_default();
+    let transport = args
+        .transport
+        .as_deref()
+        .unwrap_or(&config.mcp.transport);
+
+    match transport {
         "stdio" => {
             homer_mcp::serve_stdio(&db_path)
                 .await

@@ -209,7 +209,21 @@ impl HomerPipeline {
 
         for idx in ordered {
             let analyzer = &analyzers[idx];
-            let stage = format!("analyze:{}", analyzer.name());
+            let name = analyzer.name();
+            let stage = format!("analyze:{name}");
+
+            // Check if analyzer needs to re-run.
+            match analyzer.needs_rerun(store).await {
+                Ok(false) => {
+                    info!(analyzer = name, "Skipping (no rerun needed)");
+                    continue;
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    info!(analyzer = name, error = %e, "needs_rerun check failed, running anyway");
+                }
+            }
+
             match analyzer.analyze(store, config).await {
                 Ok(stats) => {
                     result.analysis_results += stats.results_stored;
