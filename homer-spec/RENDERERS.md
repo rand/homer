@@ -10,29 +10,33 @@
 ## Renderer Trait
 
 ```rust
+#[async_trait]
 pub trait Renderer: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    
-    /// What analysis results this renderer needs
-    fn required_analyses(&self) -> Vec<AnalysisKind>;
-    
-    /// Produce output files
-    fn render(
+    /// Human-readable name for this renderer.
+    fn name(&self) -> &'static str;
+
+    /// Output file path relative to repo root.
+    fn output_path(&self) -> &'static str;
+
+    /// Generate the artifact content as a string.
+    async fn render(
         &self,
         store: &dyn HomerStore,
-        config: &RenderConfig,
-    ) -> Result<Vec<OutputFile>>;
-}
+        config: &HomerConfig,
+    ) -> Result<String>;
 
-pub struct OutputFile {
-    pub path: PathBuf,          // Relative to repo root
-    pub content: String,
-    pub overwrite: bool,        // true = always overwrite, false = only if missing
+    /// Write the artifact to disk, handling `<!-- homer:preserve -->` merge.
+    /// Default implementation merges preserved blocks if the file already exists.
+    async fn write(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        repo_root: &Path,
+    ) -> Result<()>;
 }
 ```
 
-All renderers are stateless — they read from the store and produce files. No renderer depends on another renderer's output.
+All renderers are stateless — they read from the store and produce a single string artifact. The default `write()` implementation handles `<!-- homer:preserve -->` block merging when the output file already exists. No renderer depends on another renderer's output.
 
 ---
 

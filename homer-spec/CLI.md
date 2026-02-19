@@ -51,13 +51,15 @@ Options:
 Incremental update — process new data since last run.
 
 ```
-homer update [OPTIONS]
+homer update [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  Path to git repository (default: current directory)
 
 Options:
   --force               Force full re-extraction (ignore checkpoints)
   --force-analysis      Force re-analysis (keep extraction, recompute all analysis)
   --force-semantic      Force re-run LLM analysis (even if cache is valid)
-  -v, --verbose
 ```
 
 ### `homer render`
@@ -74,7 +76,7 @@ Options:
   --output-dir <PATH>   Output directory [default: repo root]
   --dry-run            Show what would be generated without writing files
   --diff               For agents-md: show what Homer would add/change vs existing file
-  --merge              For agents-md: merge Homer output with human-curated sections
+  --merge/--no-merge   Merge with `<!-- homer:preserve -->` blocks [default: true]
 ```
 
 ### `homer query`
@@ -201,10 +203,13 @@ Start MCP server for agent integration.
 homer serve [OPTIONS]
 
 Options:
-  --transport <TYPE>    Transport: stdio, sse [default: stdio]
-  --port <PORT>         Port for SSE transport [default: 3000]
-  --host <HOST>         Host for SSE transport [default: 127.0.0.1]
+  --transport <TYPE>    Transport: stdio [default: stdio]
+  --port <PORT>         Port for SSE transport [default: 3000] (reserved, not yet implemented)
+  --host <HOST>         Host for SSE transport [default: 127.0.0.1] (reserved, not yet implemented)
+  --path <PATH>         Path to git repository [default: current directory]
 ```
+
+> **Note**: Only `stdio` transport is currently implemented. The `--host` and `--port` flags are accepted but reserved for future SSE support.
 
 ### `homer snapshot`
 

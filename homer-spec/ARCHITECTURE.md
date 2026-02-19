@@ -198,16 +198,15 @@ homer/
 
 ```
 homer-cli ──→ homer-core ──→ homer-graphs
-    │              │
-    └──→ homer-mcp─┘
-              │
-              └──→ homer-core
+    │
+    └──→ homer-mcp ──→ homer-core
 ```
 
 - `homer-graphs`: No dependency on `homer-core`. Pure graph extraction engine. Could be used independently.
 - `homer-core`: Depends on `homer-graphs` for graph extraction. Contains all pipeline logic, store, analyzers, renderers.
-- `homer-cli`: Depends on `homer-core`. Thin CLI layer using `clap`.
+- `homer-cli`: Depends on `homer-core` (pipeline, config) and `homer-mcp` (for `homer serve`). Thin CLI layer using `clap`.
 - `homer-mcp`: Depends on `homer-core`. MCP server using `rmcp` (Anthropic's Rust MCP SDK).
+- `homer-test`: Depends on `homer-core`. Integration test fixtures and helpers.
 
 ---
 
