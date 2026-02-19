@@ -29,14 +29,18 @@ pub struct HomerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HomerSection {
     pub version: String,
+    /// Custom database path (overrides default `.homer/homer.db`).
+    pub db_path: Option<String>,
 }
 
 impl Default for HomerSection {
     fn default() -> Self {
         Self {
             version: "0.1.0".to_string(),
+            db_path: None,
         }
     }
 }
@@ -246,14 +250,37 @@ impl Default for GitLabExtractionConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GraphSection {
     pub languages: LanguageConfig,
+    #[serde(default)]
+    pub snapshots: SnapshotsConfig,
 }
 
 impl Default for GraphSection {
     fn default() -> Self {
         Self {
             languages: LanguageConfig::Auto,
+            snapshots: SnapshotsConfig::default(),
+        }
+    }
+}
+
+/// Controls automatic graph snapshot creation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnapshotsConfig {
+    /// Create snapshots at tagged releases.
+    pub at_releases: bool,
+    /// Create snapshots every N commits (0 = disabled).
+    pub every_n_commits: u32,
+}
+
+impl Default for SnapshotsConfig {
+    fn default() -> Self {
+        Self {
+            at_releases: true,
+            every_n_commits: 100,
         }
     }
 }
@@ -343,6 +370,8 @@ impl Default for RenderersSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentsMdConfig {
+    /// Output file path relative to repo root.
+    pub output_path: String,
     /// Max entries in the Load-Bearing Code table.
     pub max_load_bearing: u32,
     /// Max entries in the Change Patterns tables.
@@ -356,6 +385,7 @@ pub struct AgentsMdConfig {
 impl Default for AgentsMdConfig {
     fn default() -> Self {
         Self {
+            output_path: "AGENTS.md".to_string(),
             max_load_bearing: 20,
             max_change_patterns: 10,
             max_design_decisions: 10,
@@ -422,6 +452,8 @@ impl Default for ToposSpecConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReportConfig {
+    /// Output file path relative to repo root.
+    pub output_path: String,
     /// Report format: `html` or `markdown`.
     pub format: String,
 }
@@ -429,15 +461,26 @@ pub struct ReportConfig {
 impl Default for ReportConfig {
     fn default() -> Self {
         Self {
+            output_path: "homer-report.html".to_string(),
             format: "html".to_string(),
         }
     }
 }
 
 /// Per-renderer config for `risk-map`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RiskMapConfig {
-    _placeholder: (),
+    /// Output file path relative to repo root.
+    pub output_path: String,
+}
+
+impl Default for RiskMapConfig {
+    fn default() -> Self {
+        Self {
+            output_path: "homer-risk.json".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -477,6 +520,7 @@ mod tests {
     #[test]
     fn renderer_config_defaults() {
         let config = RenderersSection::default();
+        assert_eq!(config.agents_md.output_path, "AGENTS.md");
         assert_eq!(config.agents_md.max_load_bearing, 20);
         assert_eq!(config.agents_md.max_change_patterns, 10);
         assert_eq!(config.agents_md.max_design_decisions, 10);
@@ -486,7 +530,9 @@ mod tests {
         assert_eq!(config.skills.output_dir, ".claude/skills/");
         assert_eq!(config.topos_spec.output_dir, "spec/");
         assert_eq!(config.topos_spec.format, "topos");
+        assert_eq!(config.report.output_path, "homer-report.html");
         assert_eq!(config.report.format, "html");
+        assert_eq!(config.risk_map.output_path, "homer-risk.json");
     }
 
     #[test]
@@ -543,9 +589,54 @@ max_load_bearing = 50
         let config: HomerConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.renderers.agents_md.max_load_bearing, 50);
         // Unspecified fields get defaults
+        assert_eq!(config.renderers.agents_md.output_path, "AGENTS.md");
         assert_eq!(config.renderers.agents_md.max_change_patterns, 10);
         assert_eq!(config.renderers.agents_md.circularity_mode, "auto");
         assert_eq!(config.renderers.module_ctx.filename, ".context.md");
         assert!(config.renderers.module_ctx.per_directory);
+    }
+
+    #[test]
+    fn homer_section_defaults() {
+        let config = HomerConfig::default();
+        assert_eq!(config.homer.version, "0.1.0");
+        assert!(config.homer.db_path.is_none());
+    }
+
+    #[test]
+    fn homer_section_with_db_path() {
+        let toml_str = r#"
+[homer]
+version = "0.2.0"
+db_path = "/custom/path/homer.db"
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.homer.version, "0.2.0");
+        assert_eq!(
+            config.homer.db_path.as_deref(),
+            Some("/custom/path/homer.db")
+        );
+    }
+
+    #[test]
+    fn graph_snapshots_defaults() {
+        let config = HomerConfig::default();
+        assert!(config.graph.snapshots.at_releases);
+        assert_eq!(config.graph.snapshots.every_n_commits, 100);
+    }
+
+    #[test]
+    fn graph_snapshots_from_toml() {
+        let toml_str = r#"
+[graph]
+languages = "auto"
+
+[graph.snapshots]
+at_releases = false
+every_n_commits = 50
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.graph.snapshots.at_releases);
+        assert_eq!(config.graph.snapshots.every_n_commits, 50);
     }
 }
