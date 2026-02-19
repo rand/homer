@@ -21,7 +21,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 /// GitHub REST API extractor.
 #[derive(Debug)]
@@ -56,8 +56,15 @@ impl GitHubExtractor {
             client: Client::new(),
         }
     }
+}
 
-    pub async fn extract(
+#[async_trait::async_trait(?Send)]
+impl Extractor for GitHubExtractor {
+    fn name(&self) -> &'static str {
+        "github"
+    }
+
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -127,7 +134,9 @@ impl GitHubExtractor {
 
         Ok(stats)
     }
+}
 
+impl GitHubExtractor {
     // ── Pull Requests ───────────────────────────────────────────────
 
     async fn fetch_pull_requests(

@@ -1,6 +1,8 @@
 use std::time::Duration;
 
+use crate::config::HomerConfig;
 use crate::error::HomerError;
+use crate::store::HomerStore;
 
 /// Statistics returned by an extractor after a run.
 #[derive(Debug, Default)]
@@ -12,4 +14,19 @@ pub struct ExtractStats {
     pub errors: Vec<(String, HomerError)>,
 }
 
-// Extractor trait is defined in P1.03 once HomerStore trait exists.
+/// Common interface for all extractors.
+///
+/// Uses `?Send` because gix types (Repository, Commit) contain `RefCell`
+/// and cannot be held across await points in a Send future.
+#[async_trait::async_trait(?Send)]
+pub trait Extractor {
+    /// Human-readable name for this extractor (e.g. "git", "structure").
+    fn name(&self) -> &'static str;
+
+    /// Run extraction, populating the store with nodes and edges.
+    async fn extract(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+    ) -> crate::error::Result<ExtractStats>;
+}

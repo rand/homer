@@ -18,6 +18,7 @@ use crate::extract::gitlab::GitLabExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
+use crate::extract::traits::Extractor;
 use crate::progress::ProgressReporter;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
@@ -42,7 +43,7 @@ pub struct PipelineResult {
 /// A non-fatal error from one pipeline stage.
 #[derive(Debug)]
 pub struct PipelineError {
-    pub stage: &'static str,
+    pub stage: String,
     pub message: String,
 }
 
@@ -138,186 +139,42 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        // 1. Git history (must come first — creates commits and file nodes)
-        let git_ext = GitExtractor::new(&self.repo_path);
-        match git_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:git",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Git extraction failed (may not be a git repo)");
-                result.errors.push(PipelineError {
-                    stage: "extract:git",
-                    message: e.to_string(),
-                });
-            }
+        let mut extractors: Vec<Box<dyn Extractor>> = vec![
+            Box::new(GitExtractor::new(&self.repo_path)),
+            Box::new(StructureExtractor::new(&self.repo_path)),
+            Box::new(GraphExtractor::new(&self.repo_path)),
+            Box::new(DocumentExtractor::new(&self.repo_path)),
+        ];
+
+        if let Some(gh) = GitHubExtractor::from_repo(&self.repo_path, config) {
+            extractors.push(Box::new(gh));
+        }
+        if let Some(gl) = GitLabExtractor::from_repo(&self.repo_path, config) {
+            extractors.push(Box::new(gl));
         }
 
-        // 2. Structure (file tree, manifests, CI config)
-        let struct_ext = StructureExtractor::new(&self.repo_path);
-        match struct_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:structure",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Structure extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:structure",
-                    message: e.to_string(),
-                });
-            }
-        }
+        extractors.push(Box::new(PromptExtractor::new(&self.repo_path)));
 
-        // 3. Graph (call/import graphs via tree-sitter)
-        let graph_ext = GraphExtractor::new(&self.repo_path);
-        match graph_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:graph",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Graph extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:graph",
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // 4. Documents (Markdown cross-references)
-        let doc_ext = DocumentExtractor::new(&self.repo_path);
-        match doc_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:document",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Document extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:document",
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // 5. GitHub (PRs, issues, reviews — only if GitHub remote detected)
-        self.run_github_extraction(store, config, result).await;
-
-        // 5b. GitLab (MRs, issues, approvals — only if GitLab remote detected)
-        self.run_gitlab_extraction(store, config, result).await;
-
-        // 6. Prompts (agent rules always; sessions if opt-in)
-        self.run_prompt_extraction(store, config, result).await;
-    }
-
-    async fn run_github_extraction(
-        &self,
-        store: &dyn HomerStore,
-        config: &HomerConfig,
-        result: &mut PipelineResult,
-    ) {
-        if let Some(gh_ext) = GitHubExtractor::from_repo(&self.repo_path, config) {
-            match gh_ext.extract(store, config).await {
+        for ext in &extractors {
+            let stage = format!("extract:{}", ext.name());
+            match ext.extract(store, config).await {
                 Ok(stats) => {
                     result.extract_nodes += stats.nodes_created;
                     result.extract_edges += stats.edges_created;
                     for (desc, err) in stats.errors {
                         result.errors.push(PipelineError {
-                            stage: "extract:github",
+                            stage: stage.clone(),
                             message: format!("{desc}: {err}"),
                         });
                     }
                 }
                 Err(e) => {
-                    warn!(error = %e, "GitHub extraction failed");
+                    warn!(stage = %stage, error = %e, "Extraction failed");
                     result.errors.push(PipelineError {
-                        stage: "extract:github",
+                        stage,
                         message: e.to_string(),
                     });
                 }
-            }
-        }
-    }
-
-    async fn run_gitlab_extraction(
-        &self,
-        store: &dyn HomerStore,
-        config: &HomerConfig,
-        result: &mut PipelineResult,
-    ) {
-        if let Some(gl_ext) = GitLabExtractor::from_repo(&self.repo_path, config) {
-            match gl_ext.extract(store, config).await {
-                Ok(stats) => {
-                    result.extract_nodes += stats.nodes_created;
-                    result.extract_edges += stats.edges_created;
-                    for (desc, err) in stats.errors {
-                        result.errors.push(PipelineError {
-                            stage: "extract:gitlab",
-                            message: format!("{desc}: {err}"),
-                        });
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "GitLab extraction failed");
-                    result.errors.push(PipelineError {
-                        stage: "extract:gitlab",
-                        message: e.to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    async fn run_prompt_extraction(
-        &self,
-        store: &dyn HomerStore,
-        config: &HomerConfig,
-        result: &mut PipelineResult,
-    ) {
-        let prompt_ext = PromptExtractor::new(&self.repo_path);
-        match prompt_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:prompt",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Prompt extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:prompt",
-                    message: e.to_string(),
-                });
             }
         }
     }
@@ -337,7 +194,7 @@ impl HomerPipeline {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
                     result.errors.push(PipelineError {
-                        stage: "analyze:behavioral",
+                        stage: "analyze:behavioral".into(),
                         message: format!("{desc}: {err}"),
                     });
                 }
@@ -345,7 +202,7 @@ impl HomerPipeline {
             Err(e) => {
                 warn!(error = %e, "Behavioral analysis failed");
                 result.errors.push(PipelineError {
-                    stage: "analyze:behavioral",
+                    stage: "analyze:behavioral".into(),
                     message: e.to_string(),
                 });
             }
@@ -358,7 +215,7 @@ impl HomerPipeline {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
                     result.errors.push(PipelineError {
-                        stage: "analyze:centrality",
+                        stage: "analyze:centrality".into(),
                         message: format!("{desc}: {err}"),
                     });
                 }
@@ -366,7 +223,7 @@ impl HomerPipeline {
             Err(e) => {
                 warn!(error = %e, "Centrality analysis failed");
                 result.errors.push(PipelineError {
-                    stage: "analyze:centrality",
+                    stage: "analyze:centrality".into(),
                     message: e.to_string(),
                 });
             }
@@ -379,7 +236,7 @@ impl HomerPipeline {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
                     result.errors.push(PipelineError {
-                        stage: "analyze:community",
+                        stage: "analyze:community".into(),
                         message: format!("{desc}: {err}"),
                     });
                 }
@@ -387,7 +244,7 @@ impl HomerPipeline {
             Err(e) => {
                 warn!(error = %e, "Community analysis failed");
                 result.errors.push(PipelineError {
-                    stage: "analyze:community",
+                    stage: "analyze:community".into(),
                     message: e.to_string(),
                 });
             }
@@ -400,7 +257,7 @@ impl HomerPipeline {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
                     result.errors.push(PipelineError {
-                        stage: "analyze:temporal",
+                        stage: "analyze:temporal".into(),
                         message: format!("{desc}: {err}"),
                     });
                 }
@@ -408,7 +265,7 @@ impl HomerPipeline {
             Err(e) => {
                 warn!(error = %e, "Temporal analysis failed");
                 result.errors.push(PipelineError {
-                    stage: "analyze:temporal",
+                    stage: "analyze:temporal".into(),
                     message: e.to_string(),
                 });
             }
@@ -421,7 +278,7 @@ impl HomerPipeline {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
                     result.errors.push(PipelineError {
-                        stage: "analyze:convention",
+                        stage: "analyze:convention".into(),
                         message: format!("{desc}: {err}"),
                     });
                 }
@@ -429,7 +286,7 @@ impl HomerPipeline {
             Err(e) => {
                 warn!(error = %e, "Convention analysis failed");
                 result.errors.push(PipelineError {
-                    stage: "analyze:convention",
+                    stage: "analyze:convention".into(),
                     message: e.to_string(),
                 });
             }
@@ -442,7 +299,7 @@ impl HomerPipeline {
                 result.analysis_results += stats.results_stored;
                 for (desc, err) in stats.errors {
                     result.errors.push(PipelineError {
-                        stage: "analyze:task_pattern",
+                        stage: "analyze:task_pattern".into(),
                         message: format!("{desc}: {err}"),
                     });
                 }
@@ -450,7 +307,7 @@ impl HomerPipeline {
             Err(e) => {
                 warn!(error = %e, "Task pattern analysis failed");
                 result.errors.push(PipelineError {
-                    stage: "analyze:task_pattern",
+                    stage: "analyze:task_pattern".into(),
                     message: e.to_string(),
                 });
             }
@@ -515,16 +372,19 @@ impl HomerPipeline {
         let path = &self.repo_path;
 
         for name in names {
-            let (stage, renderer): (&str, Box<dyn Renderer>) = match *name {
-                "agents-md" => ("render:agents_md", Box::new(AgentsMdRenderer)),
-                "module-ctx" => ("render:module_context", Box::new(ModuleContextRenderer)),
-                "risk-map" => ("render:risk_map", Box::new(RiskMapRenderer)),
-                "skills" => ("render:skills", Box::new(SkillsRenderer)),
-                "report" => ("render:report", Box::new(ReportRenderer)),
-                "topos-spec" => ("render:topos_spec", Box::new(ToposSpecRenderer)),
+            let (stage, renderer): (String, Box<dyn Renderer>) = match *name {
+                "agents-md" => ("render:agents_md".into(), Box::new(AgentsMdRenderer)),
+                "module-ctx" => (
+                    "render:module_context".into(),
+                    Box::new(ModuleContextRenderer),
+                ),
+                "risk-map" => ("render:risk_map".into(), Box::new(RiskMapRenderer)),
+                "skills" => ("render:skills".into(), Box::new(SkillsRenderer)),
+                "report" => ("render:report".into(), Box::new(ReportRenderer)),
+                "topos-spec" => ("render:topos_spec".into(), Box::new(ToposSpecRenderer)),
                 unknown => {
                     result.errors.push(PipelineError {
-                        stage: "render",
+                        stage: "render".into(),
                         message: format!("Unknown renderer: {unknown}"),
                     });
                     continue;
@@ -534,7 +394,7 @@ impl HomerPipeline {
             match renderer.write(store, config, path).await {
                 Ok(()) => result.artifacts_written += 1,
                 Err(e) => {
-                    warn!(stage, error = %e, "Renderer failed");
+                    warn!(stage = %stage, error = %e, "Renderer failed");
                     result.errors.push(PipelineError {
                         stage,
                         message: e.to_string(),

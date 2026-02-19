@@ -14,6 +14,8 @@ use crate::types::{
     NodeId, NodeKind,
 };
 
+use super::traits::{ExtractStats, Extractor};
+
 /// Git history extractor — walks commits, diffs, contributors, tags.
 #[derive(Debug)]
 pub struct GitExtractor {
@@ -26,10 +28,16 @@ impl GitExtractor {
             repo_path: repo_path.to_path_buf(),
         }
     }
+}
 
-    /// Run full git extraction into the store.
+#[async_trait::async_trait(?Send)]
+impl Extractor for GitExtractor {
+    fn name(&self) -> &'static str {
+        "git"
+    }
+
     #[instrument(skip_all, name = "git_extract")]
-    pub async fn extract(
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -107,7 +115,9 @@ impl GitExtractor {
         );
         Ok(stats)
     }
+}
 
+impl GitExtractor {
     /// Check if `candidate_sha` is an ancestor of `head` by walking history.
     fn is_ancestor(head: &gix::Commit<'_>, candidate_sha: &str) -> bool {
         let Ok(walk) = head.ancestors().all() else {
@@ -353,27 +363,117 @@ impl GitExtractor {
             .tags()
             .map_err(|e| HomerError::Extract(ExtractError::Git(e.to_string())))?;
 
+        // Collect all tags with their resolved target commit OIDs.
+        let mut tags: Vec<(String, gix::ObjectId)> = Vec::new();
         for tag_ref in tag_refs.flatten() {
             let tag_name = tag_ref.name().as_bstr().to_string();
-            let short_name = tag_name.strip_prefix("refs/tags/").unwrap_or(&tag_name);
+            let short_name = tag_name
+                .strip_prefix("refs/tags/")
+                .unwrap_or(&tag_name)
+                .to_string();
+
+            // Peel annotated tags to their target commit.
+            let target_oid = tag_ref.id().detach();
 
             let release_node = Node {
                 id: NodeId(0),
                 kind: NodeKind::Release,
-                name: short_name.to_string(),
+                name: short_name.clone(),
                 content_hash: None,
                 last_extracted: Utc::now(),
                 metadata: {
                     let mut m = HashMap::new();
                     m.insert(
                         "target".to_string(),
-                        serde_json::json!(tag_ref.id().to_string()),
+                        serde_json::json!(target_oid.to_string()),
                     );
                     m
                 },
             };
             store.upsert_node(&release_node).await?;
             stats.nodes_created += 1;
+
+            tags.push((short_name, target_oid));
+        }
+
+        // Create Release→Commit Includes edges.
+        // For each tag, walk backward from its target commit to the previous tag's
+        // target (or the beginning of history for the earliest tag).
+        self.create_release_commit_edges(repo, store, stats, &tags)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Walk commits between consecutive release tags and create Includes edges.
+    async fn create_release_commit_edges(
+        &self,
+        repo: &gix::Repository,
+        store: &dyn HomerStore,
+        stats: &mut ExtractStats,
+        tags: &[(String, gix::ObjectId)],
+    ) -> crate::error::Result<()> {
+        if tags.is_empty() {
+            return Ok(());
+        }
+
+        // Build a set of tag target OIDs for boundary detection.
+        let tag_targets: std::collections::HashSet<gix::ObjectId> =
+            tags.iter().map(|(_, oid)| *oid).collect();
+
+        for (tag_name, target_oid) in tags {
+            let release_node = store.get_node_by_name(NodeKind::Release, tag_name).await?;
+            let Some(release_node) = release_node else {
+                continue;
+            };
+
+            // Walk backward from the tag's target commit.
+            let Ok(commit) = repo.find_commit(*target_oid) else {
+                continue;
+            };
+            let Ok(walk) = commit.ancestors().all() else {
+                continue;
+            };
+
+            for info in walk {
+                let Ok(info) = info else { continue };
+                let commit_sha = info.id.to_string();
+
+                // Stop at previous tag boundary (but include the first commit).
+                if info.id != *target_oid && tag_targets.contains(&info.id) {
+                    break;
+                }
+
+                // Look up the commit node in the store.
+                let Some(commit_node) = store
+                    .get_node_by_name(NodeKind::Commit, &commit_sha)
+                    .await?
+                else {
+                    continue;
+                };
+
+                let includes_edge = Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: HyperedgeKind::Includes,
+                    members: vec![
+                        HyperedgeMember {
+                            node_id: release_node.id,
+                            role: "release".to_string(),
+                            position: 0,
+                        },
+                        HyperedgeMember {
+                            node_id: commit_node.id,
+                            role: "commit".to_string(),
+                            position: 1,
+                        },
+                    ],
+                    confidence: 1.0,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                };
+                store.upsert_hyperedge(&includes_edge).await?;
+                stats.edges_created += 1;
+            }
         }
 
         Ok(())
@@ -383,16 +483,6 @@ impl GitExtractor {
 struct CommitNodeIds {
     commit: NodeId,
     contributor: NodeId,
-}
-
-/// Stats from running the extractor.
-#[derive(Debug, Default)]
-pub struct ExtractStats {
-    pub nodes_created: u64,
-    pub nodes_updated: u64,
-    pub edges_created: u64,
-    pub duration: std::time::Duration,
-    pub errors: Vec<(String, HomerError)>,
 }
 
 /// Intermediate diff entry: captures blob IDs during tree walk for post-processing.

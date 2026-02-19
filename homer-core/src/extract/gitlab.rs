@@ -21,7 +21,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 /// GitLab REST API extractor.
 #[derive(Debug)]
@@ -67,8 +67,15 @@ impl GitLabExtractor {
             client: Client::new(),
         }
     }
+}
 
-    pub async fn extract(
+#[async_trait::async_trait(?Send)]
+impl Extractor for GitLabExtractor {
+    fn name(&self) -> &'static str {
+        "gitlab"
+    }
+
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -133,7 +140,9 @@ impl GitLabExtractor {
 
         Ok(stats)
     }
+}
 
+impl GitLabExtractor {
     // ── Merge Requests ──────────────────────────────────────────────
 
     async fn fetch_merge_requests(

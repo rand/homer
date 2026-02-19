@@ -132,27 +132,27 @@ fn print_results(args: &RiskCheckArgs, violations: &[serde_json::Value]) {
         // unwrap is safe: we constructed this JSON ourselves
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     } else if violations.is_empty() {
+        println!(
+            "Risk check PASS — no files exceed threshold {:.1}",
+            args.threshold
+        );
+    } else {
+        println!(
+            "Risk check FAIL — {} files exceed threshold {:.1}:",
+            violations.len(),
+            args.threshold
+        );
+        println!();
+        for v in violations {
             println!(
-                "Risk check PASS — no files exceed threshold {:.1}",
-                args.threshold
+                "  {}: risk={:.2}, salience={:.2}, bus_factor={}, changes={}",
+                v["file"].as_str().unwrap_or("?"),
+                v["risk_score"].as_f64().unwrap_or(0.0),
+                v["salience"].as_f64().unwrap_or(0.0),
+                v["bus_factor"],
+                v["change_frequency"],
             );
-        } else {
-            println!(
-                "Risk check FAIL — {} files exceed threshold {:.1}:",
-                violations.len(),
-                args.threshold
-            );
-            println!();
-            for v in violations {
-                println!(
-                    "  {}: risk={:.2}, salience={:.2}, bus_factor={}, changes={}",
-                    v["file"].as_str().unwrap_or("?"),
-                    v["risk_score"].as_f64().unwrap_or(0.0),
-                    v["salience"].as_f64().unwrap_or(0.0),
-                    v["bus_factor"],
-                    v["change_frequency"],
-                );
-            }
+        }
     }
 }
 

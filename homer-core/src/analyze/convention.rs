@@ -985,6 +985,8 @@ mod tests {
 
     #[tokio::test]
     async fn full_convention_analysis() {
+        use crate::extract::traits::Extractor;
+
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
         std::fs::write(

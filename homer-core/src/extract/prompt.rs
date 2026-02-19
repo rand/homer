@@ -15,7 +15,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 // ── Public extractor ─────────────────────────────────────────────
 
@@ -30,8 +30,15 @@ impl PromptExtractor {
             repo_path: repo_path.to_path_buf(),
         }
     }
+}
 
-    pub async fn extract(
+#[async_trait::async_trait(?Send)]
+impl Extractor for PromptExtractor {
+    fn name(&self) -> &'static str {
+        "prompt"
+    }
+
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,

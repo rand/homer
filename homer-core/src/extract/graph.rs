@@ -19,7 +19,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 #[derive(Debug)]
 pub struct GraphExtractor {
@@ -34,9 +34,16 @@ impl GraphExtractor {
             registry: LanguageRegistry::new(),
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Extractor for GraphExtractor {
+    fn name(&self) -> &'static str {
+        "graph"
+    }
 
     #[instrument(skip_all, name = "graph_extract")]
-    pub async fn extract(
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -117,7 +124,9 @@ impl GraphExtractor {
         );
         Ok(stats)
     }
+}
 
+impl GraphExtractor {
     async fn process_file(
         &self,
         store: &dyn HomerStore,

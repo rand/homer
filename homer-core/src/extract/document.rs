@@ -13,7 +13,7 @@ use crate::types::{
     DocumentType, Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 #[derive(Debug)]
 pub struct DocumentExtractor {
@@ -26,9 +26,16 @@ impl DocumentExtractor {
             repo_path: repo_path.to_path_buf(),
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Extractor for DocumentExtractor {
+    fn name(&self) -> &'static str {
+        "document"
+    }
 
     #[instrument(skip_all, name = "document_extract")]
-    pub async fn extract(
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -65,7 +72,9 @@ impl DocumentExtractor {
         );
         Ok(stats)
     }
+}
 
+impl DocumentExtractor {
     fn find_document_files(&self, config: &HomerConfig) -> Vec<PathBuf> {
         let doc_config = &config.extraction.documents;
         let mut matched = Vec::new();
