@@ -21,6 +21,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
+use super::forge_common::{ensure_contributor, parse_issue_refs};
 use super::traits::{ExtractStats, Extractor};
 
 /// GitLab REST API extractor.
@@ -505,80 +506,9 @@ struct GlApprover {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/// Ensure a Contributor node exists, return its ID.
-async fn ensure_contributor(
-    store: &dyn HomerStore,
-    stats: &mut ExtractStats,
-    username: &str,
-) -> crate::error::Result<NodeId> {
-    if let Some(node) = store
-        .get_node_by_name(NodeKind::Contributor, username)
-        .await?
-    {
-        return Ok(node.id);
-    }
-
-    let id = store
-        .upsert_node(&Node {
-            id: NodeId(0),
-            kind: NodeKind::Contributor,
-            name: username.to_string(),
-            content_hash: None,
-            last_extracted: Utc::now(),
-            metadata: HashMap::new(),
-        })
-        .await?;
-    stats.nodes_created += 1;
-    Ok(id)
-}
-
 /// Minimal percent-encoding for GitLab project path segments.
 fn urlencod(s: &str) -> String {
     s.replace('%', "%25").replace('/', "%2F")
-}
-
-/// Parse issue cross-references from MR description.
-/// Matches "closes #N", "fixes #N", "resolves #N" (GitLab keywords).
-fn parse_issue_refs(text: &str) -> Vec<u64> {
-    let lower = text.to_lowercase();
-    let mut refs = Vec::new();
-
-    let patterns = [
-        "close ",
-        "closes ",
-        "closed ",
-        "fix ",
-        "fixes ",
-        "fixed ",
-        "resolve ",
-        "resolves ",
-        "resolved ",
-    ];
-
-    for pattern in &patterns {
-        let mut search = lower.as_str();
-        while let Some(pos) = search.find(pattern) {
-            let after = &search[pos + pattern.len()..];
-            if let Some(num) = extract_issue_number(after) {
-                if !refs.contains(&num) {
-                    refs.push(num);
-                }
-            }
-            search = &search[pos + pattern.len()..];
-        }
-    }
-
-    refs
-}
-
-fn extract_issue_number(text: &str) -> Option<u64> {
-    let text = text.trim_start();
-    let text = text.strip_prefix('#')?;
-    let num_str: String = text.chars().take_while(char::is_ascii_digit).collect();
-    if num_str.is_empty() {
-        return None;
-    }
-    num_str.parse().ok()
 }
 
 /// Detect GitLab remote URL from a git repo.
@@ -677,35 +607,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_issue_refs_basic() {
-        let refs = parse_issue_refs("This fixes #42 and closes #99");
-        assert!(refs.contains(&42));
-        assert!(refs.contains(&99));
-    }
-
-    #[test]
-    fn parse_issue_refs_no_duplicates() {
-        let refs = parse_issue_refs("fixes #5, also fixes #5");
-        assert_eq!(refs.len(), 1);
-    }
-
-    #[test]
-    fn parse_issue_refs_no_refs() {
-        let refs = parse_issue_refs("This MR adds a feature");
-        assert!(refs.is_empty());
-    }
-
-    #[test]
     fn urlencod_simple() {
         assert_eq!(urlencod("myorg"), "myorg");
         assert_eq!(urlencod("my/org"), "my%2Forg");
-    }
-
-    #[test]
-    fn extract_number_from_hash() {
-        assert_eq!(extract_issue_number("#42"), Some(42));
-        assert_eq!(extract_issue_number("  #100"), Some(100));
-        assert_eq!(extract_issue_number("#abc"), None);
-        assert_eq!(extract_issue_number("no hash"), None);
     }
 }

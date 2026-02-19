@@ -1,4 +1,5 @@
 pub mod document;
+pub mod forge_common;
 pub mod git;
 pub mod github;
 pub mod gitlab;
