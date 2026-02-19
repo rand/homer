@@ -268,6 +268,26 @@ files:
 files:
   - homer-graphs/src/languages/ecma_scope.rs
 
+## Area 66: mod
+files:
+  - homer-core/src/query/mod.rs
+
+## Area 67: render
+files:
+  - homer-cli/src/commands/render.rs
+
+## Area 68: risk_check
+files:
+  - homer-cli/src/commands/risk_check.rs
+
+## Area 69: snapshot
+files:
+  - homer-cli/src/commands/snapshot.rs
+
+## Area 70: forge_common
+files:
+  - homer-core/src/extract/forge_common.rs
+
 # Concepts
 
 Concept InitArgs:

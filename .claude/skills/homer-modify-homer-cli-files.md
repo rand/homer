@@ -8,12 +8,12 @@ Based on analysis of 3 occurrences from co-change analysis:
 
 ## Files to modify
 
-1. `Cargo.lock`
-2. `homer-cli/src`
-3. `homer-mcp/Cargo.toml`
-4. `homer-cli/Cargo.toml`
-5. `homer-cli/src/commands`
-6. `homer-cli`
-7. `homer-cli/src/commands/mod.rs`
-8. `homer-mcp/src/lib.rs`
+1. `homer-cli/src/commands/mod.rs`
+2. `homer-core/src/render/agents_md.rs`
+3. `homer-core/src/extract/traits.rs`
+4. `homer-core/src/types.rs`
+5. `homer-core/src/analyze/traits.rs`
+6. `homer-core/src/query/mod.rs`
+7. `homer-cli`
+8. `homer-cli/src`
 

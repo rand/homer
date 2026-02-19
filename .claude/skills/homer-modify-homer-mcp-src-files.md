@@ -8,12 +8,12 @@ Based on analysis of 3 occurrences from co-change analysis:
 
 ## Files to modify
 
-1. `homer-core/src/render/agents_md.rs`
-2. `homer-core/src/store/incremental.rs`
-3. `homer-core/src`
-4. `homer-core`
-5. `homer-mcp/src/lib.rs`
-6. `homer-core/src/pipeline.rs`
-7. `homer-graphs/src/diff.rs`
-8. `homer-graphs/src/languages/python.rs`
+1. `homer-core/src/extract`
+2. `homer-graphs`
+3. `homer-core/src/extract/.context.md`
+4. `homer-core/src/store/.context.md`
+5. `spec`
+6. `homer-test/tests/.context.md`
+7. `spec/homer-spec.tps`
+8. `homer-mcp/src/.context.md`
 
