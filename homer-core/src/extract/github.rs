@@ -193,7 +193,7 @@ impl GitHubExtractor {
                 if pr.number <= since_number {
                     continue;
                 }
-                if fetched >= gh_config.max_pr_history {
+                if gh_config.max_pr_history > 0 && fetched >= gh_config.max_pr_history {
                     break;
                 }
                 max_number = max_number.max(pr.number);
@@ -217,7 +217,9 @@ impl GitHubExtractor {
                 }
             }
 
-            if prs.len() < 100 || fetched >= gh_config.max_pr_history {
+            if prs.len() < 100
+                || (gh_config.max_pr_history > 0 && fetched >= gh_config.max_pr_history)
+            {
                 break;
             }
             page += 1;
@@ -505,7 +507,7 @@ impl GitHubExtractor {
                 if issue.number <= since_number {
                     continue;
                 }
-                if fetched >= gh_config.max_issue_history {
+                if gh_config.max_issue_history > 0 && fetched >= gh_config.max_issue_history {
                     break;
                 }
                 max_number = max_number.max(issue.number);
@@ -536,7 +538,9 @@ impl GitHubExtractor {
                 stats.nodes_created += 1;
             }
 
-            if issues.len() < 100 || fetched >= gh_config.max_issue_history {
+            if issues.len() < 100
+                || (gh_config.max_issue_history > 0 && fetched >= gh_config.max_issue_history)
+            {
                 break;
             }
             page += 1;
@@ -709,16 +713,27 @@ struct GhComment {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /// Estimate upper bound of API calls for a GitHub extraction run.
+/// When limits are 0 (unlimited), uses a reasonable upper bound for estimation.
 fn estimate_api_calls(gh_config: &crate::config::GitHubExtractionConfig) -> u32 {
-    let pr_pages = gh_config.max_pr_history / 100 + 1;
+    let pr_limit = if gh_config.max_pr_history == 0 {
+        1000
+    } else {
+        gh_config.max_pr_history
+    };
+    let issue_limit = if gh_config.max_issue_history == 0 {
+        1000
+    } else {
+        gh_config.max_issue_history
+    };
+    let pr_pages = pr_limit / 100 + 1;
     let mut calls = pr_pages;
     if gh_config.include_reviews {
-        calls += gh_config.max_pr_history;
+        calls += pr_limit;
     }
     if gh_config.include_comments {
-        calls += gh_config.max_pr_history;
+        calls += pr_limit;
     }
-    calls += gh_config.max_issue_history / 100 + 1;
+    calls += issue_limit / 100 + 1;
     calls
 }
 
