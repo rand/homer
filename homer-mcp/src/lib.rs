@@ -15,9 +15,10 @@ use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_router};
 use serde::Deserialize;
 use tracing::info;
 
+use homer_core::query;
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
-use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeId, NodeKind};
+use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
 
 // ── Tool parameter types ──────────────────────────────────────────
 
@@ -191,60 +192,8 @@ impl ServerHandler for HomerMcpServer {
 // ── Tool logic (separated for testability) ────────────────────────
 
 impl HomerMcpServer {
-    /// Resolve call-graph edges for a node, returning (incoming callers, outgoing callees).
-    async fn resolve_call_edges(&self, id: NodeId) -> (Vec<String>, Vec<String>) {
-        let Ok(edges) = self.store.get_edges_involving(id).await else {
-            return (Vec::new(), Vec::new());
-        };
-        let mut incoming = Vec::new();
-        let mut outgoing = Vec::new();
-        for edge in &edges {
-            if edge.kind != HyperedgeKind::Calls {
-                continue;
-            }
-            for m in &edge.members {
-                if m.node_id == id {
-                    continue;
-                }
-                if let Ok(Some(n)) = self.store.get_node(m.node_id).await {
-                    if m.role == "caller" {
-                        incoming.push(n.name);
-                    } else if m.role == "callee" {
-                        outgoing.push(n.name);
-                    }
-                }
-            }
-        }
-        (incoming, outgoing)
-    }
-
-    /// Resolve names of nodes related via a specific edge kind.
-    async fn resolve_related_names(&self, id: NodeId, kind: HyperedgeKind) -> Vec<String> {
-        let Ok(edges) = self.store.get_edges_involving(id).await else {
-            return Vec::new();
-        };
-        let mut names = Vec::new();
-        for edge in &edges {
-            if edge.kind != kind {
-                continue;
-            }
-            for m in &edge.members {
-                if m.node_id == id {
-                    continue;
-                }
-                let name = if let Ok(Some(n)) = self.store.get_node(m.node_id).await {
-                    n.name
-                } else {
-                    format!("node:{}", m.node_id.0)
-                };
-                names.push(name);
-            }
-        }
-        names
-    }
-
     async fn do_query(&self, params: QueryParams) -> Result<String, String> {
-        let kind = params.kind.as_deref().and_then(parse_node_kind);
+        let kind = params.kind.as_deref().and_then(query::parse_node_kind);
         let filter = NodeFilter {
             kind,
             name_contains: Some(params.entity.clone()),
@@ -296,7 +245,7 @@ impl HomerMcpServer {
             }
 
             if include.iter().any(|s| s == "callers" || s == "callees") {
-                let (incoming, outgoing) = self.resolve_call_edges(node.id).await;
+                let (incoming, outgoing) = query::resolve_call_edges(&*self.store, node.id).await;
                 if include.iter().any(|s| s == "callers") {
                     entry["callers"] = serde_json::json!(incoming);
                 }
@@ -307,7 +256,7 @@ impl HomerMcpServer {
 
             if include.iter().any(|s| s == "co_changes") {
                 entry["co_changes"] = serde_json::json!(
-                    self.resolve_related_names(node.id, HyperedgeKind::CoChanges)
+                    query::resolve_related_names(&*self.store, node.id, HyperedgeKind::CoChanges)
                         .await
                 );
             }
@@ -359,13 +308,7 @@ impl HomerMcpServer {
         // Resolve names and apply scope filter BEFORE top-N truncation.
         let mut named: Vec<(String, f64, &serde_json::Value)> = Vec::new();
         for (node_id, val, data) in &scored {
-            let name = self
-                .store
-                .get_node(*node_id)
-                .await
-                .ok()
-                .flatten()
-                .map_or_else(|| format!("node:{}", node_id.0), |n| n.name);
+            let name = query::resolve_name(&*self.store, *node_id).await;
 
             if let Some(ref scope) = params.scope {
                 if !name.starts_with(scope.as_str()) {
@@ -496,14 +439,7 @@ impl HomerMcpServer {
         for (edge, confidence) in scored.iter().take(top_n) {
             let mut member_names = Vec::new();
             for member in &edge.members {
-                let name = self
-                    .store
-                    .get_node(member.node_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map_or_else(|| format!("node:{}", member.node_id.0), |n| n.name);
-                member_names.push(name);
+                member_names.push(query::resolve_name(&*self.store, member.node_id).await);
             }
 
             let mut entry = serde_json::json!({
@@ -569,13 +505,7 @@ impl HomerMcpServer {
             // Aggregate per-file convention data into a project-wide summary
             let mut patterns: Vec<serde_json::Value> = Vec::new();
             for analysis in &analyses {
-                let node_name = self
-                    .store
-                    .get_node(analysis.node_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map_or_else(|| format!("node:{}", analysis.node_id.0), |n| n.name);
+                let node_name = query::resolve_name(&*self.store, analysis.node_id).await;
 
                 patterns.push(serde_json::json!({
                     "file": node_name,
@@ -608,22 +538,6 @@ impl HomerMcpServer {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-fn parse_node_kind(s: &str) -> Option<NodeKind> {
-    match s.to_lowercase().as_str() {
-        "function" | "fn" => Some(NodeKind::Function),
-        "type" | "struct" | "class" => Some(NodeKind::Type),
-        "file" => Some(NodeKind::File),
-        "module" | "dir" | "directory" => Some(NodeKind::Module),
-        "commit" => Some(NodeKind::Commit),
-        "contributor" | "author" => Some(NodeKind::Contributor),
-        "pr" | "pullrequest" => Some(NodeKind::PullRequest),
-        "issue" => Some(NodeKind::Issue),
-        "dep" | "dependency" => Some(NodeKind::ExternalDep),
-        "document" | "doc" => Some(NodeKind::Document),
-        _ => None,
-    }
-}
 
 fn compute_risk_level(risk: &serde_json::Value) -> &'static str {
     let mut score = 0u32;
@@ -695,17 +609,6 @@ pub fn resolve_db_path(repo_path: &std::path::Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_node_kind_variants() {
-        assert_eq!(parse_node_kind("function"), Some(NodeKind::Function));
-        assert_eq!(parse_node_kind("fn"), Some(NodeKind::Function));
-        assert_eq!(parse_node_kind("type"), Some(NodeKind::Type));
-        assert_eq!(parse_node_kind("file"), Some(NodeKind::File));
-        assert_eq!(parse_node_kind("module"), Some(NodeKind::Module));
-        assert_eq!(parse_node_kind("unknown"), None);
-        assert_eq!(parse_node_kind("all"), None);
-    }
 
     #[test]
     fn risk_level_computation() {

@@ -5,9 +5,10 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::Args;
 
+use homer_core::query;
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
-use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeId, NodeKind};
+use homer_core::types::{AnalysisKind, HyperedgeKind, NodeId};
 
 #[derive(Args, Debug)]
 pub struct QueryArgs {
@@ -69,7 +70,7 @@ pub async fn run(args: QueryArgs) -> anyhow::Result<()> {
     let db = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 
-    let node = find_entity(&db, &args.entity).await?;
+    let node = query::find_entity(&db, &args.entity).await?;
     let Some(node) = node else {
         println!("No entity found matching: {}", args.entity);
         return Ok(());
@@ -84,46 +85,6 @@ pub async fn run(args: QueryArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-async fn find_entity(
-    db: &SqliteStore,
-    name: &str,
-) -> anyhow::Result<Option<homer_core::types::Node>> {
-    // Try exact match by kind
-    for kind in [
-        NodeKind::File,
-        NodeKind::Function,
-        NodeKind::Type,
-        NodeKind::Module,
-        NodeKind::Document,
-    ] {
-        if let Some(node) = db.get_node_by_name(kind, name).await? {
-            return Ok(Some(node));
-        }
-    }
-
-    // Try partial match
-    for kind in [
-        NodeKind::File,
-        NodeKind::Function,
-        NodeKind::Type,
-        NodeKind::Module,
-    ] {
-        let nodes = db
-            .find_nodes(&NodeFilter {
-                kind: Some(kind),
-                ..Default::default()
-            })
-            .await?;
-        for node in nodes {
-            if node.name.contains(name) || node.name.ends_with(name) {
-                return Ok(Some(node));
-            }
-        }
-    }
-
-    Ok(None)
 }
 
 // ── Text format ──────────────────────────────────────────────────
@@ -275,7 +236,8 @@ async fn emit_text_neighbors(
     neighbor_role: &str,
     depth: u32,
 ) -> anyhow::Result<()> {
-    let neighbors = collect_neighbors(db, node_id, self_role, neighbor_role, depth).await?;
+    let neighbors =
+        query::collect_neighbors_bfs(db, node_id, self_role, neighbor_role, depth).await?;
     if neighbors.is_empty() {
         return Ok(());
     }
@@ -303,7 +265,7 @@ async fn emit_text_history(db: &SqliteStore, node: &homer_core::types::Node) -> 
         // Modifies: commit (position 0) -> file (position 1)
         let commit_member = edge.members.iter().find(|m| m.position == 0);
         if let Some(cm) = commit_member {
-            let name = resolve_name(db, cm.node_id).await;
+            let name = query::resolve_name(db, cm.node_id).await;
             println!("  {name}");
         }
     }
@@ -334,7 +296,7 @@ async fn print_markdown(
     }
 
     if sections.callers {
-        let callers = collect_neighbors(db, node.id, "callee", "caller", depth).await?;
+        let callers = query::collect_neighbors_bfs(db, node.id, "callee", "caller", depth).await?;
         if !callers.is_empty() {
             let _ = writeln!(out, "## Callers\n");
             emit_md_neighbors(&mut out, &callers);
@@ -342,7 +304,7 @@ async fn print_markdown(
     }
 
     if sections.callees {
-        let callees = collect_neighbors(db, node.id, "caller", "callee", depth).await?;
+        let callees = query::collect_neighbors_bfs(db, node.id, "caller", "callee", depth).await?;
         if !callees.is_empty() {
             let _ = writeln!(out, "## Callees\n");
             emit_md_neighbors(&mut out, &callees);
@@ -438,7 +400,7 @@ async fn emit_md_history(
     for edge in modifies.iter().take(20) {
         let commit_member = edge.members.iter().find(|m| m.position == 0);
         if let Some(cm) = commit_member {
-            let name = resolve_name(db, cm.node_id).await;
+            let name = query::resolve_name(db, cm.node_id).await;
             let _ = writeln!(out, "- `{name}`");
         }
     }
@@ -478,61 +440,17 @@ async fn print_json(
     }
 
     if sections.callers {
-        let callers = collect_neighbors(db, node.id, "callee", "caller", 1).await?;
+        let callers = query::collect_neighbors_bfs(db, node.id, "callee", "caller", 1).await?;
         data["callers"] =
             serde_json::Value::Array(callers.into_iter().map(|(_, n)| n.into()).collect());
     }
 
     if sections.callees {
-        let callees = collect_neighbors(db, node.id, "caller", "callee", 1).await?;
+        let callees = query::collect_neighbors_bfs(db, node.id, "caller", "callee", 1).await?;
         data["callees"] =
             serde_json::Value::Array(callees.into_iter().map(|(_, n)| n.into()).collect());
     }
 
     println!("{}", serde_json::to_string_pretty(&data)?);
     Ok(())
-}
-
-// ── Shared helpers ──────────────────────────────────────────────
-
-/// BFS traversal collecting directed neighbors at each depth level.
-async fn collect_neighbors(
-    db: &SqliteStore,
-    start: NodeId,
-    self_role: &str,
-    neighbor_role: &str,
-    max_depth: u32,
-) -> anyhow::Result<Vec<(u32, String)>> {
-    let mut result = Vec::new();
-    let mut frontier = vec![start];
-    let mut visited = HashSet::new();
-    visited.insert(start);
-
-    for depth in 1..=max_depth {
-        let mut next_frontier = Vec::new();
-        for &nid in &frontier {
-            let edges = db.get_edges_involving(nid).await?;
-            for edge in edges.iter().filter(|e| e.kind == HyperedgeKind::Calls) {
-                let self_m = edge.members.iter().find(|m| m.role == self_role);
-                let neighbor_m = edge.members.iter().find(|m| m.role == neighbor_role);
-                if let (Some(s), Some(n)) = (self_m, neighbor_m) {
-                    if s.node_id == nid && visited.insert(n.node_id) {
-                        let name = resolve_name(db, n.node_id).await;
-                        result.push((depth, name));
-                        next_frontier.push(n.node_id);
-                    }
-                }
-            }
-        }
-        frontier = next_frontier;
-    }
-    Ok(result)
-}
-
-async fn resolve_name(db: &SqliteStore, node_id: NodeId) -> String {
-    db.get_node(node_id)
-        .await
-        .ok()
-        .flatten()
-        .map_or_else(|| format!("node:{}", node_id.0), |n| n.name)
 }
