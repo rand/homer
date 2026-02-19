@@ -33,7 +33,7 @@ The codebase organizes into 71 architectural clusters:
 - **Cluster 10** (homer-core/src/analyze, 1 files): `homer-core/src/analyze/mod.rs`
 - **Cluster 11** (homer-core/src/analyze, 1 files): `homer-core/src/analyze/traits.rs`
 - **Cluster 12** (homer-core/src/extract, 1 files): `homer-core/src/extract/document.rs`
-- **Cluster 13** (homer-core/src/extract, 2 files): `homer-core/src/extract/traits.rs`, `homer-core/src/error.rs`
+- **Cluster 13** (homer-core/src, 2 files): `homer-core/src/extract/traits.rs`, `homer-core/src/error.rs`
 - **Cluster 14** (homer-core/src/extract, 1 files): `homer-core/src/extract/git.rs`
 - **Cluster 15** (homer-core/src/extract, 1 files): `homer-core/src/extract/graph.rs`
 - **Cluster 16** (homer-core/src/extract, 1 files): `homer-core/src/extract/structure.rs`
@@ -66,7 +66,7 @@ The codebase organizes into 71 architectural clusters:
 - **Cluster 43** (homer-graphs/src/languages, 1 files): `homer-graphs/src/languages/go.rs`
 - **Cluster 44** (homer-graphs/src/languages, 1 files): `homer-graphs/src/languages/java.rs`
 - **Cluster 45** (homer-graphs/src/languages, 1 files): `homer-graphs/src/languages/javascript.rs`
-- **Cluster 46** (homer-graphs/src/languages, 2 files): `homer-graphs/src/languages/mod.rs`, `homer-spec/ARCHITECTURE.md`
+- **Cluster 46** (homer-spec, 2 files): `homer-graphs/src/languages/mod.rs`, `homer-spec/ARCHITECTURE.md`
 - **Cluster 47** (homer-graphs/src/languages, 1 files): `homer-graphs/src/languages/python.rs`
 - **Cluster 48** (homer-graphs/src/languages, 1 files): `homer-graphs/src/languages/rust.rs`
 - **Cluster 49** (homer-graphs/src/languages, 1 files): `homer-graphs/src/languages/typescript.rs`
@@ -96,38 +96,38 @@ The codebase organizes into 71 architectural clusters:
 
 | Module | Files | Functions | Types |
 |--------|------:|----------:|------:|
-| `homer` | 10 | 0 | 0 |
-| `homer-cli` | 2 | 0 | 0 |
-| `homer-cli/src` | 4 | 10 | 3 |
-| `homer-cli/src/commands` | 19 | 59 | 29 |
-| `homer-core` | 4 | 0 | 0 |
-| `homer-core/benches` | 6 | 14 | 0 |
-| `homer-core/src` | 24 | 100 | 77 |
-| `homer-core/src/analyze` | 18 | 167 | 47 |
-| `homer-core/src/extract` | 19 | 198 | 43 |
-| `homer-core/src/llm` | 6 | 34 | 23 |
-| `homer-core/src/query` | 2 | 7 | 1 |
-| `homer-core/src/render` | 16 | 138 | 37 |
-| `homer-core/src/store` | 10 | 97 | 10 |
-| `homer-graphs` | 2 | 0 | 0 |
-| `homer-graphs/src` | 12 | 37 | 40 |
-| `homer-graphs/src/languages` | 20 | 264 | 25 |
-| `homer-mcp` | 2 | 0 | 0 |
-| `homer-mcp/src` | 2 | 25 | 7 |
-| `homer-test` | 4 | 0 | 0 |
-| `homer-test/src` | 2 | 8 | 1 |
-| `homer-test/tests` | 2 | 13 | 0 |
+| `homer` | 15 | 0 | 0 |
+| `homer-cli` | 3 | 0 | 0 |
+| `homer-cli/src` | 6 | 10 | 3 |
+| `homer-cli/src/commands` | 30 | 59 | 29 |
+| `homer-core` | 6 | 0 | 0 |
+| `homer-core/benches` | 9 | 14 | 0 |
+| `homer-core/src` | 36 | 105 | 77 |
+| `homer-core/src/analyze` | 27 | 168 | 47 |
+| `homer-core/src/extract` | 29 | 198 | 43 |
+| `homer-core/src/llm` | 9 | 34 | 23 |
+| `homer-core/src/query` | 3 | 7 | 1 |
+| `homer-core/src/render` | 24 | 138 | 37 |
+| `homer-core/src/store` | 15 | 97 | 10 |
+| `homer-graphs` | 3 | 0 | 0 |
+| `homer-graphs/src` | 18 | 37 | 40 |
+| `homer-graphs/src/languages` | 30 | 264 | 25 |
+| `homer-mcp` | 3 | 0 | 0 |
+| `homer-mcp/src` | 3 | 25 | 7 |
+| `homer-test` | 6 | 0 | 0 |
+| `homer-test/src` | 3 | 8 | 1 |
+| `homer-test/tests` | 3 | 14 | 0 |
 
 ## Key Documents
 
 | Document | Type | References |
 |----------|------|----------:|
-| `README.md` | document | 22 |
-| `docs/getting-started.md` | document | 8 |
-| `docs/configuration.md` | document | 6 |
-| `docs/troubleshooting.md` | document | 6 |
-| `docs/concepts.md` | document | 4 |
-| `CONTRIBUTING.md` | document | 2 |
+| `README.md` | document | 33 |
+| `docs/getting-started.md` | document | 12 |
+| `docs/configuration.md` | document | 9 |
+| `docs/troubleshooting.md` | document | 9 |
+| `docs/concepts.md` | document | 6 |
+| `CONTRIBUTING.md` | document | 3 |
 
 ## Change Patterns
 
@@ -135,24 +135,24 @@ The codebase organizes into 71 architectural clusters:
 
 | File | Changes |
 |------|--------:|
-| `homer-core` | 37 |
-| `homer-core/src` | 35 |
-| `homer-core/src/extract` | 24 |
-| `homer-core/src/analyze` | 22 |
-| `homer-cli/src/commands` | 21 |
-| `homer-cli` | 21 |
-| `homer-cli/src` | 21 |
-| `homer-core/src/render` | 17 |
-| `homer-core/src/store` | 14 |
-| `homer-graphs/src` | 14 |
+| `homer-core` | 39 |
+| `homer-core/src` | 37 |
+| `homer-core/src/extract` | 25 |
+| `homer-core/src/analyze` | 23 |
+| `homer-cli/src/commands` | 22 |
+| `homer-cli` | 22 |
+| `homer-cli/src` | 22 |
+| `homer-core/src/render` | 18 |
+| `homer-core/src/store` | 15 |
+| `homer-graphs/src` | 15 |
 
 **Files that change together:**
 
-- `homer-cli/src/commands` + `homer-core/benches/.context.md` (confidence: 1%)
-- `homer-cli/src/commands` + `homer-test/tests/.context.md` (confidence: 1%)
-- `homer-cli/src/commands` + `homer-core/src/query` (confidence: 1%)
-- `homer-cli/src/commands/graph.rs` + `homer-cli/src` (confidence: 1%)
+- `homer-cli/src/commands` + `homer-cli/src/commands/mod.rs` (confidence: 1%)
+- `homer-cli/src/commands` + `homer-core/src/analyze/traits.rs` (confidence: 1%)
+- `homer-cli/src/commands` + `homer-test/src/.context.md` (confidence: 1%)
 - `homer-cli/src/commands/graph.rs` + `homer-cli` (confidence: 1%)
+- `homer-cli/src/commands/graph.rs` + `homer-cli/src` (confidence: 1%)
 
 ## Load-Bearing Code
 
@@ -161,26 +161,26 @@ Modifications require understanding all callers and running the full test suite.
 
 | Entity | Salience | Classification |
 |--------|----------|----------------|
-| `homer-core/src/pipeline.rs` | 14.16 | ActiveLocalized |
-| `homer-core/src/config.rs` | 13.72 | ActiveLocalized |
-| `homer-core/src/render/agents_md.rs` | 13.59 | ActiveLocalized |
-| `homer-core/src/analyze/behavioral.rs` | 13.44 | ActiveLocalized |
-| `homer-core/src/extract/github.rs` | 13.42 | ActiveLocalized |
-| `homer-cli/src/commands/update.rs` | 13.10 | ActiveLocalized |
-| `homer-core/src/store/sqlite.rs` | 13.00 | ActiveLocalized |
-| `homer-core/src/extract/git.rs` | 12.98 | ActiveLocalized |
-| `homer-core/src/extract/gitlab.rs` | 12.82 | ActiveLocalized |
-| `homer-cli/src/commands/init.rs` | 12.65 | ActiveLocalized |
-| `homer-core/src/analyze/mod.rs` | 12.65 | ActiveLocalized |
-| `homer-core/src/analyze/semantic.rs` | 12.55 | ActiveLocalized |
-| `homer-core/src/extract/graph.rs` | 12.52 | ActiveLocalized |
-| `homer-core/src/analyze/community.rs` | 12.37 | ActiveLocalized |
-| `homer-core/src/store/traits.rs` | 12.36 | ActiveLocalized |
-| `homer-core/src/analyze/centrality.rs` | 12.23 | ActiveLocalized |
-| `homer-mcp/src/lib.rs` | 11.92 | ActiveLocalized |
-| `homer-graphs/src/languages/javascript.rs` | 11.76 | ActiveLocalized |
-| `homer-graphs/src/languages/python.rs` | 11.62 | ActiveLocalized |
-| `homer-cli/src/commands/query.rs` | 11.61 | ActiveLocalized |
+| `homer-core/src/store/sqlite.rs` | 0.38 | ActiveLocalized |
+| `homer-test/tests/pipeline.rs` | 0.27 | ActiveLocalized |
+| `homer-core/src/pipeline.rs` | 0.26 | ActiveLocalized |
+| `homer-core/src/analyze/semantic.rs` | 0.23 | ActiveLocalized |
+| `homer-core/src/render/agents_md.rs` | 0.22 | ActiveLocalized |
+| `homer-core/src/analyze/behavioral.rs` | 0.22 | ActiveLocalized |
+| `homer-core/src/analyze/centrality.rs` | 0.21 | ActiveLocalized |
+| `homer-core/src/config.rs` | 0.20 | ActiveLocalized |
+| `homer-core/src/extract/github.rs` | 0.20 | ActiveLocalized |
+| `homer-core/src/extract/git.rs` | 0.20 | ActiveLocalized |
+| `homer-core/src/extract/graph.rs` | 0.20 | ActiveLocalized |
+| `homer-core/src/analyze/community.rs` | 0.19 | ActiveLocalized |
+| `homer-core/src/extract/gitlab.rs` | 0.19 | ActiveLocalized |
+| `homer-core/src/extract/prompt.rs` | 0.19 | ActiveLocalized |
+| `homer-mcp/src/lib.rs` | 0.19 | ActiveLocalized |
+| `homer-graphs/src/languages/rust.rs` | 0.19 | ActiveLocalized |
+| `homer-cli/src/commands/update.rs` | 0.18 | ActiveLocalized |
+| `homer-graphs/src/languages/python.rs` | 0.18 | ActiveLocalized |
+| `homer-cli/src/commands/init.rs` | 0.18 | ActiveLocalized |
+| `homer-core/src/analyze/task_pattern.rs` | 0.18 | ActiveLocalized |
 
 ## Danger Zones
 
@@ -188,16 +188,16 @@ Files with high change frequency and low bus factor require extra care.
 
 | File | Changes | Bus Factor | Top Contributor |
 |------|--------:|-----------:|----------------:|
-| `homer-core` | 37 | 1 | 89% |
-| `homer-core/src` | 35 | 1 | 89% |
-| `homer-core/src/extract` | 24 | 1 | 83% |
-| `homer-core/src/analyze` | 22 | 1 | 82% |
-| `homer-cli/src/commands` | 21 | 1 | 81% |
-| `homer-cli` | 21 | 1 | 81% |
-| `homer-cli/src` | 21 | 1 | 81% |
-| `homer-core/src/render` | 17 | 1 | 82% |
-| `homer-graphs/src` | 14 | 1 | 86% |
-| `homer-graphs` | 14 | 1 | 86% |
+| `homer-core` | 39 | 1 | 90% |
+| `homer-core/src` | 37 | 1 | 89% |
+| `homer-core/src/extract` | 25 | 1 | 84% |
+| `homer-core/src/analyze` | 23 | 1 | 83% |
+| `homer-cli/src/commands` | 22 | 1 | 82% |
+| `homer-cli` | 22 | 1 | 82% |
+| `homer-cli/src` | 22 | 1 | 82% |
+| `homer-core/src/render` | 18 | 1 | 83% |
+| `homer-core/src/store` | 15 | 1 | 80% |
+| `homer-graphs/src` | 15 | 1 | 87% |
 
 ## Conventions
 
@@ -207,7 +207,7 @@ Files with high change frequency and low bus factor require extra care.
 **Dependencies:** 37 external packages
 
 **Naming:** snake_case (67% adherence)
-- snake_case: 1009 (67%)
+- snake_case: 1016 (67%)
 - lowercase: 276 (18%)
 - PascalCase: 229 (15%)
 
@@ -216,12 +216,12 @@ Files with high change frequency and low bus factor require extra care.
 - 3 test files / 73 source files
 
 **Error handling:** mixed
-- `.unwrap()`: 1112 occurrences
-- `? operator`: 1039 occurrences
+- `.unwrap()`: 1147 occurrences
+- `? operator`: 1040 occurrences
 - `Result<T, E>`: 336 occurrences
-- `.expect()`: 22 occurrences
+- `.expect()`: 23 occurrences
 
-**Documentation:** 12% coverage (183/1514 entities)
+**Documentation:** 12% coverage (183/1521 entities)
 - Dominant style: Rustdoc
 
 **Agent rules:** CLAUDE.md

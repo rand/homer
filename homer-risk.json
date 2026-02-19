@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "generated_at": "2026-02-19T20:06:06.843502+00:00",
+  "generated_at": "2026-02-19T20:48:42.157682+00:00",
   "risk_areas": [
     {
       "path": "homer-cli",
@@ -48,66 +48,6 @@
       "recommendations": [
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/init.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/status.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/update.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/main.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
       ]
     },
     {
@@ -159,51 +99,6 @@
       ]
     },
     {
-      "path": "homer-core/src/analyze/behavioral.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/traits.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/config.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
       "path": "homer-core/src/extract",
       "risk_level": "low",
       "risk_score": 0.2,
@@ -220,48 +115,35 @@
       ]
     },
     {
-      "path": "homer-core/src/extract/document.rs",
+      "path": "homer-core/src/llm",
       "risk_level": "low",
       "risk_score": 0.2,
       "reasons": [
         {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
         }
       ],
       "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
       ]
     },
     {
-      "path": "homer-core/src/extract/git.rs",
+      "path": "homer-core/src/pipeline.rs",
       "risk_level": "low",
       "risk_score": 0.2,
       "reasons": [
         {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
         }
       ],
       "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/extract/traits.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
       ]
     },
     {
@@ -281,78 +163,19 @@
       ]
     },
     {
-      "path": "homer-core/src/render/agents_md.rs",
+      "path": "homer-core/src/store",
       "risk_level": "low",
       "risk_score": 0.2,
       "reasons": [
         {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
         }
       ],
       "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/store/mod.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/store/schema.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/store/sqlite.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/store/traits.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
       ]
     },
     {
@@ -388,36 +211,6 @@
       ]
     },
     {
-      "path": "homer-graphs/src/diff.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/import_graph.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
       "path": "homer-graphs/src/languages",
       "risk_level": "low",
       "risk_score": 0.2,
@@ -431,96 +224,6 @@
       "recommendations": [
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/languages/fallback.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/languages/javascript.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/languages/python.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/languages/rust.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/lib.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-mcp/src/lib.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
       ]
     },
     {
@@ -556,21 +259,6 @@
       ]
     },
     {
-      "path": "homer-test/src/lib.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
       "path": "homer-test/tests",
       "risk_level": "low",
       "risk_score": 0.2,
@@ -587,186 +275,6 @@
       ]
     },
     {
-      "path": "homer-core/src/analyze/centrality.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/community.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/graph.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/query.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/render/module_context.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/render/risk_map.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/convention.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/extract/github.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/diff.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/semantic.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/serve.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/task_pattern.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
       "path": "homer-core/benches",
       "risk_level": "low",
       "risk_score": 0.2,
@@ -780,81 +288,6 @@
       "recommendations": [
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/benches/centrality_bench.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/benches/parse_bench.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/benches/store_bench.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/extract/gitlab.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/render/topos_spec.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
       ]
     },
     {
@@ -1130,6 +563,38 @@
       ]
     },
     {
+      "path": "spec",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "spec/homer-spec.tps",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
       "path": "README.md",
       "risk_level": "low",
       "risk_score": 0.2,
@@ -1159,21 +624,6 @@
       "recommendations": [
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-spec/ARCHITECTURE.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
       ]
     },
     {
@@ -1334,81 +784,6 @@
       "recommendations": [
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/languages/ecma_scope.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/temporal.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/render/report.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/render/skills.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
-      ]
-    },
-    {
-      "path": "homer-core/src/progress.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "rising_importance",
-          "description": "Centrality increasing rapidly — becoming more critical",
-          "centrality": 0.0
-        }
-      ],
-      "recommendations": [
-        "This file is becoming more central — consider increasing test coverage and documentation"
       ]
     },
     {
@@ -1762,6 +1137,54 @@
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
       ]
+    },
+    {
+      "path": ".claude/skills/homer-modify-homer-core-src-query-files.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": ".claude/skills/homer-modify-homer-mcp-files.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": ".claude/skills/homer-modify-homer-spec-files.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
     }
   ],
   "safe_areas": [
@@ -1796,7 +1219,31 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-cli/src/commands/init.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
       "path": "homer-cli/src/commands/mod.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-cli/src/commands/status.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-cli/src/commands/update.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-cli/src/main.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
@@ -1808,13 +1255,43 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-core/src/analyze/behavioral.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
       "path": "homer-core/src/analyze/mod.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
     },
     {
+      "path": "homer-core/src/analyze/traits.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/config.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
       "path": "homer-core/src/error.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/extract/document.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/extract/git.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
@@ -1838,13 +1315,13 @@
       "stability_class": "Volatile"
     },
     {
-      "path": "homer-core/src/lib.rs",
+      "path": "homer-core/src/extract/traits.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Unknown"
+      "stability_class": "Declining"
     },
     {
-      "path": "homer-core/src/llm",
+      "path": "homer-core/src/lib.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Unknown"
@@ -1853,13 +1330,7 @@
       "path": "homer-core/src/llm/mod.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
-    },
-    {
-      "path": "homer-core/src/pipeline.rs",
-      "risk_level": "none",
-      "risk_score": 0.0,
-      "stability_class": "Volatile"
+      "stability_class": "Declining"
     },
     {
       "path": "homer-core/src/query",
@@ -1869,6 +1340,12 @@
     },
     {
       "path": "homer-core/src/query/mod.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/render/agents_md.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
@@ -1883,13 +1360,7 @@
       "path": "homer-core/src/render/traits.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
-    },
-    {
-      "path": "homer-core/src/store",
-      "risk_level": "none",
-      "risk_score": 0.0,
-      "stability_class": "Unknown"
+      "stability_class": "Declining"
     },
     {
       "path": "homer-core/src/store/incremental.rs",
@@ -1898,10 +1369,34 @@
       "stability_class": "Volatile"
     },
     {
-      "path": "homer-core/src/types.rs",
+      "path": "homer-core/src/store/mod.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/store/schema.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/store/sqlite.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/store/traits.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/types.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
     },
     {
       "path": "homer-graphs/Cargo.toml",
@@ -1913,7 +1408,25 @@
       "path": "homer-graphs/src/call_graph.rs",
       "risk_level": "none",
       "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-graphs/src/diff.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
       "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-graphs/src/import_graph.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-graphs/src/languages/fallback.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
     },
     {
       "path": "homer-graphs/src/languages/go.rs",
@@ -1928,7 +1441,25 @@
       "stability_class": "Volatile"
     },
     {
+      "path": "homer-graphs/src/languages/javascript.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
       "path": "homer-graphs/src/languages/mod.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-graphs/src/languages/python.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-graphs/src/languages/rust.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
@@ -1938,6 +1469,12 @@
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-graphs/src/lib.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
     },
     {
       "path": "homer-graphs/src/scope_graph.rs",
@@ -1964,10 +1501,22 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-mcp/src/lib.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
       "path": "homer-test/Cargo.toml",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-test/src/lib.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
     },
     {
       "path": "rustfmt.toml",
@@ -2009,10 +1558,46 @@
       "path": "homer-graphs/src/languages/helpers.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
+      "stability_class": "Declining"
     },
     {
       "path": "homer-test/tests/pipeline.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/analyze/centrality.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/analyze/community.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-cli/src/commands/graph.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-cli/src/commands/query.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/render/module_context.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/render/risk_map.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
@@ -2024,13 +1609,49 @@
       "stability_class": "Unknown"
     },
     {
-      "path": "homer-core/src/llm/cache.rs",
+      "path": "homer-core/src/analyze/convention.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
     },
     {
+      "path": "homer-core/src/extract/github.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/llm/cache.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
       "path": "homer-core/src/llm/providers.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-cli/src/commands/diff.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/analyze/semantic.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-cli/src/commands/serve.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/analyze/task_pattern.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
@@ -2042,6 +1663,36 @@
       "stability_class": "Volatile"
     },
     {
+      "path": "homer-core/benches/centrality_bench.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/benches/parse_bench.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/benches/store_bench.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/extract/gitlab.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/render/topos_spec.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
       "path": ".homer",
       "risk_level": "none",
       "risk_score": 0.0,
@@ -2049,18 +1700,6 @@
     },
     {
       "path": ".homer/config.toml",
-      "risk_level": "none",
-      "risk_score": 0.0,
-      "stability_class": "Unknown"
-    },
-    {
-      "path": "spec",
-      "risk_level": "none",
-      "risk_score": 0.0,
-      "stability_class": "Unknown"
-    },
-    {
-      "path": "spec/homer-spec.tps",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Unknown"
@@ -2120,6 +1759,12 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-spec/ARCHITECTURE.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
       "path": "homer-spec/CLI.md",
       "risk_level": "none",
       "risk_score": 0.0,
@@ -2138,28 +1783,58 @@
       "stability_class": "Unknown"
     },
     {
-      "path": "homer-cli/src/commands/render.rs",
+      "path": "homer-graphs/src/languages/ecma_scope.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/analyze/temporal.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/render/report.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
+    },
+    {
+      "path": "homer-core/src/render/skills.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/progress.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
+    },
+    {
+      "path": "homer-cli/src/commands/render.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Declining"
     },
     {
       "path": "homer-cli/src/commands/risk_check.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
+      "stability_class": "Declining"
     },
     {
       "path": "homer-cli/src/commands/snapshot.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
+      "stability_class": "Declining"
     },
     {
       "path": "homer-core/src/extract/forge_common.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
+      "stability_class": "Declining"
     }
   ]
 }

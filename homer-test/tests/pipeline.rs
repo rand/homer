@@ -481,3 +481,42 @@ async fn agents_md_preserves_human_sections() {
         "Should preserve human content through re-render"
     );
 }
+
+// ── Auto Snapshot Creation ───────────────────────────────────────
+
+#[tokio::test]
+async fn auto_snapshot_at_release_tag() {
+    let repo = TestRepo::minimal_rust();
+
+    // Create a release tag
+    let tag_output = std::process::Command::new("git")
+        .args(["tag", "v1.0.0"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(tag_output.status.success(), "git tag should succeed");
+
+    let mut config = homer_core::config::HomerConfig::default();
+    config.graph.snapshots.at_releases = true;
+    config.graph.snapshots.every_n_commits = 0;
+
+    let store = homer_core::store::sqlite::SqliteStore::in_memory().unwrap();
+    let pipeline = homer_core::pipeline::HomerPipeline::new(repo.path());
+    pipeline.run(&store, &config).await.unwrap();
+
+    let snapshots = store.list_snapshots().await.unwrap();
+    let labels: Vec<&str> = snapshots.iter().map(|s| s.label.as_str()).collect();
+    assert!(
+        labels.contains(&"v1.0.0"),
+        "Should create snapshot for release tag, got: {labels:?}"
+    );
+
+    // Run again — should be idempotent
+    pipeline.run(&store, &config).await.unwrap();
+    let snapshots2 = store.list_snapshots().await.unwrap();
+    assert_eq!(
+        snapshots2.len(),
+        snapshots.len(),
+        "Re-running should not create duplicate snapshots"
+    );
+}

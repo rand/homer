@@ -31,6 +31,7 @@ use crate::render::skills::SkillsRenderer;
 use crate::render::topos_spec::ToposSpecRenderer;
 use crate::render::traits::Renderer;
 use crate::store::HomerStore;
+use crate::types::{NodeFilter, NodeKind};
 
 /// Result of a full pipeline run.
 #[derive(Debug)]
@@ -107,6 +108,9 @@ impl HomerPipeline {
             result.extract_nodes, result.extract_edges
         ));
         progress.finish();
+
+        // ── Auto snapshots (after extraction captures new state) ─
+        self.run_auto_snapshots(store, config, &mut result).await;
 
         // ── Phase 2: Analysis ─────────────────────────────────────
         progress.start("Analyzing", None);
@@ -191,6 +195,113 @@ impl HomerPipeline {
                     result.errors.push(PipelineError {
                         stage,
                         message: e.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Create graph snapshots based on `[graph.snapshots]` config.
+    ///
+    /// - `at_releases`: snapshot for each Release node not yet snapshotted.
+    /// - `every_n_commits`: snapshot when commit count exceeds threshold since last snapshot.
+    #[instrument(skip_all)]
+    async fn run_auto_snapshots(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        result: &mut PipelineResult,
+    ) {
+        let snap_cfg = &config.graph.snapshots;
+        if !snap_cfg.at_releases && snap_cfg.every_n_commits == 0 {
+            return;
+        }
+
+        let existing = match store.list_snapshots().await {
+            Ok(s) => s,
+            Err(e) => {
+                result.errors.push(PipelineError {
+                    stage: "snapshot".into(),
+                    message: format!("Failed to list snapshots: {e}"),
+                });
+                return;
+            }
+        };
+        let existing_labels: std::collections::HashSet<&str> =
+            existing.iter().map(|s| s.label.as_str()).collect();
+
+        // ── Release-triggered snapshots ──────────────────────────
+        if snap_cfg.at_releases {
+            let filter = NodeFilter {
+                kind: Some(NodeKind::Release),
+                ..Default::default()
+            };
+            match store.find_nodes(&filter).await {
+                Ok(releases) => {
+                    for release in &releases {
+                        if !existing_labels.contains(release.name.as_str()) {
+                            if let Err(e) = store.create_snapshot(&release.name).await {
+                                result.errors.push(PipelineError {
+                                    stage: "snapshot".into(),
+                                    message: format!(
+                                        "Failed to create release snapshot '{}': {e}",
+                                        release.name
+                                    ),
+                                });
+                            } else {
+                                info!(label = %release.name, "Created release snapshot");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    result.errors.push(PipelineError {
+                        stage: "snapshot".into(),
+                        message: format!("Failed to find release nodes: {e}"),
+                    });
+                }
+            }
+        }
+
+        // ── Commit-count snapshots ───────────────────────────────
+        if snap_cfg.every_n_commits > 0 {
+            let filter = NodeFilter {
+                kind: Some(NodeKind::Commit),
+                ..Default::default()
+            };
+            match store.find_nodes(&filter).await {
+                Ok(commits) => {
+                    let commit_count = commits.len() as u64;
+                    let threshold = u64::from(snap_cfg.every_n_commits);
+
+                    // Find the highest commit count from any existing auto-* snapshot.
+                    let last_auto_count: u64 = existing
+                        .iter()
+                        .filter_map(|s| s.label.strip_prefix("auto-"))
+                        .filter_map(|n| n.parse::<u64>().ok())
+                        .max()
+                        .unwrap_or(0);
+
+                    if commit_count >= threshold
+                        && commit_count.saturating_sub(last_auto_count) >= threshold
+                    {
+                        let label = format!("auto-{commit_count}");
+                        if !existing_labels.contains(label.as_str()) {
+                            if let Err(e) = store.create_snapshot(&label).await {
+                                result.errors.push(PipelineError {
+                                    stage: "snapshot".into(),
+                                    message: format!("Failed to create commit-count snapshot: {e}"),
+                                });
+                            } else {
+                                info!(label = %label, "Created commit-count snapshot");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    result.errors.push(PipelineError {
+                        stage: "snapshot".into(),
+                        message: format!("Failed to count commits: {e}"),
                     });
                 }
             }
@@ -580,5 +691,203 @@ mod tests {
 
         // Should complete without panic
         assert!(result.duration.as_nanos() > 0);
+    }
+
+    #[tokio::test]
+    async fn auto_snapshots_at_releases() {
+        use crate::types::{Node, NodeId, NodeKind};
+        use chrono::Utc;
+        use std::collections::HashMap;
+
+        let store = SqliteStore::in_memory().unwrap();
+        let mut config = HomerConfig::default();
+        config.graph.snapshots.at_releases = true;
+        config.graph.snapshots.every_n_commits = 0;
+
+        // Insert a Release node directly
+        let release = Node {
+            id: NodeId(0),
+            kind: NodeKind::Release,
+            name: "v1.0.0".to_string(),
+            content_hash: None,
+            last_extracted: Utc::now(),
+            metadata: HashMap::new(),
+        };
+        store.upsert_node(&release).await.unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pipeline = HomerPipeline::new(tmp.path());
+        let mut result = PipelineResult {
+            extract_nodes: 0,
+            extract_edges: 0,
+            analysis_results: 0,
+            artifacts_written: 0,
+            errors: Vec::new(),
+            duration: std::time::Duration::ZERO,
+        };
+
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+
+        let snapshots = store.list_snapshots().await.unwrap();
+        assert_eq!(snapshots.len(), 1, "Should create one snapshot");
+        assert_eq!(snapshots[0].label, "v1.0.0");
+
+        // Running again should be idempotent
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+        let snapshots = store.list_snapshots().await.unwrap();
+        assert_eq!(snapshots.len(), 1, "Should not create duplicate snapshot");
+    }
+
+    #[tokio::test]
+    async fn auto_snapshots_every_n_commits() {
+        use crate::types::{Node, NodeId, NodeKind};
+        use chrono::Utc;
+        use std::collections::HashMap;
+
+        let store = SqliteStore::in_memory().unwrap();
+        let mut config = HomerConfig::default();
+        config.graph.snapshots.at_releases = false;
+        config.graph.snapshots.every_n_commits = 3;
+
+        // Insert 3 commit nodes (meeting the threshold)
+        for i in 0..3 {
+            let commit = Node {
+                id: NodeId(0),
+                kind: NodeKind::Commit,
+                name: format!("abc{i}"),
+                content_hash: None,
+                last_extracted: Utc::now(),
+                metadata: HashMap::new(),
+            };
+            store.upsert_node(&commit).await.unwrap();
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pipeline = HomerPipeline::new(tmp.path());
+        let mut result = PipelineResult {
+            extract_nodes: 0,
+            extract_edges: 0,
+            analysis_results: 0,
+            artifacts_written: 0,
+            errors: Vec::new(),
+            duration: std::time::Duration::ZERO,
+        };
+
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+
+        let snapshots = store.list_snapshots().await.unwrap();
+        assert_eq!(snapshots.len(), 1, "Should create commit-count snapshot");
+        assert_eq!(snapshots[0].label, "auto-3");
+    }
+
+    #[tokio::test]
+    async fn auto_snapshots_successive_commit_count() {
+        use crate::types::{Node, NodeId, NodeKind};
+        use chrono::Utc;
+        use std::collections::HashMap;
+
+        let store = SqliteStore::in_memory().unwrap();
+        let mut config = HomerConfig::default();
+        config.graph.snapshots.at_releases = false;
+        config.graph.snapshots.every_n_commits = 3;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pipeline = HomerPipeline::new(tmp.path());
+
+        let mut result = PipelineResult {
+            extract_nodes: 0,
+            extract_edges: 0,
+            analysis_results: 0,
+            artifacts_written: 0,
+            errors: Vec::new(),
+            duration: std::time::Duration::ZERO,
+        };
+
+        // Insert 3 commits → first snapshot
+        for i in 0..3 {
+            let commit = Node {
+                id: NodeId(0),
+                kind: NodeKind::Commit,
+                name: format!("sha-{i}"),
+                content_hash: None,
+                last_extracted: Utc::now(),
+                metadata: HashMap::new(),
+            };
+            store.upsert_node(&commit).await.unwrap();
+        }
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+        assert_eq!(store.list_snapshots().await.unwrap().len(), 1);
+
+        // Insert 2 more (total 5, only 2 since last) → no new snapshot
+        for i in 3..5 {
+            let commit = Node {
+                id: NodeId(0),
+                kind: NodeKind::Commit,
+                name: format!("sha-{i}"),
+                content_hash: None,
+                last_extracted: Utc::now(),
+                metadata: HashMap::new(),
+            };
+            store.upsert_node(&commit).await.unwrap();
+        }
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+        assert_eq!(
+            store.list_snapshots().await.unwrap().len(),
+            1,
+            "Should not snapshot yet (only 2 new commits since last)"
+        );
+
+        // Insert 1 more (total 6, 3 since last) → second snapshot
+        let commit = Node {
+            id: NodeId(0),
+            kind: NodeKind::Commit,
+            name: "sha-5".to_string(),
+            content_hash: None,
+            last_extracted: Utc::now(),
+            metadata: HashMap::new(),
+        };
+        store.upsert_node(&commit).await.unwrap();
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+        let snapshots = store.list_snapshots().await.unwrap();
+        assert_eq!(snapshots.len(), 2, "Should create second snapshot");
+        assert_eq!(snapshots[1].label, "auto-6");
+    }
+
+    #[tokio::test]
+    async fn auto_snapshots_disabled_when_zero() {
+        let store = SqliteStore::in_memory().unwrap();
+        let mut config = HomerConfig::default();
+        config.graph.snapshots.at_releases = false;
+        config.graph.snapshots.every_n_commits = 0;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pipeline = HomerPipeline::new(tmp.path());
+        let mut result = PipelineResult {
+            extract_nodes: 0,
+            extract_edges: 0,
+            analysis_results: 0,
+            artifacts_written: 0,
+            errors: Vec::new(),
+            duration: std::time::Duration::ZERO,
+        };
+
+        pipeline
+            .run_auto_snapshots(&store, &config, &mut result)
+            .await;
+
+        let snapshots = store.list_snapshots().await.unwrap();
+        assert!(snapshots.is_empty(), "Should not create any snapshots");
     }
 }
