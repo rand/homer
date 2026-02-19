@@ -691,6 +691,76 @@ impl HomerStore for SqliteStore {
         Ok(count as u64)
     }
 
+    async fn invalidate_analyses_by_kinds(
+        &self,
+        node_id: NodeId,
+        kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64> {
+        if kinds.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (0..kinds.len()).map(|i| format!("?{}", i + 2)).collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE node_id = ?1 AND kind IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(node_id.0)];
+        for kind in kinds {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+        let count = stmt.execute(refs.as_slice()).map_err(StoreError::Sqlite)?;
+        Ok(count as u64)
+    }
+
+    async fn invalidate_all_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<u64> {
+        if kinds.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (0..kinds.len()).map(|i| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE kind IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        for kind in kinds {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+        let count = stmt.execute(refs.as_slice()).map_err(StoreError::Sqlite)?;
+        Ok(count as u64)
+    }
+
+    async fn invalidate_analyses_excluding_kinds(
+        &self,
+        node_id: NodeId,
+        keep_kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64> {
+        if keep_kinds.is_empty() {
+            return self.invalidate_analyses(node_id).await;
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (0..keep_kinds.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE node_id = ?1 AND kind NOT IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(node_id.0)];
+        for kind in keep_kinds {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+        let count = stmt.execute(refs.as_slice()).map_err(StoreError::Sqlite)?;
+        Ok(count as u64)
+    }
+
     // ── Full-text search ───────────────────────────────────────────
 
     async fn index_text(

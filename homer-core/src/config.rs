@@ -46,6 +46,8 @@ pub struct AnalysisSection {
     pub depth: AnalysisDepth,
     pub llm_salience_threshold: f64,
     pub max_llm_batch_size: u32,
+    #[serde(default)]
+    pub invalidation: InvalidationPolicy,
 }
 
 impl Default for AnalysisSection {
@@ -54,6 +56,32 @@ impl Default for AnalysisSection {
             depth: AnalysisDepth::Standard,
             llm_salience_threshold: 0.7,
             max_llm_batch_size: 50,
+            invalidation: InvalidationPolicy::default(),
+        }
+    }
+}
+
+/// Controls how analysis results are invalidated when the graph changes.
+///
+/// The default is coarse-grained: any topology change invalidates all centrality
+/// scores, and semantic summaries are only invalidated on direct content changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvalidationPolicy {
+    /// If true, any graph topology change invalidates all centrality scores
+    /// (`PageRank`, `BetweennessCentrality`, `HITSScore`, `CompositeSalience`)
+    /// for every node.
+    pub global_centrality_on_topology_change: bool,
+    /// If true, only invalidate semantic summaries (`SemanticSummary`,
+    /// `DesignRationale`, `InvariantDescription`) when a node's own
+    /// `content_hash` changes — not when its neighbors change.
+    pub conservative_semantic_invalidation: bool,
+}
+
+impl Default for InvalidationPolicy {
+    fn default() -> Self {
+        Self {
+            global_centrality_on_topology_change: true,
+            conservative_semantic_invalidation: true,
         }
     }
 }

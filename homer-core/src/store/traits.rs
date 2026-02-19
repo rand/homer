@@ -85,6 +85,23 @@ pub trait HomerStore: Send + Sync {
     /// Invalidate all analysis results for a node.
     async fn invalidate_analyses(&self, node_id: NodeId) -> crate::error::Result<u64>;
 
+    /// Invalidate analysis results of specific kinds for a node.
+    async fn invalidate_analyses_by_kinds(
+        &self,
+        node_id: NodeId,
+        kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64>;
+
+    /// Invalidate analysis results of specific kinds for ALL nodes.
+    async fn invalidate_all_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<u64>;
+
+    /// Invalidate all analysis results for a node EXCEPT the specified kinds.
+    async fn invalidate_analyses_excluding_kinds(
+        &self,
+        node_id: NodeId,
+        keep_kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64>;
+
     // ── Full-text search ───────────────────────────────────────────
 
     /// Index text content for a node.
