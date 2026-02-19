@@ -41,6 +41,11 @@ pub trait HomerStore: Send + Sync {
     /// Resolve a node to its canonical (current) identity through alias chains.
     async fn resolve_canonical(&self, node_id: NodeId) -> crate::error::Result<NodeId>;
 
+    /// Return the full alias chain starting from `node_id`, following old → new links.
+    /// The first element is `node_id` itself; the last is the canonical identity.
+    /// Returns `[node_id]` if no aliases exist.
+    async fn alias_chain(&self, node_id: NodeId) -> crate::error::Result<Vec<NodeId>>;
+
     // ── Hyperedge operations ───────────────────────────────────────
 
     /// Insert or update a hyperedge. Returns the edge's ID.

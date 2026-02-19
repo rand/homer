@@ -456,6 +456,33 @@ impl HomerStore for SqliteStore {
         Ok(current)
     }
 
+    async fn alias_chain(&self, node_id: NodeId) -> crate::error::Result<Vec<NodeId>> {
+        let conn = self.conn.lock().unwrap();
+        let mut chain = vec![node_id];
+        let mut current = node_id;
+        for _ in 0..10 {
+            let next: Option<i64> = conn
+                .query_row(
+                    "SELECT m_new.node_id FROM hyperedges e
+                     JOIN hyperedge_members m_old ON e.id = m_old.hyperedge_id AND m_old.role = 'old'
+                     JOIN hyperedge_members m_new ON e.id = m_new.hyperedge_id AND m_new.role = 'new'
+                     WHERE e.kind = 'Aliases' AND m_old.node_id = ?1",
+                    params![current.0],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(StoreError::Sqlite)?;
+            match next {
+                Some(id) => {
+                    current = NodeId(id);
+                    chain.push(current);
+                }
+                None => break,
+            }
+        }
+        Ok(chain)
+    }
+
     // ── Hyperedge operations ───────────────────────────────────────
 
     async fn upsert_hyperedge(&self, edge: &Hyperedge) -> crate::error::Result<HyperedgeId> {
@@ -1330,6 +1357,61 @@ mod tests {
         // Already canonical — resolves to self
         let self_resolved = store.resolve_canonical(new_id).await.unwrap();
         assert_eq!(self_resolved, new_id);
+    }
+
+    #[tokio::test]
+    async fn alias_chain_returns_full_history() {
+        let store = SqliteStore::in_memory().unwrap();
+        let v1 = store
+            .upsert_node(&make_test_node(NodeKind::File, "utils.rs"))
+            .await
+            .unwrap();
+        let v2 = store
+            .upsert_node(&make_test_node(NodeKind::File, "helpers.rs"))
+            .await
+            .unwrap();
+        let v3 = store
+            .upsert_node(&make_test_node(NodeKind::File, "core_helpers.rs"))
+            .await
+            .unwrap();
+
+        // v1 -> v2 -> v3 alias chain
+        for (old, new) in [(v1, v2), (v2, v3)] {
+            store
+                .upsert_hyperedge(&Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: HyperedgeKind::Aliases,
+                    members: vec![
+                        HyperedgeMember {
+                            node_id: old,
+                            role: "old".to_string(),
+                            position: 0,
+                        },
+                        HyperedgeMember {
+                            node_id: new,
+                            role: "new".to_string(),
+                            position: 1,
+                        },
+                    ],
+                    confidence: 1.0,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                })
+                .await
+                .unwrap();
+        }
+
+        // Full chain from v1
+        let chain = store.alias_chain(v1).await.unwrap();
+        assert_eq!(chain, vec![v1, v2, v3]);
+
+        // Partial chain from v2
+        let chain = store.alias_chain(v2).await.unwrap();
+        assert_eq!(chain, vec![v2, v3]);
+
+        // No aliases from v3
+        let chain = store.alias_chain(v3).await.unwrap();
+        assert_eq!(chain, vec![v3]);
     }
 
     #[tokio::test]
