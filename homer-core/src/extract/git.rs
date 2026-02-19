@@ -36,6 +36,19 @@ impl Extractor for GitExtractor {
         "git"
     }
 
+    async fn has_work(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let checkpoint_sha = store.get_checkpoint("git_last_sha").await?;
+        let Some(cp) = checkpoint_sha else {
+            return Ok(true); // No checkpoint → first run
+        };
+        let repo = gix::open(&self.repo_path)
+            .map_err(|e| HomerError::Extract(ExtractError::Git(e.to_string())))?;
+        let head = repo
+            .head_commit()
+            .map_err(|e| HomerError::Extract(ExtractError::Git(e.to_string())))?;
+        Ok(head.id().to_string() != cp)
+    }
+
     #[instrument(skip_all, name = "git_extract")]
     async fn extract(
         &self,

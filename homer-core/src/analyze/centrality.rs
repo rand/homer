@@ -426,7 +426,7 @@ async fn store_centrality_results(
         let result = AnalysisResult {
             id: AnalysisResultId(0),
             node_id,
-            kind: kind.clone(),
+            kind,
             data,
             input_hash: 0,
             computed_at: now,

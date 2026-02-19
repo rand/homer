@@ -26,6 +26,8 @@ pub struct HomerConfig {
     pub renderers: RenderersSection,
     #[serde(default)]
     pub llm: LlmSection,
+    #[serde(default)]
+    pub mcp: McpSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -513,6 +515,28 @@ impl Default for LlmSection {
     }
 }
 
+/// MCP server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpSection {
+    /// Transport type: "stdio" or "sse".
+    pub transport: String,
+    /// Host for SSE transport.
+    pub host: String,
+    /// Port for SSE transport.
+    pub port: u16,
+}
+
+impl Default for McpSection {
+    fn default() -> Self {
+        Self {
+            transport: "stdio".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,5 +662,27 @@ every_n_commits = 50
         let config: HomerConfig = toml::from_str(toml_str).unwrap();
         assert!(!config.graph.snapshots.at_releases);
         assert_eq!(config.graph.snapshots.every_n_commits, 50);
+    }
+
+    #[test]
+    fn mcp_section_defaults() {
+        let config = HomerConfig::default();
+        assert_eq!(config.mcp.transport, "stdio");
+        assert_eq!(config.mcp.host, "127.0.0.1");
+        assert_eq!(config.mcp.port, 3000);
+    }
+
+    #[test]
+    fn mcp_section_from_toml() {
+        let toml_str = r#"
+[mcp]
+transport = "sse"
+host = "0.0.0.0"
+port = 8080
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mcp.transport, "sse");
+        assert_eq!(config.mcp.host, "0.0.0.0");
+        assert_eq!(config.mcp.port, 8080);
     }
 }

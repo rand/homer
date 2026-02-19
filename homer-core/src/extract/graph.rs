@@ -42,6 +42,13 @@ impl Extractor for GraphExtractor {
         "graph"
     }
 
+    async fn has_work(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let graph_sha = store.get_checkpoint("graph_last_sha").await?;
+        let git_sha = store.get_checkpoint("git_last_sha").await?;
+        // Re-run if graph checkpoint is missing or differs from current git checkpoint
+        Ok(graph_sha != git_sha)
+    }
+
     #[instrument(skip_all, name = "graph_extract")]
     async fn extract(
         &self,

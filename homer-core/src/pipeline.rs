@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -7,10 +8,11 @@ use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::convention::ConventionAnalyzer;
+use crate::analyze::semantic::SemanticAnalyzer;
 use crate::analyze::task_pattern::TaskPatternAnalyzer;
 use crate::analyze::temporal::TemporalAnalyzer;
 use crate::analyze::traits::Analyzer;
-use crate::config::HomerConfig;
+use crate::config::{AnalysisDepth, HomerConfig};
 use crate::extract::document::DocumentExtractor;
 use crate::extract::git::GitExtractor;
 use crate::extract::github::GitHubExtractor;
@@ -19,6 +21,7 @@ use crate::extract::graph::GraphExtractor;
 use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
 use crate::extract::traits::Extractor;
+use crate::llm::providers::create_provider;
 use crate::progress::ProgressReporter;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
@@ -156,7 +159,22 @@ impl HomerPipeline {
         extractors.push(Box::new(PromptExtractor::new(&self.repo_path)));
 
         for ext in &extractors {
-            let stage = format!("extract:{}", ext.name());
+            let name = ext.name();
+            let stage = format!("extract:{name}");
+
+            // Check if extractor has new data to process.
+            match ext.has_work(store).await {
+                Ok(false) => {
+                    info!(extractor = name, "Skipping (no new work)");
+                    continue;
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    // has_work() failure is non-fatal; proceed with extraction.
+                    info!(extractor = name, error = %e, "has_work check failed, running anyway");
+                }
+            }
+
             match ext.extract(store, config).await {
                 Ok(stats) => {
                     result.extract_nodes += stats.nodes_created;
@@ -179,7 +197,6 @@ impl HomerPipeline {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     #[instrument(skip_all)]
     async fn run_analysis(
         &self,
@@ -187,131 +204,74 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        // Behavioral analysis first (change frequency, bus factor, etc.)
-        let behavioral = BehavioralAnalyzer;
-        match behavioral.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
+        let analyzers = self.build_analyzer_list(config);
+        let ordered = toposort_analyzers(&analyzers);
+
+        for idx in ordered {
+            let analyzer = &analyzers[idx];
+            let stage = format!("analyze:{}", analyzer.name());
+            match analyzer.analyze(store, config).await {
+                Ok(stats) => {
+                    result.analysis_results += stats.results_stored;
+                    for (desc, err) in stats.errors {
+                        result.errors.push(PipelineError {
+                            stage: stage.clone(),
+                            message: format!("{desc}: {err}"),
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(stage = %stage, error = %e, "Analysis failed");
                     result.errors.push(PipelineError {
-                        stage: "analyze:behavioral".into(),
-                        message: format!("{desc}: {err}"),
+                        stage,
+                        message: e.to_string(),
                     });
                 }
             }
-            Err(e) => {
-                warn!(error = %e, "Behavioral analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:behavioral".into(),
-                    message: e.to_string(),
-                });
+        }
+    }
+
+    /// Build the list of analyzers to run, conditionally including semantic.
+    fn build_analyzer_list(&self, config: &HomerConfig) -> Vec<Box<dyn Analyzer>> {
+        let mut analyzers: Vec<Box<dyn Analyzer>> = vec![
+            Box::new(BehavioralAnalyzer),
+            Box::new(CentralityAnalyzer::default()),
+            Box::new(CommunityAnalyzer),
+            Box::new(TemporalAnalyzer),
+            Box::new(ConventionAnalyzer::new(&self.repo_path)),
+            Box::new(TaskPatternAnalyzer),
+        ];
+
+        // Semantic analysis — LLM-powered, gated by config and depth.
+        if config.llm.enabled && config.analysis.depth != AnalysisDepth::Shallow {
+            match Self::create_llm_provider(config) {
+                Ok(provider) => analyzers.push(Box::new(SemanticAnalyzer::new(provider))),
+                Err(e) => {
+                    info!(error = %e, "Skipping semantic analysis (LLM provider unavailable)");
+                }
             }
         }
 
-        // Centrality analysis (PageRank, betweenness, HITS, composite salience)
-        let centrality = CentralityAnalyzer::default();
-        match centrality.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:centrality".into(),
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Centrality analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:centrality".into(),
-                    message: e.to_string(),
-                });
-            }
-        }
+        analyzers
+    }
 
-        // Community detection + stability classification
-        let community = CommunityAnalyzer;
-        match community.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:community".into(),
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Community analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:community".into(),
-                    message: e.to_string(),
-                });
-            }
-        }
+    /// Create an LLM provider from config, reading the API key from the environment.
+    fn create_llm_provider(
+        config: &HomerConfig,
+    ) -> crate::error::Result<Box<dyn crate::llm::LlmProvider>> {
+        let api_key = std::env::var(&config.llm.api_key_env).map_err(|_| {
+            crate::error::HomerError::Llm(crate::error::LlmError::Config(format!(
+                "Environment variable {} not set",
+                config.llm.api_key_env
+            )))
+        })?;
 
-        // Temporal analysis (centrality trends, drift, enhanced stability)
-        let temporal = TemporalAnalyzer;
-        match temporal.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:temporal".into(),
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Temporal analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:temporal".into(),
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // Convention analysis (naming, testing, error handling, doc style, agent rules)
-        let convention = ConventionAnalyzer::new(&self.repo_path);
-        match convention.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:convention".into(),
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Convention analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:convention".into(),
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // Task pattern analysis (prompt hotspots, correction hotspots, task patterns, vocabulary)
-        let task_pattern = TaskPatternAnalyzer;
-        match task_pattern.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:task_pattern".into(),
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Task pattern analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:task_pattern".into(),
-                    message: e.to_string(),
-                });
-            }
-        }
+        create_provider(
+            &config.llm.provider,
+            &config.llm.model,
+            &api_key,
+            config.llm.base_url.as_deref(),
+        )
     }
 
     /// All known renderer names and their stage labels.
@@ -405,6 +365,74 @@ impl HomerPipeline {
     }
 }
 
+/// Topologically sort analyzers by their `produces()`/`requires()` declarations.
+///
+/// Uses Kahn's algorithm. If the dependency graph has cycles (should never happen),
+/// remaining analyzers are appended in their original order.
+fn toposort_analyzers(analyzers: &[Box<dyn Analyzer>]) -> Vec<usize> {
+    let n = analyzers.len();
+
+    // Build a map: AnalysisKind → index of the analyzer that produces it.
+    let mut producer_of = std::collections::HashMap::new();
+    for (i, a) in analyzers.iter().enumerate() {
+        for kind in a.produces() {
+            producer_of.insert(*kind, i);
+        }
+    }
+
+    // Build adjacency: in_degree[i] = number of analyzers that must run before i.
+    let mut in_degree = vec![0u32; n];
+    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, a) in analyzers.iter().enumerate() {
+        for kind in a.requires() {
+            if let Some(&dep) = producer_of.get(kind) {
+                if dep != i {
+                    dependents[dep].push(i);
+                    in_degree[i] += 1;
+                }
+            }
+        }
+    }
+
+    // Deduplicate edges (an analyzer may require multiple kinds from the same producer).
+    for deps in &mut dependents {
+        deps.sort_unstable();
+        deps.dedup();
+    }
+    // Recompute in-degree after dedup.
+    in_degree.fill(0);
+    for deps in &dependents {
+        for &d in deps {
+            in_degree[d] += 1;
+        }
+    }
+
+    // Kahn's algorithm.
+    let mut queue: VecDeque<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+    let mut order = Vec::with_capacity(n);
+    while let Some(i) = queue.pop_front() {
+        order.push(i);
+        for &dep in &dependents[i] {
+            in_degree[dep] -= 1;
+            if in_degree[dep] == 0 {
+                queue.push_back(dep);
+            }
+        }
+    }
+
+    // If there's a cycle, append remaining in original order as a fallback.
+    if order.len() < n {
+        warn!("Analyzer dependency graph has a cycle; appending remaining in original order");
+        for i in 0..n {
+            if !order.contains(&i) {
+                order.push(i);
+            }
+        }
+    }
+
+    order
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,6 +506,39 @@ mod tests {
             result.artifacts_written >= 1,
             "Should write at least AGENTS.md"
         );
+    }
+
+    #[test]
+    fn toposort_respects_dependencies() {
+        // Build the default analyzer list (no LLM → no semantic)
+        let config = HomerConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let pipeline = HomerPipeline::new(tmp.path());
+        let analyzers = pipeline.build_analyzer_list(&config);
+        let order = toposort_analyzers(&analyzers);
+
+        // Build name→position map
+        let names: Vec<&str> = order.iter().map(|&i| analyzers[i].name()).collect();
+
+        let pos = |name: &str| names.iter().position(|n| *n == name).unwrap();
+
+        // behavioral must come before centrality (centrality requires ChangeFrequency)
+        assert!(
+            pos("behavioral") < pos("centrality"),
+            "behavioral before centrality: {names:?}"
+        );
+        // centrality must come before community (community requires CompositeSalience)
+        assert!(
+            pos("centrality") < pos("community"),
+            "centrality before community: {names:?}"
+        );
+        // community must come before temporal (temporal requires CommunityAssignment)
+        assert!(
+            pos("community") < pos("temporal"),
+            "community before temporal: {names:?}"
+        );
+        // all analyzers are present
+        assert_eq!(order.len(), analyzers.len());
     }
 
     #[tokio::test]

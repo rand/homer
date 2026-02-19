@@ -481,7 +481,7 @@ impl HomerMcpServer {
         for (kind, label) in &kinds {
             let analyses = self
                 .store
-                .get_analyses_by_kind(kind.clone())
+                .get_analyses_by_kind(*kind)
                 .await
                 .map_err(|e| format!("Store error: {e}"))?;
 

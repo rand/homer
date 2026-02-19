@@ -470,7 +470,7 @@ async fn print_json(
             AnalysisKind::StabilityClassification,
             AnalysisKind::CommunityAssignment,
         ] {
-            if let Some(result) = db.get_analysis(node.id, kind.clone()).await? {
+            if let Some(result) = db.get_analysis(node.id, kind).await? {
                 analyses.insert(format!("{kind:?}"), result.data);
             }
         }

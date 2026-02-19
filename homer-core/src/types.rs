@@ -192,7 +192,7 @@ pub struct HyperedgeMember {
 
 // ── Analysis types ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisKind {
     // Behavioral
     ChangeFrequency,

@@ -635,7 +635,7 @@ impl HomerStore for SqliteStore {
                 Ok(AnalysisResult {
                     id: AnalysisResultId(row.get("id")?),
                     node_id: NodeId(row.get("node_id")?),
-                    kind: kind.clone(),
+                    kind,
                     data: serde_json::from_str(&data_str).unwrap_or_default(),
                     input_hash: row.get("input_hash")?,
                     computed_at: DateTime::parse_from_rfc3339(&computed_at_str)
