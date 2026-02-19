@@ -1046,6 +1046,27 @@ impl HomerStore for SqliteStore {
             .await
     }
 
+    // ── Transactions ──────────────────────────────────────────────
+
+    async fn begin_transaction(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    async fn commit_transaction(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("COMMIT").map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    async fn rollback_transaction(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("ROLLBACK").map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
     // ── Metrics ────────────────────────────────────────────────────
 
     async fn stats(&self) -> crate::error::Result<StoreStats> {
@@ -1660,6 +1681,52 @@ mod tests {
         let graph = store.load_call_graph(&SubgraphFilter::Full).await.unwrap();
         assert_eq!(graph.node_count(), 0);
         assert_eq!(graph.edge_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn transaction_commit_is_atomic() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        store.begin_transaction().await.unwrap();
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "tx1.rs"))
+            .await
+            .unwrap();
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "tx2.rs"))
+            .await
+            .unwrap();
+        store.commit_transaction().await.unwrap();
+
+        let stats = store.stats().await.unwrap();
+        assert_eq!(stats.total_nodes, 2);
+    }
+
+    #[tokio::test]
+    async fn transaction_rollback_discards_changes() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "keeper.rs"))
+            .await
+            .unwrap();
+
+        store.begin_transaction().await.unwrap();
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "discard.rs"))
+            .await
+            .unwrap();
+        store.rollback_transaction().await.unwrap();
+
+        let stats = store.stats().await.unwrap();
+        assert_eq!(stats.total_nodes, 1);
+        assert!(
+            store
+                .get_node_by_name(NodeKind::File, "discard.rs")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }
 

@@ -166,6 +166,24 @@ pub trait HomerStore: Send + Sync {
         filter: &SubgraphFilter,
     ) -> crate::error::Result<InMemoryGraph>;
 
+    // ── Transactions ──────────────────────────────────────────────
+
+    /// Begin an explicit transaction. Operations between begin and commit
+    /// are executed atomically. Default: no-op (each operation auto-commits).
+    async fn begin_transaction(&self) -> crate::error::Result<()> {
+        Ok(())
+    }
+
+    /// Commit the current transaction started by `begin_transaction`.
+    async fn commit_transaction(&self) -> crate::error::Result<()> {
+        Ok(())
+    }
+
+    /// Roll back the current transaction started by `begin_transaction`.
+    async fn rollback_transaction(&self) -> crate::error::Result<()> {
+        Ok(())
+    }
+
     // ── Metrics ────────────────────────────────────────────────────
 
     /// Get summary statistics about the store.
