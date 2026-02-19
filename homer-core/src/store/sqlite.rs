@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
@@ -9,8 +11,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::{HomerError, StoreError};
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, GraphDiff, Hyperedge, HyperedgeId,
-    HyperedgeKind, HyperedgeMember, Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope,
-    SnapshotId, StoreStats,
+    HyperedgeKind, HyperedgeMember, InMemoryGraph, Node, NodeFilter, NodeId, NodeKind, SearchHit,
+    SearchScope, SnapshotId, SnapshotInfo, StoreStats, SubgraphFilter, extract_directed_pair,
 };
 
 use super::HomerStore;
@@ -134,6 +136,135 @@ impl SqliteStore {
             metadata: Self::parse_metadata(&metadata_str),
         })
     }
+
+    /// Build an `InMemoryGraph` from edges of a specific kind, applying a `SubgraphFilter`.
+    async fn load_filtered_graph(
+        &self,
+        kind: HyperedgeKind,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph> {
+        let edges = self.get_edges_by_kind(kind).await?;
+        if matches!(filter, SubgraphFilter::Full) {
+            return Ok(InMemoryGraph::from_edges(&edges));
+        }
+        let full_graph = InMemoryGraph::from_edges(&edges);
+        let allowed = resolve_filter(self, &full_graph, filter).await?;
+        let filtered_edges: Vec<Hyperedge> = edges
+            .into_iter()
+            .filter(|e| {
+                let (src, tgt) = extract_directed_pair(&e.members);
+                allowed.contains(&src) && allowed.contains(&tgt)
+            })
+            .collect();
+        Ok(InMemoryGraph::from_edges(&filtered_edges))
+    }
+}
+
+/// Resolve a `SubgraphFilter` into the set of `NodeId`s that pass the filter.
+/// Uses `Pin<Box>` to support recursive `And` filters.
+fn resolve_filter<'a>(
+    store: &'a SqliteStore,
+    graph: &'a InMemoryGraph,
+    filter: &'a SubgraphFilter,
+) -> Pin<Box<dyn Future<Output = crate::error::Result<HashSet<NodeId>>> + Send + 'a>> {
+    Box::pin(async move {
+        match filter {
+            SubgraphFilter::Full => Ok(graph.node_to_index.keys().copied().collect()),
+
+            SubgraphFilter::OfKind { kinds } => {
+                let mut allowed = HashSet::new();
+                for kind in kinds {
+                    let nodes = store
+                        .find_nodes(&NodeFilter {
+                            kind: Some(kind.clone()),
+                            ..Default::default()
+                        })
+                        .await?;
+                    for node in nodes {
+                        if graph.node_to_index.contains_key(&node.id) {
+                            allowed.insert(node.id);
+                        }
+                    }
+                }
+                Ok(allowed)
+            }
+
+            SubgraphFilter::Module { path_prefix } => {
+                let nodes = store
+                    .find_nodes(&NodeFilter {
+                        name_prefix: Some(path_prefix.clone()),
+                        ..Default::default()
+                    })
+                    .await?;
+                Ok(nodes
+                    .into_iter()
+                    .filter(|n| graph.node_to_index.contains_key(&n.id))
+                    .map(|n| n.id)
+                    .collect())
+            }
+
+            SubgraphFilter::HighSalience { min_score } => {
+                let analyses = store
+                    .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+                    .await?;
+                Ok(analyses
+                    .into_iter()
+                    .filter(|a| {
+                        a.data
+                            .get("score")
+                            .and_then(serde_json::Value::as_f64)
+                            .is_some_and(|s| s >= *min_score)
+                            && graph.node_to_index.contains_key(&a.node_id)
+                    })
+                    .map(|a| a.node_id)
+                    .collect())
+            }
+
+            SubgraphFilter::Neighborhood { centers, hops } => {
+                use petgraph::Direction;
+                use std::collections::VecDeque;
+
+                let mut visited = HashSet::new();
+                let mut queue = VecDeque::new();
+                for center in centers {
+                    if let Some(&idx) = graph.node_to_index.get(center) {
+                        if visited.insert(*center) {
+                            queue.push_back((idx, 0u32));
+                        }
+                    }
+                }
+                while let Some((idx, depth)) = queue.pop_front() {
+                    if depth >= *hops {
+                        continue;
+                    }
+                    let neighbors = graph
+                        .graph
+                        .neighbors_directed(idx, Direction::Outgoing)
+                        .chain(graph.graph.neighbors_directed(idx, Direction::Incoming));
+                    for neighbor_idx in neighbors {
+                        if let Some(&nid) = graph.index_to_node.get(&neighbor_idx) {
+                            if visited.insert(nid) {
+                                queue.push_back((neighbor_idx, depth + 1));
+                            }
+                        }
+                    }
+                }
+                Ok(visited)
+            }
+
+            SubgraphFilter::And(filters) => {
+                let mut result: Option<HashSet<NodeId>> = None;
+                for f in filters {
+                    let set = resolve_filter(store, graph, f).await?;
+                    result = Some(match result {
+                        None => set,
+                        Some(r) => r.intersection(&set).copied().collect(),
+                    });
+                }
+                Ok(result.unwrap_or_default())
+            }
+        }
+    })
 }
 
 #[async_trait::async_trait]
@@ -325,6 +456,33 @@ impl HomerStore for SqliteStore {
         Ok(current)
     }
 
+    async fn alias_chain(&self, node_id: NodeId) -> crate::error::Result<Vec<NodeId>> {
+        let conn = self.conn.lock().unwrap();
+        let mut chain = vec![node_id];
+        let mut current = node_id;
+        for _ in 0..10 {
+            let next: Option<i64> = conn
+                .query_row(
+                    "SELECT m_new.node_id FROM hyperedges e
+                     JOIN hyperedge_members m_old ON e.id = m_old.hyperedge_id AND m_old.role = 'old'
+                     JOIN hyperedge_members m_new ON e.id = m_new.hyperedge_id AND m_new.role = 'new'
+                     WHERE e.kind = 'Aliases' AND m_old.node_id = ?1",
+                    params![current.0],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(StoreError::Sqlite)?;
+            match next {
+                Some(id) => {
+                    current = NodeId(id);
+                    chain.push(current);
+                }
+                None => break,
+            }
+        }
+        Ok(chain)
+    }
+
     // ── Hyperedge operations ───────────────────────────────────────
 
     async fn upsert_hyperedge(&self, edge: &Hyperedge) -> crate::error::Result<HyperedgeId> {
@@ -477,7 +635,7 @@ impl HomerStore for SqliteStore {
                 Ok(AnalysisResult {
                     id: AnalysisResultId(row.get("id")?),
                     node_id: NodeId(row.get("node_id")?),
-                    kind: kind.clone(),
+                    kind,
                     data: serde_json::from_str(&data_str).unwrap_or_default(),
                     input_hash: row.get("input_hash")?,
                     computed_at: DateTime::parse_from_rfc3339(&computed_at_str)
@@ -530,6 +688,76 @@ impl HomerStore for SqliteStore {
                 params![node_id.0],
             )
             .map_err(StoreError::Sqlite)?;
+        Ok(count as u64)
+    }
+
+    async fn invalidate_analyses_by_kinds(
+        &self,
+        node_id: NodeId,
+        kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64> {
+        if kinds.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (0..kinds.len()).map(|i| format!("?{}", i + 2)).collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE node_id = ?1 AND kind IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(node_id.0)];
+        for kind in kinds {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+        let count = stmt.execute(refs.as_slice()).map_err(StoreError::Sqlite)?;
+        Ok(count as u64)
+    }
+
+    async fn invalidate_all_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<u64> {
+        if kinds.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (0..kinds.len()).map(|i| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE kind IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        for kind in kinds {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+        let count = stmt.execute(refs.as_slice()).map_err(StoreError::Sqlite)?;
+        Ok(count as u64)
+    }
+
+    async fn invalidate_analyses_excluding_kinds(
+        &self,
+        node_id: NodeId,
+        keep_kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64> {
+        if keep_kinds.is_empty() {
+            return self.invalidate_analyses(node_id).await;
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<String> = (0..keep_kinds.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE node_id = ?1 AND kind NOT IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(node_id.0)];
+        for kind in keep_kinds {
+            params_vec.push(Box::new(kind.as_str().to_string()));
+        }
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(AsRef::as_ref).collect();
+        let count = stmt.execute(refs.as_slice()).map_err(StoreError::Sqlite)?;
         Ok(count as u64)
     }
 
@@ -625,6 +853,27 @@ impl HomerStore for SqliteStore {
         Ok(())
     }
 
+    async fn clear_analyses_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<()> {
+        if kinds.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders: Vec<&str> = kinds.iter().map(|_| "?").collect();
+        let sql = format!(
+            "DELETE FROM analysis_results WHERE kind IN ({})",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(StoreError::Sqlite)?;
+        let params: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        stmt.execute(param_refs.as_slice())
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
     // ── Graph snapshots ────────────────────────────────────────────
 
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId> {
@@ -660,6 +909,57 @@ impl HomerStore for SqliteStore {
         .map_err(StoreError::Sqlite)?;
 
         Ok(SnapshotId(snap_id))
+    }
+
+    async fn list_snapshots(&self) -> crate::error::Result<Vec<SnapshotInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, label, snapshot_at, node_count, edge_count
+                 FROM graph_snapshots ORDER BY snapshot_at ASC",
+            )
+            .map_err(StoreError::Sqlite)?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let id: i64 = row.get(0)?;
+                let label: String = row.get(1)?;
+                let at_str: String = row.get(2)?;
+                let node_count: i64 = row.get(3)?;
+                let edge_count: i64 = row.get(4)?;
+                Ok((id, label, at_str, node_count, edge_count))
+            })
+            .map_err(StoreError::Sqlite)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::Sqlite)?;
+
+        let mut snapshots = Vec::with_capacity(rows.len());
+        for (id, label, at_str, node_count, edge_count) in rows {
+            let snapshot_at = DateTime::parse_from_rfc3339(&at_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_default();
+            snapshots.push(SnapshotInfo {
+                id: SnapshotId(id),
+                label,
+                snapshot_at,
+                node_count: u64::try_from(node_count).unwrap_or(0),
+                edge_count: u64::try_from(edge_count).unwrap_or(0),
+            });
+        }
+
+        Ok(snapshots)
+    }
+
+    async fn delete_snapshot(&self, label: &str) -> crate::error::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        // CASCADE will clean up snapshot_nodes and snapshot_edges
+        let deleted = conn
+            .execute(
+                "DELETE FROM graph_snapshots WHERE label = ?1",
+                params![label],
+            )
+            .map_err(StoreError::Sqlite)?;
+        Ok(deleted > 0)
     }
 
     async fn get_snapshot_diff(
@@ -727,6 +1027,44 @@ impl HomerStore for SqliteStore {
             added_edges,
             removed_edges,
         })
+    }
+
+    // ── Graph loading ────────────────────────────────────────────────
+
+    async fn load_call_graph(
+        &self,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph> {
+        self.load_filtered_graph(HyperedgeKind::Calls, filter).await
+    }
+
+    async fn load_import_graph(
+        &self,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph> {
+        self.load_filtered_graph(HyperedgeKind::Imports, filter)
+            .await
+    }
+
+    // ── Transactions ──────────────────────────────────────────────
+
+    async fn begin_transaction(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    async fn commit_transaction(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("COMMIT").map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    async fn rollback_transaction(&self) -> crate::error::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("ROLLBACK").map_err(StoreError::Sqlite)?;
+        Ok(())
     }
 
     // ── Metrics ────────────────────────────────────────────────────
@@ -1134,6 +1472,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn alias_chain_returns_full_history() {
+        let store = SqliteStore::in_memory().unwrap();
+        let v1 = store
+            .upsert_node(&make_test_node(NodeKind::File, "utils.rs"))
+            .await
+            .unwrap();
+        let v2 = store
+            .upsert_node(&make_test_node(NodeKind::File, "helpers.rs"))
+            .await
+            .unwrap();
+        let v3 = store
+            .upsert_node(&make_test_node(NodeKind::File, "core_helpers.rs"))
+            .await
+            .unwrap();
+
+        // v1 -> v2 -> v3 alias chain
+        for (old, new) in [(v1, v2), (v2, v3)] {
+            store
+                .upsert_hyperedge(&Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: HyperedgeKind::Aliases,
+                    members: vec![
+                        HyperedgeMember {
+                            node_id: old,
+                            role: "old".to_string(),
+                            position: 0,
+                        },
+                        HyperedgeMember {
+                            node_id: new,
+                            role: "new".to_string(),
+                            position: 1,
+                        },
+                    ],
+                    confidence: 1.0,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                })
+                .await
+                .unwrap();
+        }
+
+        // Full chain from v1
+        let chain = store.alias_chain(v1).await.unwrap();
+        assert_eq!(chain, vec![v1, v2, v3]);
+
+        // Partial chain from v2
+        let chain = store.alias_chain(v2).await.unwrap();
+        assert_eq!(chain, vec![v2, v3]);
+
+        // No aliases from v3
+        let chain = store.alias_chain(v3).await.unwrap();
+        assert_eq!(chain, vec![v3]);
+    }
+
+    #[tokio::test]
     async fn snapshot_diff_detects_changes() {
         let store = SqliteStore::in_memory().unwrap();
 
@@ -1154,6 +1547,186 @@ mod tests {
         let diff = store.get_snapshot_diff(snap1, snap2).await.unwrap();
         assert_eq!(diff.added_nodes.len(), 1, "should detect 1 added node");
         assert!(diff.removed_nodes.is_empty(), "no nodes removed");
+    }
+
+    /// Helper: create a directed edge between two nodes.
+    async fn insert_edge(
+        store: &SqliteStore,
+        kind: HyperedgeKind,
+        src: NodeId,
+        tgt: NodeId,
+        src_role: &str,
+        tgt_role: &str,
+    ) {
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: src,
+                        role: src_role.to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: tgt,
+                        role: tgt_role.to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: 1.0,
+                last_updated: Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_call_graph_full() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store
+            .upsert_node(&make_test_node(NodeKind::Function, "main"))
+            .await
+            .unwrap();
+        let b = store
+            .upsert_node(&make_test_node(NodeKind::Function, "helper"))
+            .await
+            .unwrap();
+        let c = store
+            .upsert_node(&make_test_node(NodeKind::Function, "util"))
+            .await
+            .unwrap();
+
+        // main -> helper -> util
+        insert_edge(&store, HyperedgeKind::Calls, a, b, "caller", "callee").await;
+        insert_edge(&store, HyperedgeKind::Calls, b, c, "caller", "callee").await;
+
+        let graph = store.load_call_graph(&SubgraphFilter::Full).await.unwrap();
+        assert_eq!(graph.node_count(), 3);
+        assert_eq!(graph.edge_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn load_import_graph_module_filter() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store
+            .upsert_node(&make_test_node(NodeKind::File, "src/auth/login.rs"))
+            .await
+            .unwrap();
+        let b = store
+            .upsert_node(&make_test_node(NodeKind::File, "src/auth/token.rs"))
+            .await
+            .unwrap();
+        let c = store
+            .upsert_node(&make_test_node(NodeKind::File, "src/db/pool.rs"))
+            .await
+            .unwrap();
+
+        // login imports token and pool
+        insert_edge(&store, HyperedgeKind::Imports, a, b, "importer", "imported").await;
+        insert_edge(&store, HyperedgeKind::Imports, a, c, "importer", "imported").await;
+
+        // Filter to src/auth/ — pool.rs excluded, so only login->token edge survives
+        let graph = store
+            .load_import_graph(&SubgraphFilter::Module {
+                path_prefix: "src/auth/".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn load_call_graph_neighborhood_filter() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store
+            .upsert_node(&make_test_node(NodeKind::Function, "a"))
+            .await
+            .unwrap();
+        let b = store
+            .upsert_node(&make_test_node(NodeKind::Function, "b"))
+            .await
+            .unwrap();
+        let c = store
+            .upsert_node(&make_test_node(NodeKind::Function, "c"))
+            .await
+            .unwrap();
+        let d = store
+            .upsert_node(&make_test_node(NodeKind::Function, "d"))
+            .await
+            .unwrap();
+
+        // a -> b -> c -> d (chain of 3 hops)
+        insert_edge(&store, HyperedgeKind::Calls, a, b, "caller", "callee").await;
+        insert_edge(&store, HyperedgeKind::Calls, b, c, "caller", "callee").await;
+        insert_edge(&store, HyperedgeKind::Calls, c, d, "caller", "callee").await;
+
+        // 1-hop from a: should include a and b
+        let graph = store
+            .load_call_graph(&SubgraphFilter::Neighborhood {
+                centers: vec![a],
+                hops: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn load_call_graph_empty() {
+        let store = SqliteStore::in_memory().unwrap();
+        let graph = store.load_call_graph(&SubgraphFilter::Full).await.unwrap();
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(graph.edge_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn transaction_commit_is_atomic() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        store.begin_transaction().await.unwrap();
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "tx1.rs"))
+            .await
+            .unwrap();
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "tx2.rs"))
+            .await
+            .unwrap();
+        store.commit_transaction().await.unwrap();
+
+        let stats = store.stats().await.unwrap();
+        assert_eq!(stats.total_nodes, 2);
+    }
+
+    #[tokio::test]
+    async fn transaction_rollback_discards_changes() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "keeper.rs"))
+            .await
+            .unwrap();
+
+        store.begin_transaction().await.unwrap();
+        store
+            .upsert_node(&make_test_node(NodeKind::File, "discard.rs"))
+            .await
+            .unwrap();
+        store.rollback_transaction().await.unwrap();
+
+        let stats = store.stats().await.unwrap();
+        assert_eq!(stats.total_nodes, 1);
+        assert!(
+            store
+                .get_node_by_name(NodeKind::File, "discard.rs")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
@@ -1334,7 +1907,7 @@ mod proptests {
                 let result = AnalysisResult {
                     id: AnalysisResultId(0),
                     node_id,
-                    kind: kind.clone(),
+                    kind,
                     data: serde_json::json!({"score": score}),
                     input_hash,
                     computed_at: Utc::now(),
@@ -1342,7 +1915,7 @@ mod proptests {
 
                 store.store_analysis(&result).await.unwrap();
 
-                let results = store.get_analyses_by_kind(kind.clone()).await.unwrap();
+                let results = store.get_analyses_by_kind(kind).await.unwrap();
                 prop_assert_eq!(results.len(), 1);
                 let r = &results[0];
                 prop_assert_eq!(r.node_id, node_id);

@@ -13,7 +13,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::git::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 /// Structure extractor — file tree walking, manifest parsing, CI config detection.
 #[derive(Debug)]
@@ -27,10 +27,16 @@ impl StructureExtractor {
             repo_path: repo_path.to_path_buf(),
         }
     }
+}
 
-    /// Run structure extraction.
+#[async_trait::async_trait(?Send)]
+impl Extractor for StructureExtractor {
+    fn name(&self) -> &'static str {
+        "structure"
+    }
+
     #[instrument(skip_all, name = "structure_extract")]
-    pub async fn extract(
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -101,7 +107,9 @@ impl StructureExtractor {
         );
         Ok(stats)
     }
+}
 
+impl StructureExtractor {
     fn walk_file_tree(&self, config: &HomerConfig) -> Vec<PathBuf> {
         let structure = &config.extraction.structure;
         let mut matched_files = Vec::new();

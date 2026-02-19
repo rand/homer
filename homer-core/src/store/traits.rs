@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 
 use crate::types::{
-    AnalysisKind, AnalysisResult, GraphDiff, Hyperedge, HyperedgeId, HyperedgeKind, Node,
-    NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, StoreStats,
+    AnalysisKind, AnalysisResult, GraphDiff, Hyperedge, HyperedgeId, HyperedgeKind, InMemoryGraph,
+    Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, SnapshotInfo,
+    StoreStats, SubgraphFilter,
 };
 
 /// The core store abstraction. All pipeline stages read/write through this trait.
@@ -39,6 +40,11 @@ pub trait HomerStore: Send + Sync {
 
     /// Resolve a node to its canonical (current) identity through alias chains.
     async fn resolve_canonical(&self, node_id: NodeId) -> crate::error::Result<NodeId>;
+
+    /// Return the full alias chain starting from `node_id`, following old → new links.
+    /// The first element is `node_id` itself; the last is the canonical identity.
+    /// Returns `[node_id]` if no aliases exist.
+    async fn alias_chain(&self, node_id: NodeId) -> crate::error::Result<Vec<NodeId>>;
 
     // ── Hyperedge operations ───────────────────────────────────────
 
@@ -79,6 +85,23 @@ pub trait HomerStore: Send + Sync {
     /// Invalidate all analysis results for a node.
     async fn invalidate_analyses(&self, node_id: NodeId) -> crate::error::Result<u64>;
 
+    /// Invalidate analysis results of specific kinds for a node.
+    async fn invalidate_analyses_by_kinds(
+        &self,
+        node_id: NodeId,
+        kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64>;
+
+    /// Invalidate analysis results of specific kinds for ALL nodes.
+    async fn invalidate_all_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<u64>;
+
+    /// Invalidate all analysis results for a node EXCEPT the specified kinds.
+    async fn invalidate_analyses_excluding_kinds(
+        &self,
+        node_id: NodeId,
+        keep_kinds: &[AnalysisKind],
+    ) -> crate::error::Result<u64>;
+
     // ── Full-text search ───────────────────────────────────────────
 
     /// Index text content for a node.
@@ -110,10 +133,19 @@ pub trait HomerStore: Send + Sync {
     /// Clear all analysis results (for --force-analysis).
     async fn clear_analyses(&self) -> crate::error::Result<()>;
 
+    /// Clear analysis results for specific kinds (for --force-semantic).
+    async fn clear_analyses_by_kinds(&self, kinds: &[AnalysisKind]) -> crate::error::Result<()>;
+
     // ── Graph snapshots ────────────────────────────────────────────
 
     /// Create a named snapshot of current graph state.
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId>;
+
+    /// List all snapshots ordered by creation time.
+    async fn list_snapshots(&self) -> crate::error::Result<Vec<SnapshotInfo>>;
+
+    /// Delete a snapshot by its label.
+    async fn delete_snapshot(&self, label: &str) -> crate::error::Result<bool>;
 
     /// Compute the diff between two snapshots (added/removed nodes and edges).
     async fn get_snapshot_diff(
@@ -121,6 +153,36 @@ pub trait HomerStore: Send + Sync {
         from: SnapshotId,
         to: SnapshotId,
     ) -> crate::error::Result<GraphDiff>;
+
+    // ── Graph loading ────────────────────────────────────────────────
+
+    /// Load the call graph (`Calls` edges) into memory, applying a subgraph filter.
+    async fn load_call_graph(&self, filter: &SubgraphFilter)
+    -> crate::error::Result<InMemoryGraph>;
+
+    /// Load the import graph (`Imports` edges) into memory, applying a subgraph filter.
+    async fn load_import_graph(
+        &self,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph>;
+
+    // ── Transactions ──────────────────────────────────────────────
+
+    /// Begin an explicit transaction. Operations between begin and commit
+    /// are executed atomically. Default: no-op (each operation auto-commits).
+    async fn begin_transaction(&self) -> crate::error::Result<()> {
+        Ok(())
+    }
+
+    /// Commit the current transaction started by `begin_transaction`.
+    async fn commit_transaction(&self) -> crate::error::Result<()> {
+        Ok(())
+    }
+
+    /// Roll back the current transaction started by `begin_transaction`.
+    async fn rollback_transaction(&self) -> crate::error::Result<()> {
+        Ok(())
+    }
 
     // ── Metrics ────────────────────────────────────────────────────
 

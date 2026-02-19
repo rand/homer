@@ -40,6 +40,16 @@ impl Analyzer for ConventionAnalyzer {
         "convention"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::NamingPattern,
+            AnalysisKind::ErrorHandlingPattern,
+            AnalysisKind::TestingPattern,
+            AnalysisKind::DocumentationStylePattern,
+            AnalysisKind::AgentRuleValidation,
+        ]
+    }
+
     #[instrument(skip_all, name = "convention_analyze")]
     async fn analyze(
         &self,
@@ -985,6 +995,8 @@ mod tests {
 
     #[tokio::test]
     async fn full_convention_analysis() {
+        use crate::extract::traits::Extractor;
+
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
         std::fs::write(

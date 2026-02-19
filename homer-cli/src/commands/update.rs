@@ -9,6 +9,7 @@ use homer_core::pipeline::HomerPipeline;
 use homer_core::progress::IndicatifReporter;
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
+use homer_core::types::AnalysisKind;
 
 #[derive(Args, Debug)]
 pub struct UpdateArgs {
@@ -23,6 +24,10 @@ pub struct UpdateArgs {
     /// Force re-analysis (keep extraction, recompute all analysis)
     #[arg(long)]
     pub force_analysis: bool,
+
+    /// Force refresh of LLM-derived semantic analyses only
+    #[arg(long)]
+    pub force_semantic: bool,
 }
 
 pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
@@ -46,7 +51,7 @@ pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
         .with_context(|| format!("Cannot parse config: {}", config_path.display()))?;
 
     // Open database
-    let db_path = homer_dir.join("homer.db");
+    let db_path = super::resolve_db_path(&repo_path);
     let store = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 
@@ -66,6 +71,20 @@ pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
             .clear_analyses()
             .await
             .context("Failed to clear analyses")?;
+    }
+
+    // Clear only semantic (LLM-derived) analyses if --force-semantic
+    if args.force_semantic {
+        info!("Force-semantic mode: clearing LLM-derived analyses");
+        let semantic_kinds = [
+            AnalysisKind::SemanticSummary,
+            AnalysisKind::DesignRationale,
+            AnalysisKind::InvariantDescription,
+        ];
+        store
+            .clear_analyses_by_kinds(&semantic_kinds)
+            .await
+            .context("Failed to clear semantic analyses")?;
     }
 
     let progress = IndicatifReporter::new();

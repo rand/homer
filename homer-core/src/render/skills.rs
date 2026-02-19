@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
 
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -31,6 +31,7 @@ impl Renderer for SkillsRenderer {
         ".claude/skills/homer-skills.md"
     }
 
+    #[instrument(skip_all, name = "skills_render")]
     async fn render(
         &self,
         _store: &dyn HomerStore,
@@ -53,7 +54,7 @@ impl Renderer for SkillsRenderer {
             return Ok(());
         }
 
-        let skills_dir = repo_root.join(".claude/skills");
+        let skills_dir = repo_root.join(&config.renderers.skills.output_dir);
         std::fs::create_dir_all(&skills_dir)
             .map_err(|e| crate::error::HomerError::Extract(crate::error::ExtractError::Io(e)))?;
 

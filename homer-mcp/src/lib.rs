@@ -15,9 +15,10 @@ use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_router};
 use serde::Deserialize;
 use tracing::info;
 
+use homer_core::query;
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
-use homer_core::types::{AnalysisKind, NodeFilter, NodeKind};
+use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
 
 // ── Tool parameter types ──────────────────────────────────────────
 
@@ -25,10 +26,15 @@ use homer_core::types::{AnalysisKind, NodeFilter, NodeKind};
 pub struct QueryParams {
     /// Entity name or substring to search for
     #[schemars(description = "Entity name or substring to search for")]
-    pub name: String,
+    pub entity: String,
     /// Kind filter: function, type, file, module, or all
     #[schemars(description = "Kind filter: function, type, file, module (omit for all)")]
     pub kind: Option<String>,
+    /// Sections to include in the response
+    #[schemars(
+        description = "Sections to include: summary, metrics, callers, callees, history, co_changes (omit for default)"
+    )]
+    pub include: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -39,13 +45,43 @@ pub struct GraphParams {
     /// Metric: pagerank, betweenness, hits, salience (default: salience)
     #[schemars(description = "Metric: pagerank, betweenness, hits, salience (default: salience)")]
     pub metric: Option<String>,
+    /// File path prefix to scope results
+    #[schemars(description = "File path prefix to scope results (e.g. 'src/core/')")]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RiskParams {
-    /// File path relative to repo root
-    #[schemars(description = "File path relative to repo root")]
-    pub path: String,
+    /// File paths relative to repo root
+    #[schemars(description = "File paths relative to repo root")]
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CoChangesParams {
+    /// File path to find co-change partners for (omit for top global pairs)
+    #[schemars(
+        description = "File path to find co-change partners for (omit for top global pairs)"
+    )]
+    pub path: Option<String>,
+    /// Maximum co-change pairs to return (default: 10)
+    #[schemars(description = "Maximum co-change pairs to return (default: 10)")]
+    pub top: Option<u32>,
+    /// Minimum confidence threshold (default: 0.3)
+    #[schemars(description = "Minimum confidence threshold (default: 0.3)")]
+    pub min_confidence: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConventionsParams {
+    /// Convention category filter
+    #[schemars(
+        description = "Convention type: naming, testing, error_handling, documentation, agent_rules (default: all)"
+    )]
+    pub category: Option<String>,
+    /// Module path or empty for project-wide
+    #[schemars(description = "Module path to scope conventions to, or omit for project-wide")]
+    pub scope: Option<String>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────
@@ -113,6 +149,28 @@ impl HomerMcpServer {
             Err(e) => format!("Error: {e}"),
         }
     }
+
+    #[tool(
+        name = "homer_co_changes",
+        description = "Find files that frequently change together. Use when planning modifications to understand ripple effects."
+    )]
+    async fn co_changes(&self, Parameters(params): Parameters<CoChangesParams>) -> String {
+        match self.do_co_changes(params).await {
+            Ok(s) => s,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[tool(
+        name = "homer_conventions",
+        description = "Get project conventions (naming, testing, error handling, documentation). Use to understand and follow established patterns."
+    )]
+    async fn conventions(&self, Parameters(params): Parameters<ConventionsParams>) -> String {
+        match self.do_conventions(params).await {
+            Ok(s) => s,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
 }
 
 impl ServerHandler for HomerMcpServer {
@@ -121,7 +179,8 @@ impl ServerHandler for HomerMcpServer {
             instructions: Some(
                 "Homer MCP server — codebase intelligence tools for AI agents. \
                  Use homer_query to look up entities, homer_graph for centrality metrics, \
-                 and homer_risk to assess modification risk."
+                 homer_risk to assess modification risk, homer_co_changes to find files \
+                 that change together, and homer_conventions to understand project patterns."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -134,10 +193,10 @@ impl ServerHandler for HomerMcpServer {
 
 impl HomerMcpServer {
     async fn do_query(&self, params: QueryParams) -> Result<String, String> {
-        let kind = params.kind.as_deref().and_then(parse_node_kind);
+        let kind = params.kind.as_deref().and_then(query::parse_node_kind);
         let filter = NodeFilter {
             kind,
-            name_contains: Some(params.name.clone()),
+            name_contains: Some(params.entity.clone()),
             ..Default::default()
         };
 
@@ -148,23 +207,58 @@ impl HomerMcpServer {
             .map_err(|e| format!("Store error: {e}"))?;
 
         if nodes.is_empty() {
-            return Ok(format!("No entities found matching '{}'", params.name));
+            return Ok(format!("No entities found matching '{}'", params.entity));
         }
+
+        let include = params.include.as_deref().unwrap_or(&[]);
+        let include_all = include.is_empty();
 
         let mut results = Vec::new();
         for node in nodes.iter().take(20) {
             let mut entry = serde_json::json!({
                 "name": node.name,
                 "kind": node.kind.as_str(),
-                "metadata": node.metadata,
             });
 
-            if let Ok(Some(sal)) = self
-                .store
-                .get_analysis(node.id, AnalysisKind::CompositeSalience)
-                .await
-            {
-                entry["salience"] = sal.data;
+            if include_all || include.iter().any(|s| s == "summary") {
+                entry["metadata"] = serde_json::json!(node.metadata);
+            }
+
+            if include_all || include.iter().any(|s| s == "metrics") {
+                if let Ok(Some(sal)) = self
+                    .store
+                    .get_analysis(node.id, AnalysisKind::CompositeSalience)
+                    .await
+                {
+                    entry["salience"] = sal.data;
+                }
+            }
+
+            if include.iter().any(|s| s == "history") {
+                if let Ok(Some(freq)) = self
+                    .store
+                    .get_analysis(node.id, AnalysisKind::ChangeFrequency)
+                    .await
+                {
+                    entry["change_frequency"] = freq.data;
+                }
+            }
+
+            if include.iter().any(|s| s == "callers" || s == "callees") {
+                let (incoming, outgoing) = query::resolve_call_edges(&*self.store, node.id).await;
+                if include.iter().any(|s| s == "callers") {
+                    entry["callers"] = serde_json::json!(incoming);
+                }
+                if include.iter().any(|s| s == "callees") {
+                    entry["callees"] = serde_json::json!(outgoing);
+                }
+            }
+
+            if include.iter().any(|s| s == "co_changes") {
+                entry["co_changes"] = serde_json::json!(
+                    query::resolve_related_names(&*self.store, node.id, HyperedgeKind::CoChanges)
+                        .await
+                );
             }
 
             results.push(entry);
@@ -211,21 +305,31 @@ impl HomerMcpServer {
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let mut entries = Vec::new();
-        for (node_id, val, data) in scored.iter().take(top_n) {
-            let name = self
-                .store
-                .get_node(*node_id)
-                .await
-                .ok()
-                .flatten()
-                .map_or_else(|| format!("node:{}", node_id.0), |n| n.name);
-            entries.push(serde_json::json!({
-                "name": name,
-                "score": val,
-                "data": data,
-            }));
+        // Resolve names and apply scope filter BEFORE top-N truncation.
+        let mut named: Vec<(String, f64, &serde_json::Value)> = Vec::new();
+        for (node_id, val, data) in &scored {
+            let name = query::resolve_name(&*self.store, *node_id).await;
+
+            if let Some(ref scope) = params.scope {
+                if !name.starts_with(scope.as_str()) {
+                    continue;
+                }
+            }
+
+            named.push((name, *val, *data));
         }
+
+        let entries: Vec<_> = named
+            .iter()
+            .take(top_n)
+            .map(|(name, val, data)| {
+                serde_json::json!({
+                    "name": name,
+                    "score": val,
+                    "data": data,
+                })
+            })
+            .collect();
 
         serde_json::to_string_pretty(&serde_json::json!({
             "metric": metric,
@@ -236,61 +340,204 @@ impl HomerMcpServer {
     }
 
     async fn do_risk(&self, params: RiskParams) -> Result<String, String> {
-        let node = self
+        let mut results = Vec::new();
+
+        for path in &params.paths {
+            let node = self
+                .store
+                .get_node_by_name(NodeKind::File, path)
+                .await
+                .map_err(|e| format!("Store error: {e}"))?;
+
+            let Some(file_node) = node else {
+                results.push(serde_json::json!({
+                    "file": path,
+                    "error": "not found in Homer database",
+                }));
+                continue;
+            };
+
+            let mut risk = serde_json::json!({ "file": path });
+
+            let analyses = [
+                (AnalysisKind::ChangeFrequency, "change_frequency"),
+                (
+                    AnalysisKind::ContributorConcentration,
+                    "contributor_concentration",
+                ),
+                (AnalysisKind::CompositeSalience, "salience"),
+                (AnalysisKind::CommunityAssignment, "community"),
+                (AnalysisKind::StabilityClassification, "stability"),
+            ];
+
+            for (kind, key) in analyses {
+                if let Ok(Some(result)) = self.store.get_analysis(file_node.id, kind).await {
+                    risk[key] = result.data;
+                }
+            }
+
+            risk["risk_level"] = serde_json::json!(compute_risk_level(&risk));
+            results.push(risk);
+        }
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "count": results.len(),
+            "results": results,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    async fn do_co_changes(&self, params: CoChangesParams) -> Result<String, String> {
+        let top_n = params.top.unwrap_or(10) as usize;
+        let min_conf = params.min_confidence.unwrap_or(0.3);
+
+        // Validate file path first (before querying edges)
+        let target_node_id = if let Some(ref path) = params.path {
+            let node = self
+                .store
+                .get_node_by_name(NodeKind::File, path)
+                .await
+                .map_err(|e| format!("Store error: {e}"))?;
+            match node {
+                Some(n) => Some(n.id),
+                None => {
+                    return Ok(format!("File '{path}' not found in Homer database"));
+                }
+            }
+        } else {
+            None
+        };
+
+        let edges = self
             .store
-            .get_node_by_name(NodeKind::File, &params.path)
+            .get_edges_by_kind(HyperedgeKind::CoChanges)
             .await
             .map_err(|e| format!("Store error: {e}"))?;
 
-        let Some(file_node) = node else {
-            return Ok(format!(
-                "File '{}' not found in Homer database",
-                params.path
-            ));
-        };
-
-        let mut risk = serde_json::json!({ "file": params.path });
-
-        let analyses = [
-            (AnalysisKind::ChangeFrequency, "change_frequency"),
-            (
-                AnalysisKind::ContributorConcentration,
-                "contributor_concentration",
-            ),
-            (AnalysisKind::CompositeSalience, "salience"),
-            (AnalysisKind::CommunityAssignment, "community"),
-            (AnalysisKind::StabilityClassification, "stability"),
-        ];
-
-        for (kind, key) in analyses {
-            if let Ok(Some(result)) = self.store.get_analysis(file_node.id, kind).await {
-                risk[key] = result.data;
-            }
+        if edges.is_empty() {
+            return Ok(r#"{"count": 0, "results": [], "note": "No co-change data. Run `homer update` first."}"#.to_string());
         }
 
-        risk["risk_level"] = serde_json::json!(compute_risk_level(&risk));
+        let filtered: Vec<_> = if let Some(target) = target_node_id {
+            edges
+                .iter()
+                .filter(|e| e.members.iter().any(|m| m.node_id == target))
+                .collect()
+        } else {
+            edges.iter().collect()
+        };
 
-        serde_json::to_string_pretty(&risk).map_err(|e| format!("JSON error: {e}"))
+        let mut scored: Vec<_> = filtered
+            .iter()
+            .filter(|e| e.confidence >= min_conf)
+            .map(|e| (e, e.confidence))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut results = Vec::new();
+        for (edge, confidence) in scored.iter().take(top_n) {
+            let mut member_names = Vec::new();
+            for member in &edge.members {
+                member_names.push(query::resolve_name(&*self.store, member.node_id).await);
+            }
+
+            let mut entry = serde_json::json!({
+                "files": member_names,
+                "confidence": confidence,
+            });
+
+            if let Some(co_occ) = edge.metadata.get("co_occurrences") {
+                entry["co_occurrences"] = co_occ.clone();
+            }
+            if let Some(support) = edge.metadata.get("support") {
+                entry["support"] = support.clone();
+            }
+
+            results.push(entry);
+        }
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "count": results.len(),
+            "results": results,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
+    }
+
+    async fn do_conventions(&self, params: ConventionsParams) -> Result<String, String> {
+        let kinds: Vec<(AnalysisKind, &str)> = match params.category.as_deref() {
+            Some("naming") => vec![(AnalysisKind::NamingPattern, "naming")],
+            Some("testing") => vec![(AnalysisKind::TestingPattern, "testing")],
+            Some("error_handling") => {
+                vec![(AnalysisKind::ErrorHandlingPattern, "error_handling")]
+            }
+            Some("documentation") => {
+                vec![(AnalysisKind::DocumentationStylePattern, "documentation")]
+            }
+            Some("agent_rules") => vec![(AnalysisKind::AgentRuleValidation, "agent_rules")],
+            Some(other) => {
+                return Ok(format!(
+                    "Unknown category '{other}'. Use: naming, testing, error_handling, documentation, agent_rules"
+                ));
+            }
+            None => vec![
+                (AnalysisKind::NamingPattern, "naming"),
+                (AnalysisKind::TestingPattern, "testing"),
+                (AnalysisKind::ErrorHandlingPattern, "error_handling"),
+                (AnalysisKind::DocumentationStylePattern, "documentation"),
+                (AnalysisKind::AgentRuleValidation, "agent_rules"),
+            ],
+        };
+
+        let mut categories = serde_json::Map::new();
+
+        for (kind, label) in &kinds {
+            let analyses = self
+                .store
+                .get_analyses_by_kind(*kind)
+                .await
+                .map_err(|e| format!("Store error: {e}"))?;
+
+            if analyses.is_empty() {
+                continue;
+            }
+
+            // Aggregate per-file convention data into a project-wide summary
+            let mut patterns: Vec<serde_json::Value> = Vec::new();
+            for analysis in &analyses {
+                let node_name = query::resolve_name(&*self.store, analysis.node_id).await;
+
+                patterns.push(serde_json::json!({
+                    "file": node_name,
+                    "data": analysis.data,
+                }));
+            }
+
+            categories.insert(
+                (*label).to_string(),
+                serde_json::json!({
+                    "count": patterns.len(),
+                    "patterns": patterns,
+                }),
+            );
+        }
+
+        if categories.is_empty() {
+            return Ok(
+                r#"{"count": 0, "categories": {}, "note": "No convention data. Run `homer update` first."}"#
+                    .to_string(),
+            );
+        }
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "count": categories.len(),
+            "categories": categories,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-fn parse_node_kind(s: &str) -> Option<NodeKind> {
-    match s.to_lowercase().as_str() {
-        "function" | "fn" => Some(NodeKind::Function),
-        "type" | "struct" | "class" => Some(NodeKind::Type),
-        "file" => Some(NodeKind::File),
-        "module" | "dir" | "directory" => Some(NodeKind::Module),
-        "commit" => Some(NodeKind::Commit),
-        "contributor" | "author" => Some(NodeKind::Contributor),
-        "pr" | "pullrequest" => Some(NodeKind::PullRequest),
-        "issue" => Some(NodeKind::Issue),
-        "dep" | "dependency" => Some(NodeKind::ExternalDep),
-        "document" | "doc" => Some(NodeKind::Document),
-        _ => None,
-    }
-}
 
 fn compute_risk_level(risk: &serde_json::Value) -> &'static str {
     let mut score = 0u32;
@@ -364,17 +611,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_node_kind_variants() {
-        assert_eq!(parse_node_kind("function"), Some(NodeKind::Function));
-        assert_eq!(parse_node_kind("fn"), Some(NodeKind::Function));
-        assert_eq!(parse_node_kind("type"), Some(NodeKind::Type));
-        assert_eq!(parse_node_kind("file"), Some(NodeKind::File));
-        assert_eq!(parse_node_kind("module"), Some(NodeKind::Module));
-        assert_eq!(parse_node_kind("unknown"), None);
-        assert_eq!(parse_node_kind("all"), None);
-    }
-
-    #[test]
     fn risk_level_computation() {
         let empty = serde_json::json!({});
         assert_eq!(compute_risk_level(&empty), "low");
@@ -400,8 +636,9 @@ mod tests {
 
         let result = server
             .do_query(QueryParams {
-                name: "nonexistent".to_string(),
+                entity: "nonexistent".to_string(),
                 kind: None,
+                include: None,
             })
             .await
             .unwrap();
@@ -416,11 +653,77 @@ mod tests {
 
         let result = server
             .do_risk(RiskParams {
-                path: "src/missing.rs".to_string(),
+                paths: vec!["src/missing.rs".to_string()],
             })
             .await
             .unwrap();
 
         assert!(result.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn server_co_changes_empty_store() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_co_changes(CoChangesParams {
+                path: None,
+                top: None,
+                min_confidence: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("\"count\": 0"));
+    }
+
+    #[tokio::test]
+    async fn server_co_changes_missing_file() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_co_changes(CoChangesParams {
+                path: Some("nonexistent.rs".to_string()),
+                top: None,
+                min_confidence: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn server_conventions_empty_store() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_conventions(ConventionsParams {
+                category: None,
+                scope: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("\"count\": 0"));
+    }
+
+    #[tokio::test]
+    async fn server_conventions_unknown_category() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_conventions(ConventionsParams {
+                category: Some("bogus".to_string()),
+                scope: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("Unknown category"));
     }
 }

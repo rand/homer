@@ -32,6 +32,21 @@ impl Analyzer for TemporalAnalyzer {
         "temporal"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::CentralityTrend,
+            AnalysisKind::ArchitecturalDrift,
+            AnalysisKind::StabilityClassification,
+        ]
+    }
+
+    fn requires(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::CompositeSalience,
+            AnalysisKind::CommunityAssignment,
+        ]
+    }
+
     #[instrument(skip_all, name = "temporal_analyze")]
     async fn analyze(
         &self,

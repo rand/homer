@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -7,10 +8,11 @@ use crate::analyze::behavioral::BehavioralAnalyzer;
 use crate::analyze::centrality::CentralityAnalyzer;
 use crate::analyze::community::CommunityAnalyzer;
 use crate::analyze::convention::ConventionAnalyzer;
+use crate::analyze::semantic::SemanticAnalyzer;
 use crate::analyze::task_pattern::TaskPatternAnalyzer;
 use crate::analyze::temporal::TemporalAnalyzer;
 use crate::analyze::traits::Analyzer;
-use crate::config::HomerConfig;
+use crate::config::{AnalysisDepth, HomerConfig};
 use crate::extract::document::DocumentExtractor;
 use crate::extract::git::GitExtractor;
 use crate::extract::github::GitHubExtractor;
@@ -18,6 +20,8 @@ use crate::extract::gitlab::GitLabExtractor;
 use crate::extract::graph::GraphExtractor;
 use crate::extract::prompt::PromptExtractor;
 use crate::extract::structure::StructureExtractor;
+use crate::extract::traits::Extractor;
+use crate::llm::providers::create_provider;
 use crate::progress::ProgressReporter;
 use crate::render::agents_md::AgentsMdRenderer;
 use crate::render::module_context::ModuleContextRenderer;
@@ -42,7 +46,7 @@ pub struct PipelineResult {
 /// A non-fatal error from one pipeline stage.
 #[derive(Debug)]
 pub struct PipelineError {
-    pub stage: &'static str,
+    pub stage: String,
     pub message: String,
 }
 
@@ -138,126 +142,54 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        // 1. Git history (must come first — creates commits and file nodes)
-        let git_ext = GitExtractor::new(&self.repo_path);
-        match git_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:git",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Git extraction failed (may not be a git repo)");
-                result.errors.push(PipelineError {
-                    stage: "extract:git",
-                    message: e.to_string(),
-                });
-            }
+        let mut extractors: Vec<Box<dyn Extractor>> = vec![
+            Box::new(GitExtractor::new(&self.repo_path)),
+            Box::new(StructureExtractor::new(&self.repo_path)),
+            Box::new(GraphExtractor::new(&self.repo_path)),
+            Box::new(DocumentExtractor::new(&self.repo_path)),
+        ];
+
+        if let Some(gh) = GitHubExtractor::from_repo(&self.repo_path, config) {
+            extractors.push(Box::new(gh));
+        }
+        if let Some(gl) = GitLabExtractor::from_repo(&self.repo_path, config) {
+            extractors.push(Box::new(gl));
         }
 
-        // 2. Structure (file tree, manifests, CI config)
-        let struct_ext = StructureExtractor::new(&self.repo_path);
-        match struct_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:structure",
-                        message: format!("{path}: {err}"),
-                    });
+        extractors.push(Box::new(PromptExtractor::new(&self.repo_path)));
+
+        for ext in &extractors {
+            let name = ext.name();
+            let stage = format!("extract:{name}");
+
+            // Check if extractor has new data to process.
+            match ext.has_work(store).await {
+                Ok(false) => {
+                    info!(extractor = name, "Skipping (no new work)");
+                    continue;
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    // has_work() failure is non-fatal; proceed with extraction.
+                    info!(extractor = name, error = %e, "has_work check failed, running anyway");
                 }
             }
-            Err(e) => {
-                warn!(error = %e, "Structure extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:structure",
-                    message: e.to_string(),
-                });
-            }
-        }
 
-        // 3. Graph (call/import graphs via tree-sitter)
-        let graph_ext = GraphExtractor::new(&self.repo_path);
-        match graph_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:graph",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Graph extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:graph",
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // 4. Documents (Markdown cross-references)
-        let doc_ext = DocumentExtractor::new(&self.repo_path);
-        match doc_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (path, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:document",
-                        message: format!("{path}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Document extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:document",
-                    message: e.to_string(),
-                });
-            }
-        }
-
-        // 5. GitHub (PRs, issues, reviews — only if GitHub remote detected)
-        self.run_github_extraction(store, config, result).await;
-
-        // 5b. GitLab (MRs, issues, approvals — only if GitLab remote detected)
-        self.run_gitlab_extraction(store, config, result).await;
-
-        // 6. Prompts (agent rules always; sessions if opt-in)
-        self.run_prompt_extraction(store, config, result).await;
-    }
-
-    async fn run_github_extraction(
-        &self,
-        store: &dyn HomerStore,
-        config: &HomerConfig,
-        result: &mut PipelineResult,
-    ) {
-        if let Some(gh_ext) = GitHubExtractor::from_repo(&self.repo_path, config) {
-            match gh_ext.extract(store, config).await {
+            match ext.extract(store, config).await {
                 Ok(stats) => {
                     result.extract_nodes += stats.nodes_created;
                     result.extract_edges += stats.edges_created;
                     for (desc, err) in stats.errors {
                         result.errors.push(PipelineError {
-                            stage: "extract:github",
+                            stage: stage.clone(),
                             message: format!("{desc}: {err}"),
                         });
                     }
                 }
                 Err(e) => {
-                    warn!(error = %e, "GitHub extraction failed");
+                    warn!(stage = %stage, error = %e, "Extraction failed");
                     result.errors.push(PipelineError {
-                        stage: "extract:github",
+                        stage,
                         message: e.to_string(),
                     });
                 }
@@ -265,64 +197,6 @@ impl HomerPipeline {
         }
     }
 
-    async fn run_gitlab_extraction(
-        &self,
-        store: &dyn HomerStore,
-        config: &HomerConfig,
-        result: &mut PipelineResult,
-    ) {
-        if let Some(gl_ext) = GitLabExtractor::from_repo(&self.repo_path, config) {
-            match gl_ext.extract(store, config).await {
-                Ok(stats) => {
-                    result.extract_nodes += stats.nodes_created;
-                    result.extract_edges += stats.edges_created;
-                    for (desc, err) in stats.errors {
-                        result.errors.push(PipelineError {
-                            stage: "extract:gitlab",
-                            message: format!("{desc}: {err}"),
-                        });
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "GitLab extraction failed");
-                    result.errors.push(PipelineError {
-                        stage: "extract:gitlab",
-                        message: e.to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    async fn run_prompt_extraction(
-        &self,
-        store: &dyn HomerStore,
-        config: &HomerConfig,
-        result: &mut PipelineResult,
-    ) {
-        let prompt_ext = PromptExtractor::new(&self.repo_path);
-        match prompt_ext.extract(store, config).await {
-            Ok(stats) => {
-                result.extract_nodes += stats.nodes_created;
-                result.extract_edges += stats.edges_created;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "extract:prompt",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Prompt extraction failed");
-                result.errors.push(PipelineError {
-                    stage: "extract:prompt",
-                    message: e.to_string(),
-                });
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_lines)]
     #[instrument(skip_all)]
     async fn run_analysis(
         &self,
@@ -330,131 +204,125 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
-        // Behavioral analysis first (change frequency, bus factor, etc.)
-        let behavioral = BehavioralAnalyzer;
-        match behavioral.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
+        let analyzers = self.build_analyzer_list(config);
+        let ordered = toposort_analyzers(&analyzers);
+
+        for idx in ordered {
+            let analyzer = &analyzers[idx];
+            let name = analyzer.name();
+            let stage = format!("analyze:{name}");
+
+            // Check if analyzer needs to re-run.
+            match analyzer.needs_rerun(store).await {
+                Ok(false) => {
+                    info!(analyzer = name, "Skipping (no rerun needed)");
+                    continue;
+                }
+                Ok(true) => {}
+                Err(e) => {
+                    info!(analyzer = name, error = %e, "needs_rerun check failed, running anyway");
+                }
+            }
+
+            match analyzer.analyze(store, config).await {
+                Ok(stats) => {
+                    result.analysis_results += stats.results_stored;
+                    for (desc, err) in stats.errors {
+                        result.errors.push(PipelineError {
+                            stage: stage.clone(),
+                            message: format!("{desc}: {err}"),
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(stage = %stage, error = %e, "Analysis failed");
                     result.errors.push(PipelineError {
-                        stage: "analyze:behavioral",
-                        message: format!("{desc}: {err}"),
+                        stage,
+                        message: e.to_string(),
                     });
                 }
             }
-            Err(e) => {
-                warn!(error = %e, "Behavioral analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:behavioral",
-                    message: e.to_string(),
-                });
+        }
+    }
+
+    /// Build the list of analyzers to run, conditionally including semantic.
+    fn build_analyzer_list(&self, config: &HomerConfig) -> Vec<Box<dyn Analyzer>> {
+        let mut analyzers: Vec<Box<dyn Analyzer>> = vec![
+            Box::new(BehavioralAnalyzer),
+            Box::new(CentralityAnalyzer::default()),
+            Box::new(CommunityAnalyzer),
+            Box::new(TemporalAnalyzer),
+            Box::new(ConventionAnalyzer::new(&self.repo_path)),
+            Box::new(TaskPatternAnalyzer),
+        ];
+
+        // Semantic analysis — LLM-powered, gated by config and depth.
+        if config.llm.enabled && config.analysis.depth != AnalysisDepth::Shallow {
+            match Self::create_llm_provider(config) {
+                Ok(provider) => analyzers.push(Box::new(SemanticAnalyzer::new(provider))),
+                Err(e) => {
+                    info!(error = %e, "Skipping semantic analysis (LLM provider unavailable)");
+                }
             }
         }
 
-        // Centrality analysis (PageRank, betweenness, HITS, composite salience)
-        let centrality = CentralityAnalyzer::default();
-        match centrality.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:centrality",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Centrality analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:centrality",
-                    message: e.to_string(),
-                });
-            }
-        }
+        analyzers
+    }
 
-        // Community detection + stability classification
-        let community = CommunityAnalyzer;
-        match community.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:community",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Community analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:community",
-                    message: e.to_string(),
-                });
-            }
-        }
+    /// Create an LLM provider from config, reading the API key from the environment.
+    fn create_llm_provider(
+        config: &HomerConfig,
+    ) -> crate::error::Result<Box<dyn crate::llm::LlmProvider>> {
+        let api_key = std::env::var(&config.llm.api_key_env).map_err(|_| {
+            crate::error::HomerError::Llm(crate::error::LlmError::Config(format!(
+                "Environment variable {} not set",
+                config.llm.api_key_env
+            )))
+        })?;
 
-        // Temporal analysis (centrality trends, drift, enhanced stability)
-        let temporal = TemporalAnalyzer;
-        match temporal.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:temporal",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Temporal analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:temporal",
-                    message: e.to_string(),
-                });
-            }
-        }
+        create_provider(
+            &config.llm.provider,
+            &config.llm.model,
+            &api_key,
+            config.llm.base_url.as_deref(),
+        )
+    }
 
-        // Convention analysis (naming, testing, error handling, doc style, agent rules)
-        let convention = ConventionAnalyzer::new(&self.repo_path);
-        match convention.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:convention",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Convention analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:convention",
-                    message: e.to_string(),
-                });
-            }
-        }
+    /// All known renderer names and their stage labels.
+    pub const ALL_RENDERER_NAMES: &[&str] = &[
+        "agents-md",
+        "module-ctx",
+        "risk-map",
+        "skills",
+        "report",
+        "topos-spec",
+    ];
 
-        // Task pattern analysis (prompt hotspots, correction hotspots, task patterns, vocabulary)
-        let task_pattern = TaskPatternAnalyzer;
-        match task_pattern.analyze(store, config).await {
-            Ok(stats) => {
-                result.analysis_results += stats.results_stored;
-                for (desc, err) in stats.errors {
-                    result.errors.push(PipelineError {
-                        stage: "analyze:task_pattern",
-                        message: format!("{desc}: {err}"),
-                    });
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Task pattern analysis failed");
-                result.errors.push(PipelineError {
-                    stage: "analyze:task_pattern",
-                    message: e.to_string(),
-                });
-            }
-        }
+    /// Run only the named renderers against an existing store.
+    ///
+    /// Returns a `PipelineResult` with only the rendering fields populated.
+    #[instrument(skip_all)]
+    pub async fn run_renderers(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        renderer_names: &[&str],
+    ) -> crate::error::Result<PipelineResult> {
+        let start = Instant::now();
+        let mut result = PipelineResult {
+            extract_nodes: 0,
+            extract_edges: 0,
+            analysis_results: 0,
+            artifacts_written: 0,
+            errors: Vec::new(),
+            duration: std::time::Duration::ZERO,
+        };
+
+        self.run_selected_renderers(store, config, renderer_names, &mut result)
+            .await;
+
+        result.duration = start.elapsed();
+        Ok(result)
     }
 
     #[instrument(skip_all)]
@@ -464,32 +332,56 @@ impl HomerPipeline {
         config: &HomerConfig,
         result: &mut PipelineResult,
     ) {
+        self.run_selected_renderers(store, config, Self::ALL_RENDERER_NAMES, result)
+            .await;
+    }
+
+    /// Build a renderer by name, or `None` for unknown names.
+    pub fn build_renderer(name: &str) -> Option<Box<dyn Renderer>> {
+        match name {
+            "agents-md" => Some(Box::new(AgentsMdRenderer)),
+            "module-ctx" => Some(Box::new(ModuleContextRenderer)),
+            "risk-map" => Some(Box::new(RiskMapRenderer)),
+            "skills" => Some(Box::new(SkillsRenderer)),
+            "report" => Some(Box::new(ReportRenderer)),
+            "topos-spec" => Some(Box::new(ToposSpecRenderer)),
+            _ => None,
+        }
+    }
+
+    async fn run_selected_renderers(
+        &self,
+        store: &dyn HomerStore,
+        config: &HomerConfig,
+        names: &[&str],
+        result: &mut PipelineResult,
+    ) {
         let path = &self.repo_path;
 
-        // Run all renderers concurrently — they are independent of each other
-        let (agents, ctx, risk, skills, report, topos) = tokio::join!(
-            AgentsMdRenderer.write(store, config, path),
-            ModuleContextRenderer.write(store, config, path),
-            RiskMapRenderer.write(store, config, path),
-            SkillsRenderer.write(store, config, path),
-            ReportRenderer.write(store, config, path),
-            ToposSpecRenderer.write(store, config, path),
-        );
+        for name in names {
+            let (stage, renderer): (String, Box<dyn Renderer>) = match *name {
+                "agents-md" => ("render:agents_md".into(), Box::new(AgentsMdRenderer)),
+                "module-ctx" => (
+                    "render:module_context".into(),
+                    Box::new(ModuleContextRenderer),
+                ),
+                "risk-map" => ("render:risk_map".into(), Box::new(RiskMapRenderer)),
+                "skills" => ("render:skills".into(), Box::new(SkillsRenderer)),
+                "report" => ("render:report".into(), Box::new(ReportRenderer)),
+                "topos-spec" => ("render:topos_spec".into(), Box::new(ToposSpecRenderer)),
+                unknown => {
+                    result.errors.push(PipelineError {
+                        stage: "render".into(),
+                        message: format!("Unknown renderer: {unknown}"),
+                    });
+                    continue;
+                }
+            };
 
-        let outcomes: [(&str, crate::error::Result<()>); 6] = [
-            ("render:agents_md", agents),
-            ("render:module_context", ctx),
-            ("render:risk_map", risk),
-            ("render:skills", skills),
-            ("render:report", report),
-            ("render:topos_spec", topos),
-        ];
-
-        for (stage, outcome) in outcomes {
-            match outcome {
+            match renderer.write(store, config, path).await {
                 Ok(()) => result.artifacts_written += 1,
                 Err(e) => {
-                    warn!(stage, error = %e, "Renderer failed");
+                    warn!(stage = %stage, error = %e, "Renderer failed");
                     result.errors.push(PipelineError {
                         stage,
                         message: e.to_string(),
@@ -498,6 +390,74 @@ impl HomerPipeline {
             }
         }
     }
+}
+
+/// Topologically sort analyzers by their `produces()`/`requires()` declarations.
+///
+/// Uses Kahn's algorithm. If the dependency graph has cycles (should never happen),
+/// remaining analyzers are appended in their original order.
+fn toposort_analyzers(analyzers: &[Box<dyn Analyzer>]) -> Vec<usize> {
+    let n = analyzers.len();
+
+    // Build a map: AnalysisKind → index of the analyzer that produces it.
+    let mut producer_of = std::collections::HashMap::new();
+    for (i, a) in analyzers.iter().enumerate() {
+        for kind in a.produces() {
+            producer_of.insert(*kind, i);
+        }
+    }
+
+    // Build adjacency: in_degree[i] = number of analyzers that must run before i.
+    let mut in_degree = vec![0u32; n];
+    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, a) in analyzers.iter().enumerate() {
+        for kind in a.requires() {
+            if let Some(&dep) = producer_of.get(kind) {
+                if dep != i {
+                    dependents[dep].push(i);
+                    in_degree[i] += 1;
+                }
+            }
+        }
+    }
+
+    // Deduplicate edges (an analyzer may require multiple kinds from the same producer).
+    for deps in &mut dependents {
+        deps.sort_unstable();
+        deps.dedup();
+    }
+    // Recompute in-degree after dedup.
+    in_degree.fill(0);
+    for deps in &dependents {
+        for &d in deps {
+            in_degree[d] += 1;
+        }
+    }
+
+    // Kahn's algorithm.
+    let mut queue: VecDeque<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+    let mut order = Vec::with_capacity(n);
+    while let Some(i) = queue.pop_front() {
+        order.push(i);
+        for &dep in &dependents[i] {
+            in_degree[dep] -= 1;
+            if in_degree[dep] == 0 {
+                queue.push_back(dep);
+            }
+        }
+    }
+
+    // If there's a cycle, append remaining in original order as a fallback.
+    if order.len() < n {
+        warn!("Analyzer dependency graph has a cycle; appending remaining in original order");
+        for i in 0..n {
+            if !order.contains(&i) {
+                order.push(i);
+            }
+        }
+    }
+
+    order
 }
 
 #[cfg(test)]
@@ -573,6 +533,39 @@ mod tests {
             result.artifacts_written >= 1,
             "Should write at least AGENTS.md"
         );
+    }
+
+    #[test]
+    fn toposort_respects_dependencies() {
+        // Build the default analyzer list (no LLM → no semantic)
+        let config = HomerConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let pipeline = HomerPipeline::new(tmp.path());
+        let analyzers = pipeline.build_analyzer_list(&config);
+        let order = toposort_analyzers(&analyzers);
+
+        // Build name→position map
+        let names: Vec<&str> = order.iter().map(|&i| analyzers[i].name()).collect();
+
+        let pos = |name: &str| names.iter().position(|n| *n == name).unwrap();
+
+        // behavioral must come before centrality (centrality requires ChangeFrequency)
+        assert!(
+            pos("behavioral") < pos("centrality"),
+            "behavioral before centrality: {names:?}"
+        );
+        // centrality must come before community (community requires CompositeSalience)
+        assert!(
+            pos("centrality") < pos("community"),
+            "centrality before community: {names:?}"
+        );
+        // community must come before temporal (temporal requires CommunityAssignment)
+        assert!(
+            pos("community") < pos("temporal"),
+            "community before temporal: {names:?}"
+        );
+        // all analyzers are present
+        assert_eq!(order.len(), analyzers.len());
     }
 
     #[tokio::test]

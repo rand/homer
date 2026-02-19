@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::llm::cache::{compute_input_hash, get_cached, has_quality_doc_comment, store_cached};
@@ -18,8 +18,6 @@ use super::AnalyzeStats;
 use super::traits::Analyzer;
 
 const TEMPLATE_VERSION: &str = "entity-summary-v3";
-// Used by design rationale extraction (requires GitHub PR data from F2)
-#[allow(dead_code)]
 const RATIONALE_TEMPLATE_VERSION: &str = "design-rationale-v1";
 
 /// Semantic analyzer — calls LLM to summarize high-salience entities.
@@ -40,6 +38,23 @@ impl Analyzer for SemanticAnalyzer {
         "semantic"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::SemanticSummary,
+            AnalysisKind::InvariantDescription,
+            AnalysisKind::DesignRationale,
+        ]
+    }
+
+    fn requires(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::CompositeSalience,
+            AnalysisKind::PageRank,
+            AnalysisKind::BetweennessCentrality,
+        ]
+    }
+
+    #[instrument(skip_all, name = "semantic_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,
@@ -94,6 +109,19 @@ impl Analyzer for SemanticAnalyzer {
                     stats.errors.push((candidate.name.clone(), e));
                 }
             }
+        }
+
+        // Design rationale extraction for merged PRs
+        if !cost_tracker.is_over_budget(budget) {
+            let rationale_count = extract_design_rationales(
+                store,
+                &*self.provider,
+                &semaphore,
+                &mut cost_tracker,
+                budget,
+            )
+            .await;
+            stats.results_stored += rationale_count;
         }
 
         stats.duration = start.elapsed();
@@ -462,8 +490,129 @@ fn build_summary_prompt(candidate: &Candidate, source: &str) -> String {
     )
 }
 
-// Used by design rationale extraction (requires GitHub PR data from F2)
-#[allow(dead_code)]
+#[allow(clippy::too_many_lines)]
+async fn extract_design_rationales(
+    store: &dyn HomerStore,
+    provider: &dyn LlmProvider,
+    semaphore: &Semaphore,
+    cost_tracker: &mut CostTracker,
+    budget: f64,
+) -> u64 {
+    let Ok(prs) = store
+        .find_nodes(&crate::types::NodeFilter {
+            kind: Some(NodeKind::PullRequest),
+            ..Default::default()
+        })
+        .await
+    else {
+        return 0;
+    };
+
+    let mut count = 0u64;
+
+    for pr in &prs {
+        if cost_tracker.is_over_budget(budget) {
+            break;
+        }
+
+        // Skip if already analyzed or not a merged PR with body
+        if let Ok(Some(_)) = store
+            .get_analysis(pr.id, AnalysisKind::DesignRationale)
+            .await
+        {
+            continue;
+        }
+        let Some(body) = pr.metadata.get("body").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if !pr.metadata.contains_key("merged_at") {
+            continue;
+        }
+
+        let title = pr
+            .metadata
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&pr.name);
+        let number = pr
+            .metadata
+            .get("number")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+
+        let prompt = build_rationale_prompt(number, title, body, &[], &[]);
+        let input_hash = compute_input_hash(
+            provider.model_id(),
+            RATIONALE_TEMPLATE_VERSION,
+            &prompt,
+            None,
+            &[],
+            &[],
+        );
+
+        // Check cache
+        if let Ok(Some(_)) =
+            get_cached(store, pr.id, AnalysisKind::DesignRationale, input_hash).await
+        {
+            cost_tracker.record_cache_hit();
+            continue;
+        }
+
+        let Ok(_permit) = semaphore.acquire().await else {
+            break;
+        };
+
+        match provider.call(&prompt, 0.0).await {
+            Ok((response, usage)) => {
+                cost_tracker.record_call(
+                    &usage,
+                    provider.cost_per_1k_input(),
+                    provider.cost_per_1k_output(),
+                );
+
+                let parsed: serde_json::Value = serde_json::from_str(response.trim())
+                    .unwrap_or_else(|_| serde_json::json!({"rationale": response.trim()}));
+
+                let provenance = AnalysisProvenance::LlmDerived {
+                    model_id: provider.model_id().to_string(),
+                    prompt_template: RATIONALE_TEMPLATE_VERSION.to_string(),
+                    input_hash,
+                    evidence_nodes: vec![pr.id],
+                    confidence: ProvenanceConfidence::Medium,
+                };
+
+                let data = serde_json::json!({
+                    "pr_number": number,
+                    "title": title,
+                    "motivation": parsed.get("motivation"),
+                    "approach": parsed.get("approach"),
+                    "alternatives_considered": parsed.get("alternatives_considered"),
+                    "tradeoffs": parsed.get("tradeoffs"),
+                    "provenance": serde_json::to_value(&provenance).unwrap_or_default(),
+                });
+
+                if store_cached(
+                    store,
+                    pr.id,
+                    AnalysisKind::DesignRationale,
+                    data,
+                    input_hash,
+                )
+                .await
+                .is_ok()
+                {
+                    count += 1;
+                }
+            }
+            Err(e) => {
+                debug!(pr = %pr.name, error = %e, "Design rationale extraction failed");
+            }
+        }
+    }
+
+    count
+}
+
 fn build_rationale_prompt(
     pr_number: u64,
     title: &str,

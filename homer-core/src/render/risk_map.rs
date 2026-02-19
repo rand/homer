@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use serde::Serialize;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -33,6 +33,7 @@ impl Renderer for RiskMapRenderer {
         "homer-risk.json"
     }
 
+    #[instrument(skip_all, name = "risk_map_render")]
     async fn render(
         &self,
         store: &dyn HomerStore,

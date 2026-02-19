@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
+use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 
 // ── Typed ID wrappers ──────────────────────────────────────────────
@@ -191,7 +192,7 @@ pub struct HyperedgeMember {
 
 // ── Analysis types ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisKind {
     // Behavioral
     ChangeFrequency,
@@ -395,6 +396,94 @@ pub enum SubgraphFilter {
     And(Vec<SubgraphFilter>),
 }
 
+/// A petgraph `DiGraph` loaded from the store, with `NodeId` ↔ `NodeIndex` mapping.
+#[derive(Debug)]
+pub struct InMemoryGraph {
+    pub graph: DiGraph<NodeId, f64>,
+    pub node_to_index: HashMap<NodeId, NodeIndex>,
+    pub index_to_node: HashMap<NodeIndex, NodeId>,
+}
+
+impl InMemoryGraph {
+    /// Build a graph from hyperedges, extracting directed pairs by role or position.
+    pub fn from_edges(edges: &[Hyperedge]) -> Self {
+        let estimated_nodes = edges.len();
+        let mut graph = DiGraph::<NodeId, f64>::with_capacity(estimated_nodes, edges.len());
+        let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::with_capacity(estimated_nodes);
+        let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::with_capacity(estimated_nodes);
+
+        for edge in edges {
+            for member in &edge.members {
+                node_to_index.entry(member.node_id).or_insert_with(|| {
+                    let idx = graph.add_node(member.node_id);
+                    index_to_node.insert(idx, member.node_id);
+                    idx
+                });
+            }
+        }
+
+        for edge in edges {
+            let (source, target) = extract_directed_pair(&edge.members);
+            if let (Some(&src_idx), Some(&tgt_idx)) =
+                (node_to_index.get(&source), node_to_index.get(&target))
+            {
+                graph.add_edge(src_idx, tgt_idx, edge.confidence);
+            }
+        }
+
+        Self {
+            graph,
+            node_to_index,
+            index_to_node,
+        }
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
+}
+
+/// Extract a directed (source, target) pair from hyperedge members.
+/// Uses roles ("caller"/"callee", "source"/"target") or falls back to position ordering.
+pub fn extract_directed_pair(members: &[HyperedgeMember]) -> (NodeId, NodeId) {
+    if members.len() < 2 {
+        let id = members.first().map_or(NodeId(0), |m| m.node_id);
+        return (id, id);
+    }
+
+    let source_roles = ["caller", "source", "importer"];
+    let target_roles = ["callee", "target", "imported"];
+
+    let source = members
+        .iter()
+        .find(|m| source_roles.contains(&m.role.as_str()));
+    let target = members
+        .iter()
+        .find(|m| target_roles.contains(&m.role.as_str()));
+
+    if let (Some(s), Some(t)) = (source, target) {
+        return (s.node_id, t.node_id);
+    }
+
+    let mut sorted = members.to_vec();
+    sorted.sort_by_key(|m| m.position);
+    (sorted[0].node_id, sorted[1].node_id)
+}
+
+/// Metadata about a stored snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotInfo {
+    pub id: SnapshotId,
+    pub label: String,
+    pub snapshot_at: DateTime<Utc>,
+    pub node_count: u64,
+    pub edge_count: u64,
+}
+
 /// Graph diff between two snapshots.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GraphDiff {
@@ -414,6 +503,21 @@ pub struct FileDiffStats {
     pub status: DiffStatus,
     pub lines_added: u32,
     pub lines_deleted: u32,
+    /// Per-hunk diff metadata for fine-grained analysis.
+    pub hunks: Vec<DiffHunk>,
+}
+
+/// A contiguous region of changes within a file diff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffHunk {
+    /// Starting line number in the old file (1-based).
+    pub old_start: u32,
+    /// Number of lines from the old file in this hunk.
+    pub old_lines: u32,
+    /// Starting line number in the new file (1-based).
+    pub new_start: u32,
+    /// Number of lines from the new file in this hunk.
+    pub new_lines: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

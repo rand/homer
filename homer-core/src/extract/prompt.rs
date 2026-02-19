@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -15,7 +15,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 // ── Public extractor ─────────────────────────────────────────────
 
@@ -30,8 +30,16 @@ impl PromptExtractor {
             repo_path: repo_path.to_path_buf(),
         }
     }
+}
 
-    pub async fn extract(
+#[async_trait::async_trait(?Send)]
+impl Extractor for PromptExtractor {
+    fn name(&self) -> &'static str {
+        "prompt"
+    }
+
+    #[instrument(skip_all, name = "prompt_extract")]
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -681,6 +689,9 @@ fn parse_claude_code_jsonl(content: &str) -> Vec<AgentInteraction> {
         i += 1;
     }
 
+    // Second pass: detect revert-and-redo patterns across the interaction sequence.
+    detect_revert_and_redo(&mut interactions);
+
     interactions
 }
 
@@ -742,33 +753,13 @@ fn detect_correction(
             break;
         }
 
-        let text = msg
-            .get("content")
-            .and_then(|v| v.as_str())
-            .or_else(|| {
-                msg.get("content")
-                    .and_then(|v| v.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|b| b.get("text"))
-                    .and_then(|v| v.as_str())
-            })
-            .unwrap_or("");
+        let text = extract_user_text(&msg);
 
-        // Check for explicit correction indicators.
-        let text_lower = text.to_lowercase();
-        let has_correction_marker = text_lower.contains("no,")
-            || text_lower.contains("wrong")
-            || text_lower.contains("that's not")
-            || text_lower.contains("revert")
-            || text_lower.contains("undo")
-            || text_lower.contains("instead")
-            || text_lower.contains("actually");
-
-        if has_correction_marker {
+        if has_correction_markers(&text) {
             return true;
         }
 
-        // User references the same files that were just modified.
+        // User references the same files that were just modified (edit-after-response).
         if !current_modified.is_empty() && current_modified.iter().any(|f| text.contains(f)) {
             return true;
         }
@@ -776,6 +767,105 @@ fn detect_correction(
         break; // Only check the immediate next user message.
     }
     false
+}
+
+/// Check for explicit correction/rejection indicators in user text.
+fn has_correction_markers(text: &str) -> bool {
+    let lower = text.to_lowercase();
+
+    // Natural language correction markers.
+    let language_markers = [
+        "no,",
+        "wrong",
+        "that's not",
+        "revert",
+        "undo",
+        "instead",
+        "actually",
+        "that broke",
+        "doesn't work",
+        "didn't work",
+        "not what i",
+        "not right",
+        "go back",
+        "roll back",
+        "try again",
+        "start over",
+    ];
+    if language_markers.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+
+    // Explicit git/tool rejection markers (spec requirement).
+    let command_markers = [
+        "/undo",
+        "git checkout",
+        "git stash",
+        "git reset",
+        "git restore",
+        "git revert",
+    ];
+    if command_markers.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+
+    false
+}
+
+/// Extract user-visible text from a user message (handles both string and
+/// content-array formats).
+fn extract_user_text(msg: &serde_json::Value) -> String {
+    msg.get("content")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| {
+            msg.get("content")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|b| b.get("text"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_default()
+}
+
+/// Detect revert-and-redo patterns: if two assistant messages both modify the
+/// same file(s) with only user messages in between, the second edit likely
+/// corrects the first.
+fn detect_revert_and_redo(interactions: &mut [AgentInteraction]) {
+    if interactions.len() < 2 {
+        return;
+    }
+    for i in 0..interactions.len() - 1 {
+        if interactions[i].modified_files.is_empty() {
+            continue;
+        }
+        let modified_set: HashSet<&str> = interactions[i]
+            .modified_files
+            .iter()
+            .map(String::as_str)
+            .collect();
+        // Look at subsequent interactions for overlapping edits.
+        for j in (i + 1)..interactions.len() {
+            if interactions[j].modified_files.is_empty() {
+                continue;
+            }
+            let overlap = interactions[j]
+                .modified_files
+                .iter()
+                .any(|f| modified_set.contains(f.as_str()));
+            if overlap {
+                // The earlier edit was corrected by the later one.
+                interactions[i].had_correction = true;
+                break;
+            }
+            // Only look at the next 2 interactions to avoid false positives
+            // from unrelated edits later in the session.
+            if j - i > 2 {
+                break;
+            }
+        }
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -941,6 +1031,64 @@ mod tests {
         ];
         let prev: HashSet<String> = HashSet::new();
         assert!(!detect_correction(&lines, 0, &prev));
+    }
+
+    #[test]
+    fn correction_detection_git_commands() {
+        let lines = [
+            r#"{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/main.rs","old_string":"a","new_string":"b"}}]}"#,
+            r#"{"role":"user","content":"git checkout src/main.rs"}"#,
+        ];
+        let prev: HashSet<String> = HashSet::new();
+        assert!(detect_correction(&lines, 0, &prev));
+    }
+
+    #[test]
+    fn correction_detection_undo_command() {
+        let lines = [
+            r#"{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/main.rs","old_string":"a","new_string":"b"}}]}"#,
+            r#"{"role":"user","content":"/undo"}"#,
+        ];
+        let prev: HashSet<String> = HashSet::new();
+        assert!(detect_correction(&lines, 0, &prev));
+    }
+
+    #[test]
+    fn revert_and_redo_detects_consecutive_edits() {
+        let jsonl = concat!(
+            r#"{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/main.rs","old_string":"a","new_string":"b"}}]}"#,
+            "\n",
+            r#"{"role":"user","content":"hmm"}"#,
+            "\n",
+            r#"{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/main.rs","old_string":"b","new_string":"c"}}]}"#,
+            "\n",
+        );
+        let interactions = parse_claude_code_jsonl(jsonl);
+        assert_eq!(interactions.len(), 2);
+        // First edit should be marked as corrected (same file edited again).
+        assert!(
+            interactions[0].had_correction,
+            "First edit to same file should be marked as correction"
+        );
+    }
+
+    #[test]
+    fn revert_and_redo_different_files_not_flagged() {
+        let jsonl = concat!(
+            r#"{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/a.rs","old_string":"a","new_string":"b"}}]}"#,
+            "\n",
+            r#"{"role":"user","content":"now edit b"}"#,
+            "\n",
+            r#"{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"src/b.rs","old_string":"x","new_string":"y"}}]}"#,
+            "\n",
+        );
+        let interactions = parse_claude_code_jsonl(jsonl);
+        assert_eq!(interactions.len(), 2);
+        // Different files — not a correction.
+        assert!(
+            !interactions[0].had_correction,
+            "Different files should not be flagged as correction"
+        );
     }
 
     #[test]

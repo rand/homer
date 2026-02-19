@@ -5,14 +5,15 @@
     clippy::cast_sign_loss
 )]
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -21,7 +22,13 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::forge_common::{ensure_contributor, parse_issue_refs};
+use super::traits::{ExtractStats, Extractor};
+
+/// Maximum retry attempts for rate-limited requests.
+const MAX_RETRIES: u32 = 5;
+/// Pause and wait for reset when remaining drops below this threshold.
+const RATE_LIMIT_PAUSE_THRESHOLD: u32 = 5;
 
 /// GitHub REST API extractor.
 #[derive(Debug)]
@@ -30,6 +37,10 @@ pub struct GitHubExtractor {
     repo: String,
     token: Option<String>,
     client: Client,
+    /// Remaining API calls before rate limit resets.
+    rate_remaining: Cell<u32>,
+    /// Unix timestamp when the rate limit window resets.
+    rate_reset: Cell<u64>,
 }
 
 impl GitHubExtractor {
@@ -44,6 +55,8 @@ impl GitHubExtractor {
             repo,
             token,
             client: Client::new(),
+            rate_remaining: Cell::new(u32::MAX),
+            rate_reset: Cell::new(0),
         })
     }
 
@@ -54,10 +67,20 @@ impl GitHubExtractor {
             repo,
             token,
             client: Client::new(),
+            rate_remaining: Cell::new(u32::MAX),
+            rate_reset: Cell::new(0),
         }
     }
+}
 
-    pub async fn extract(
+#[async_trait::async_trait(?Send)]
+impl Extractor for GitHubExtractor {
+    fn name(&self) -> &'static str {
+        "github"
+    }
+
+    #[instrument(skip_all, name = "github_extract")]
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -66,7 +89,13 @@ impl GitHubExtractor {
         let mut stats = ExtractStats::default();
         let gh_config = &config.extraction.github;
 
-        info!(owner = %self.owner, repo = %self.repo, "GitHub extraction starting");
+        let estimated = estimate_api_calls(gh_config);
+        info!(
+            owner = %self.owner,
+            repo = %self.repo,
+            estimated_api_calls = estimated,
+            "GitHub extraction starting"
+        );
 
         // Get checkpoints for incremental updates
         let last_pr = store
@@ -127,7 +156,9 @@ impl GitHubExtractor {
 
         Ok(stats)
     }
+}
 
+impl GitHubExtractor {
     // ── Pull Requests ───────────────────────────────────────────────
 
     async fn fetch_pull_requests(
@@ -190,6 +221,7 @@ impl GitHubExtractor {
         Ok(max_number)
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn store_pull_request(
         &self,
         store: &dyn HomerStore,
@@ -205,6 +237,9 @@ impl GitHubExtractor {
         }
         if let Some(merged) = &pr.merged_at {
             metadata.insert("merged_at".to_string(), serde_json::json!(merged));
+        }
+        if let Some(sha) = &pr.merge_commit_sha {
+            metadata.insert("merge_commit_sha".to_string(), serde_json::json!(sha));
         }
         if let Some(user) = &pr.user {
             metadata.insert("author".to_string(), serde_json::json!(user.login));
@@ -289,6 +324,34 @@ impl GitHubExtractor {
                             },
                         ],
                         confidence: 0.9,
+                        last_updated: Utc::now(),
+                        metadata: HashMap::new(),
+                    })
+                    .await?;
+                stats.edges_created += 1;
+            }
+        }
+
+        // Link PR to its merge commit if available
+        if let Some(sha) = &pr.merge_commit_sha {
+            if let Some(commit_node) = store.get_node_by_name(NodeKind::Commit, sha).await? {
+                store
+                    .upsert_hyperedge(&Hyperedge {
+                        id: HyperedgeId(0),
+                        kind: HyperedgeKind::Includes,
+                        members: vec![
+                            HyperedgeMember {
+                                node_id: pr_node_id,
+                                role: "pull_request".to_string(),
+                                position: 0,
+                            },
+                            HyperedgeMember {
+                                node_id: commit_node.id,
+                                role: "merge_commit".to_string(),
+                                position: 1,
+                            },
+                        ],
+                        confidence: 1.0,
                         last_updated: Utc::now(),
                         metadata: HashMap::new(),
                     })
@@ -479,49 +542,114 @@ impl GitHubExtractor {
 
     // ── HTTP Client ─────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_lines)]
     async fn api_get<T: serde::de::DeserializeOwned>(&self, path: &str) -> crate::error::Result<T> {
         let url = format!("https://api.github.com{path}");
 
-        let mut req = self
-            .client
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "homer-cli/0.1");
+        // Pre-check: if remaining is low, wait for reset
+        self.wait_for_rate_reset().await;
 
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {token}"));
-        }
+        let mut delay = Duration::from_secs(1);
 
-        debug!(url = %url, "GitHub API request");
+        for attempt in 0..=MAX_RETRIES {
+            let mut req = self
+                .client
+                .get(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "homer-cli/0.1");
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| HomerError::Extract(ExtractError::Git(format!("GitHub API: {e}"))))?;
-
-        // Check rate limit headers
-        if let Some(remaining) = resp
-            .headers()
-            .get("x-ratelimit-remaining")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u32>().ok())
-        {
-            if remaining < 10 {
-                warn!(remaining, "GitHub API rate limit low");
+            if let Some(token) = &self.token {
+                req = req.header("Authorization", format!("Bearer {token}"));
             }
-        }
 
-        if !resp.status().is_success() {
+            debug!(url = %url, attempt, "GitHub API request");
+
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| HomerError::Extract(ExtractError::Git(format!("GitHub API: {e}"))))?;
+
+            self.update_rate_limit(&resp);
+
+            if resp.status().is_success() {
+                return resp.json().await.map_err(|e| {
+                    HomerError::Extract(ExtractError::Git(format!("Parse response: {e}")))
+                });
+            }
+
+            // Rate limited — retry with backoff
             let status = resp.status().as_u16();
+            if (status == 403 || status == 429) && attempt < MAX_RETRIES {
+                let wait = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map_or(delay, Duration::from_secs);
+                warn!(
+                    attempt,
+                    status,
+                    wait_secs = wait.as_secs(),
+                    "Rate limited, backing off"
+                );
+                tokio::time::sleep(wait).await;
+                delay = (delay * 2).min(Duration::from_secs(60));
+                continue;
+            }
+
             let body = resp.text().await.unwrap_or_default();
             return Err(HomerError::Extract(ExtractError::Git(format!(
                 "GitHub API {status}: {body}"
             ))));
         }
 
-        resp.json()
-            .await
-            .map_err(|e| HomerError::Extract(ExtractError::Git(format!("Parse response: {e}"))))
+        Err(HomerError::Extract(ExtractError::Git(format!(
+            "GitHub API: max retries exceeded for {url}"
+        ))))
+    }
+
+    /// Update rate limit state from response headers.
+    fn update_rate_limit(&self, resp: &reqwest::Response) {
+        if let Some(remaining) = resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            self.rate_remaining.set(remaining);
+            if remaining < 10 {
+                warn!(remaining, "GitHub API rate limit low");
+            }
+        }
+        if let Some(reset) = resp
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            self.rate_reset.set(reset);
+        }
+    }
+
+    /// Sleep until the rate limit window resets if remaining is low.
+    async fn wait_for_rate_reset(&self) {
+        if self.rate_remaining.get() > RATE_LIMIT_PAUSE_THRESHOLD {
+            return;
+        }
+        let reset_at = self.rate_reset.get();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if reset_at > now {
+            let wait = reset_at - now + 1;
+            warn!(
+                remaining = self.rate_remaining.get(),
+                wait_secs = wait,
+                "Rate limit low, waiting for reset"
+            );
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+        }
     }
 }
 
@@ -534,6 +662,7 @@ struct GhPullRequest {
     state: String,
     body: Option<String>,
     merged_at: Option<String>,
+    merge_commit_sha: Option<String>,
     user: Option<GhUser>,
 }
 
@@ -574,80 +703,18 @@ struct GhComment {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/// Ensure a Contributor node exists, return its ID.
-async fn ensure_contributor(
-    store: &dyn HomerStore,
-    stats: &mut ExtractStats,
-    login: &str,
-) -> crate::error::Result<NodeId> {
-    if let Some(node) = store.get_node_by_name(NodeKind::Contributor, login).await? {
-        return Ok(node.id);
+/// Estimate upper bound of API calls for a GitHub extraction run.
+fn estimate_api_calls(gh_config: &crate::config::GitHubExtractionConfig) -> u32 {
+    let pr_pages = gh_config.max_pr_history / 100 + 1;
+    let mut calls = pr_pages;
+    if gh_config.include_reviews {
+        calls += gh_config.max_pr_history;
     }
-
-    let id = store
-        .upsert_node(&Node {
-            id: NodeId(0),
-            kind: NodeKind::Contributor,
-            name: login.to_string(),
-            content_hash: None,
-            last_extracted: Utc::now(),
-            metadata: HashMap::new(),
-        })
-        .await?;
-    stats.nodes_created += 1;
-    Ok(id)
-}
-
-/// Parse issue cross-references from PR body text.
-/// Matches patterns like "fixes #123", "closes #456", "resolves #789".
-fn parse_issue_refs(text: &str) -> Vec<u64> {
-    let lower = text.to_lowercase();
-    let mut refs = Vec::new();
-
-    let patterns = [
-        "close ",
-        "closes ",
-        "closed ",
-        "fix ",
-        "fixes ",
-        "fixed ",
-        "resolve ",
-        "resolves ",
-        "resolved ",
-    ];
-
-    for pattern in &patterns {
-        let mut search = lower.as_str();
-        while let Some(pos) = search.find(pattern) {
-            let after = &search[pos + pattern.len()..];
-            if let Some(num) = extract_issue_number(after) {
-                if !refs.contains(&num) {
-                    refs.push(num);
-                }
-            }
-            search = &search[pos + pattern.len()..];
-        }
+    if gh_config.include_comments {
+        calls += gh_config.max_pr_history;
     }
-
-    refs
-}
-
-/// Extract an issue number after a keyword, e.g., "#123" or "org/repo#123".
-fn extract_issue_number(text: &str) -> Option<u64> {
-    let text = text.trim_start();
-    let text = if let Some(rest) = text.strip_prefix('#') {
-        rest
-    } else {
-        // Could be "org/repo#123" — skip to #
-        let (_, after) = text.split_once('#')?;
-        after
-    };
-
-    let num_str: String = text.chars().take_while(char::is_ascii_digit).collect();
-    if num_str.is_empty() {
-        return None;
-    }
-    num_str.parse().ok()
+    calls += gh_config.max_issue_history / 100 + 1;
+    calls
 }
 
 /// Detect GitHub remote URL from a git repo.
@@ -718,42 +785,38 @@ mod tests {
     }
 
     #[test]
-    fn parse_issue_refs_basic() {
-        let refs = parse_issue_refs("This fixes #42 and closes #99");
-        assert!(refs.contains(&42));
-        assert!(refs.contains(&99));
+    fn estimate_api_calls_upper_bound() {
+        let config = crate::config::GitHubExtractionConfig {
+            max_pr_history: 100,
+            max_issue_history: 200,
+            include_reviews: true,
+            include_comments: true,
+            ..crate::config::GitHubExtractionConfig::default()
+        };
+        // PR pages (2) + reviews (100) + comments (100) + issue pages (3) = 205
+        let est = estimate_api_calls(&config);
+        assert_eq!(est, 205);
     }
 
     #[test]
-    fn parse_issue_refs_case_insensitive() {
-        let refs = parse_issue_refs("FIXES #10, Resolves #20");
-        assert!(refs.contains(&10));
-        assert!(refs.contains(&20));
+    fn estimate_api_calls_no_extras() {
+        let config = crate::config::GitHubExtractionConfig {
+            max_pr_history: 100,
+            max_issue_history: 200,
+            include_reviews: false,
+            include_comments: false,
+            ..crate::config::GitHubExtractionConfig::default()
+        };
+        // PR pages (2) + issue pages (3) = 5
+        let est = estimate_api_calls(&config);
+        assert_eq!(est, 5);
     }
 
     #[test]
-    fn parse_issue_refs_no_duplicates() {
-        let refs = parse_issue_refs("fixes #5, also fixes #5");
-        assert_eq!(refs.len(), 1);
-    }
-
-    #[test]
-    fn parse_issue_refs_org_repo_syntax() {
-        let refs = parse_issue_refs("fixes org/repo#123");
-        assert!(refs.contains(&123));
-    }
-
-    #[test]
-    fn parse_issue_refs_no_refs() {
-        let refs = parse_issue_refs("This PR adds a feature");
-        assert!(refs.is_empty());
-    }
-
-    #[test]
-    fn extract_number_from_hash() {
-        assert_eq!(extract_issue_number("#42"), Some(42));
-        assert_eq!(extract_issue_number("  #100"), Some(100));
-        assert_eq!(extract_issue_number("#abc"), None);
+    fn rate_limit_fields_initialized() {
+        let ext = GitHubExtractor::new("owner".to_string(), "repo".to_string(), None);
+        assert_eq!(ext.rate_remaining.get(), u32::MAX);
+        assert_eq!(ext.rate_reset.get(), 0);
     }
 
     #[test]

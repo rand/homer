@@ -19,7 +19,7 @@ use crate::types::{
     Hyperedge, HyperedgeId, HyperedgeKind, HyperedgeMember, Node, NodeId, NodeKind,
 };
 
-use super::traits::ExtractStats;
+use super::traits::{ExtractStats, Extractor};
 
 #[derive(Debug)]
 pub struct GraphExtractor {
@@ -34,9 +34,23 @@ impl GraphExtractor {
             registry: LanguageRegistry::new(),
         }
     }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Extractor for GraphExtractor {
+    fn name(&self) -> &'static str {
+        "graph"
+    }
+
+    async fn has_work(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let graph_sha = store.get_checkpoint("graph_last_sha").await?;
+        let git_sha = store.get_checkpoint("git_last_sha").await?;
+        // Re-run if graph checkpoint is missing or differs from current git checkpoint
+        Ok(graph_sha != git_sha)
+    }
 
     #[instrument(skip_all, name = "graph_extract")]
-    pub async fn extract(
+    async fn extract(
         &self,
         store: &dyn HomerStore,
         config: &HomerConfig,
@@ -117,7 +131,9 @@ impl GraphExtractor {
         );
         Ok(stats)
     }
+}
 
+impl GraphExtractor {
     async fn process_file(
         &self,
         store: &dyn HomerStore,

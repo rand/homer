@@ -26,17 +26,23 @@ pub struct HomerConfig {
     pub renderers: RenderersSection,
     #[serde(default)]
     pub llm: LlmSection,
+    #[serde(default)]
+    pub mcp: McpSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HomerSection {
     pub version: String,
+    /// Custom database path (overrides default `.homer/homer.db`).
+    pub db_path: Option<String>,
 }
 
 impl Default for HomerSection {
     fn default() -> Self {
         Self {
             version: "0.1.0".to_string(),
+            db_path: None,
         }
     }
 }
@@ -46,6 +52,8 @@ pub struct AnalysisSection {
     pub depth: AnalysisDepth,
     pub llm_salience_threshold: f64,
     pub max_llm_batch_size: u32,
+    #[serde(default)]
+    pub invalidation: InvalidationPolicy,
 }
 
 impl Default for AnalysisSection {
@@ -54,6 +62,32 @@ impl Default for AnalysisSection {
             depth: AnalysisDepth::Standard,
             llm_salience_threshold: 0.7,
             max_llm_batch_size: 50,
+            invalidation: InvalidationPolicy::default(),
+        }
+    }
+}
+
+/// Controls how analysis results are invalidated when the graph changes.
+///
+/// The default is coarse-grained: any topology change invalidates all centrality
+/// scores, and semantic summaries are only invalidated on direct content changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvalidationPolicy {
+    /// If true, any graph topology change invalidates all centrality scores
+    /// (`PageRank`, `BetweennessCentrality`, `HITSScore`, `CompositeSalience`)
+    /// for every node.
+    pub global_centrality_on_topology_change: bool,
+    /// If true, only invalidate semantic summaries (`SemanticSummary`,
+    /// `DesignRationale`, `InvariantDescription`) when a node's own
+    /// `content_hash` changes — not when its neighbors change.
+    pub conservative_semantic_invalidation: bool,
+}
+
+impl Default for InvalidationPolicy {
+    fn default() -> Self {
+        Self {
+            global_centrality_on_topology_change: true,
+            conservative_semantic_invalidation: true,
         }
     }
 }
@@ -218,14 +252,37 @@ impl Default for GitLabExtractionConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GraphSection {
     pub languages: LanguageConfig,
+    #[serde(default)]
+    pub snapshots: SnapshotsConfig,
 }
 
 impl Default for GraphSection {
     fn default() -> Self {
         Self {
             languages: LanguageConfig::Auto,
+            snapshots: SnapshotsConfig::default(),
+        }
+    }
+}
+
+/// Controls automatic graph snapshot creation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnapshotsConfig {
+    /// Create snapshots at tagged releases.
+    pub at_releases: bool,
+    /// Create snapshots every N commits (0 = disabled).
+    pub every_n_commits: u32,
+}
+
+impl Default for SnapshotsConfig {
+    fn default() -> Self {
+        Self {
+            at_releases: true,
+            every_n_commits: 100,
         }
     }
 }
@@ -283,12 +340,147 @@ impl<'de> Deserialize<'de> for LanguageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderersSection {
     pub enabled: Vec<String>,
+    #[serde(default, rename = "agents-md")]
+    pub agents_md: AgentsMdConfig,
+    #[serde(default, rename = "module-ctx")]
+    pub module_ctx: ModuleContextConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    #[serde(default, rename = "topos-spec")]
+    pub topos_spec: ToposSpecConfig,
+    #[serde(default)]
+    pub report: ReportConfig,
+    #[serde(default, rename = "risk-map")]
+    pub risk_map: RiskMapConfig,
 }
 
 impl Default for RenderersSection {
     fn default() -> Self {
         Self {
             enabled: vec!["agents-md".into(), "module-ctx".into(), "risk-map".into()],
+            agents_md: AgentsMdConfig::default(),
+            module_ctx: ModuleContextConfig::default(),
+            skills: SkillsConfig::default(),
+            topos_spec: ToposSpecConfig::default(),
+            report: ReportConfig::default(),
+            risk_map: RiskMapConfig::default(),
+        }
+    }
+}
+
+/// Per-renderer config for `agents-md`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentsMdConfig {
+    /// Output file path relative to repo root.
+    pub output_path: String,
+    /// Max entries in the Load-Bearing Code table.
+    pub max_load_bearing: u32,
+    /// Max entries in the Change Patterns tables.
+    pub max_change_patterns: u32,
+    /// Max entries in the Key Design Decisions list.
+    pub max_design_decisions: u32,
+    /// How to handle existing AGENTS.md: `auto`, `diff`, `merge`, `overwrite`.
+    pub circularity_mode: String,
+}
+
+impl Default for AgentsMdConfig {
+    fn default() -> Self {
+        Self {
+            output_path: "AGENTS.md".to_string(),
+            max_load_bearing: 20,
+            max_change_patterns: 10,
+            max_design_decisions: 10,
+            circularity_mode: "auto".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `module-ctx`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModuleContextConfig {
+    /// Filename for per-directory context files.
+    pub filename: String,
+    /// Whether to generate one file per directory.
+    pub per_directory: bool,
+}
+
+impl Default for ModuleContextConfig {
+    fn default() -> Self {
+        Self {
+            filename: ".context.md".to_string(),
+            per_directory: true,
+        }
+    }
+}
+
+/// Per-renderer config for `skills`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkillsConfig {
+    /// Output directory for skill files (relative to repo root).
+    pub output_dir: String,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            output_dir: ".claude/skills/".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `topos-spec`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToposSpecConfig {
+    /// Output directory for spec files (relative to repo root).
+    pub output_dir: String,
+    /// Spec format: `topos`.
+    pub format: String,
+}
+
+impl Default for ToposSpecConfig {
+    fn default() -> Self {
+        Self {
+            output_dir: "spec/".to_string(),
+            format: "topos".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `report`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReportConfig {
+    /// Output file path relative to repo root.
+    pub output_path: String,
+    /// Report format: `html` or `markdown`.
+    pub format: String,
+}
+
+impl Default for ReportConfig {
+    fn default() -> Self {
+        Self {
+            output_path: "homer-report.html".to_string(),
+            format: "html".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `risk-map`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RiskMapConfig {
+    /// Output file path relative to repo root.
+    pub output_path: String,
+}
+
+impl Default for RiskMapConfig {
+    fn default() -> Self {
+        Self {
+            output_path: "homer-risk.json".to_string(),
         }
     }
 }
@@ -320,5 +512,177 @@ impl Default for LlmSection {
             cost_budget: 0.0,
             enabled: false, // opt-in by default
         }
+    }
+}
+
+/// MCP server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpSection {
+    /// Transport type: "stdio" or "sse".
+    pub transport: String,
+    /// Host for SSE transport.
+    pub host: String,
+    /// Port for SSE transport.
+    pub port: u16,
+}
+
+impl Default for McpSection {
+    fn default() -> Self {
+        Self {
+            transport: "stdio".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_config_defaults() {
+        let config = RenderersSection::default();
+        assert_eq!(config.agents_md.output_path, "AGENTS.md");
+        assert_eq!(config.agents_md.max_load_bearing, 20);
+        assert_eq!(config.agents_md.max_change_patterns, 10);
+        assert_eq!(config.agents_md.max_design_decisions, 10);
+        assert_eq!(config.agents_md.circularity_mode, "auto");
+        assert_eq!(config.module_ctx.filename, ".context.md");
+        assert!(config.module_ctx.per_directory);
+        assert_eq!(config.skills.output_dir, ".claude/skills/");
+        assert_eq!(config.topos_spec.output_dir, "spec/");
+        assert_eq!(config.topos_spec.format, "topos");
+        assert_eq!(config.report.output_path, "homer-report.html");
+        assert_eq!(config.report.format, "html");
+        assert_eq!(config.risk_map.output_path, "homer-risk.json");
+    }
+
+    #[test]
+    fn renderer_config_from_toml() {
+        let toml_str = r#"
+[renderers]
+enabled = ["agents-md", "risk-map"]
+
+[renderers.agents-md]
+max_load_bearing = 30
+max_change_patterns = 5
+max_design_decisions = 15
+circularity_mode = "overwrite"
+
+[renderers.module-ctx]
+filename = ".module.md"
+per_directory = false
+
+[renderers.skills]
+output_dir = "skills/"
+
+[renderers.topos-spec]
+output_dir = "docs/spec/"
+format = "topos"
+
+[renderers.report]
+format = "markdown"
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.renderers.enabled,
+            vec!["agents-md".to_string(), "risk-map".to_string()]
+        );
+        assert_eq!(config.renderers.agents_md.max_load_bearing, 30);
+        assert_eq!(config.renderers.agents_md.max_change_patterns, 5);
+        assert_eq!(config.renderers.agents_md.max_design_decisions, 15);
+        assert_eq!(config.renderers.agents_md.circularity_mode, "overwrite");
+        assert_eq!(config.renderers.module_ctx.filename, ".module.md");
+        assert!(!config.renderers.module_ctx.per_directory);
+        assert_eq!(config.renderers.skills.output_dir, "skills/");
+        assert_eq!(config.renderers.topos_spec.output_dir, "docs/spec/");
+        assert_eq!(config.renderers.report.format, "markdown");
+    }
+
+    #[test]
+    fn renderer_config_partial_toml_uses_defaults() {
+        let toml_str = r#"
+[renderers]
+enabled = ["agents-md"]
+
+[renderers.agents-md]
+max_load_bearing = 50
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.renderers.agents_md.max_load_bearing, 50);
+        // Unspecified fields get defaults
+        assert_eq!(config.renderers.agents_md.output_path, "AGENTS.md");
+        assert_eq!(config.renderers.agents_md.max_change_patterns, 10);
+        assert_eq!(config.renderers.agents_md.circularity_mode, "auto");
+        assert_eq!(config.renderers.module_ctx.filename, ".context.md");
+        assert!(config.renderers.module_ctx.per_directory);
+    }
+
+    #[test]
+    fn homer_section_defaults() {
+        let config = HomerConfig::default();
+        assert_eq!(config.homer.version, "0.1.0");
+        assert!(config.homer.db_path.is_none());
+    }
+
+    #[test]
+    fn homer_section_with_db_path() {
+        let toml_str = r#"
+[homer]
+version = "0.2.0"
+db_path = "/custom/path/homer.db"
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.homer.version, "0.2.0");
+        assert_eq!(
+            config.homer.db_path.as_deref(),
+            Some("/custom/path/homer.db")
+        );
+    }
+
+    #[test]
+    fn graph_snapshots_defaults() {
+        let config = HomerConfig::default();
+        assert!(config.graph.snapshots.at_releases);
+        assert_eq!(config.graph.snapshots.every_n_commits, 100);
+    }
+
+    #[test]
+    fn graph_snapshots_from_toml() {
+        let toml_str = r#"
+[graph]
+languages = "auto"
+
+[graph.snapshots]
+at_releases = false
+every_n_commits = 50
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.graph.snapshots.at_releases);
+        assert_eq!(config.graph.snapshots.every_n_commits, 50);
+    }
+
+    #[test]
+    fn mcp_section_defaults() {
+        let config = HomerConfig::default();
+        assert_eq!(config.mcp.transport, "stdio");
+        assert_eq!(config.mcp.host, "127.0.0.1");
+        assert_eq!(config.mcp.port, 3000);
+    }
+
+    #[test]
+    fn mcp_section_from_toml() {
+        let toml_str = r#"
+[mcp]
+transport = "sse"
+host = "0.0.0.0"
+port = 8080
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mcp.transport, "sse");
+        assert_eq!(config.mcp.host, "0.0.0.0");
+        assert_eq!(config.mcp.port, 8080);
     }
 }

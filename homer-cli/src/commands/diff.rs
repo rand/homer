@@ -22,6 +22,9 @@ pub struct DiffArgs {
     /// Path to git repository (default: current directory)
     #[arg(long, default_value = ".")]
     pub path: PathBuf,
+    /// Sections to include: topology, centrality, communities, coupling
+    #[arg(long, value_delimiter = ',')]
+    pub include: Option<Vec<String>>,
 }
 
 pub async fn run(args: DiffArgs) -> anyhow::Result<()> {
@@ -36,17 +39,25 @@ pub async fn run(args: DiffArgs) -> anyhow::Result<()> {
         );
     }
 
-    let db_path = homer_dir.join("homer.db");
+    let db_path = super::resolve_db_path(&repo_path);
     let store = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 
     let changed_files = git_diff_files(&repo_path, &args.ref1, &args.ref2)?;
     let impact = assess_impact(&store, &changed_files).await?;
 
+    let sections = args
+        .include
+        .as_ref()
+        .map(|v| v.iter().map(String::as_str).collect::<Vec<_>>());
+    let filter = SectionFilter::new(sections.as_deref());
+
     match args.format.as_str() {
-        "json" => print_json(&args.ref1, &args.ref2, &changed_files, &impact)?,
-        "markdown" => print_markdown(&args.ref1, &args.ref2, &changed_files, &impact),
-        _ => print_text(&args.ref1, &args.ref2, &changed_files, &impact),
+        "json" => print_json(&args.ref1, &args.ref2, &changed_files, &impact, &filter)?,
+        "markdown" => {
+            print_markdown(&args.ref1, &args.ref2, &changed_files, &impact, &filter);
+        }
+        _ => print_text(&args.ref1, &args.ref2, &changed_files, &impact, &filter),
     }
 
     Ok(())
@@ -293,33 +304,70 @@ async fn find_community_impacts(
     Ok(affected)
 }
 
+// ── Section filter ────────────────────────────────────────────────
+
+#[allow(clippy::struct_excessive_bools)]
+struct SectionFilter {
+    show_topology: bool,
+    show_centrality: bool,
+    show_communities: bool,
+    show_coupling: bool,
+}
+
+impl SectionFilter {
+    fn new(sections: Option<&[&str]>) -> Self {
+        let Some(sections) = sections else {
+            return Self {
+                show_topology: true,
+                show_centrality: true,
+                show_communities: true,
+                show_coupling: true,
+            };
+        };
+        Self {
+            show_topology: sections.contains(&"topology"),
+            show_centrality: sections.contains(&"centrality"),
+            show_communities: sections.contains(&"communities"),
+            show_coupling: sections.contains(&"coupling"),
+        }
+    }
+}
+
 // ── Output formatters ──────────────────────────────────────────────
 
-fn print_text(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &ImpactReport) {
+fn print_text(
+    ref1: &str,
+    ref2: &str,
+    changed: &[ChangedFile],
+    impact: &ImpactReport,
+    filter: &SectionFilter,
+) {
     println!("Architectural Diff: {ref1} -> {ref2}");
     println!();
 
-    let t = &impact.topology;
-    println!("Topology:");
-    println!(
-        "  +{} new, ~{} modified, -{} removed, >{} renamed",
-        t.added, t.modified, t.deleted, t.renamed
-    );
-    println!("  {} files changed total", changed.len());
-    println!();
-
-    if !changed.is_empty() {
-        println!("Files:");
-        for f in changed.iter().take(30) {
-            println!("  {} {}", f.status.symbol(), f.path);
-        }
-        if changed.len() > 30 {
-            println!("  ... and {} more", changed.len() - 30);
-        }
+    if filter.show_topology {
+        let t = &impact.topology;
+        println!("Topology:");
+        println!(
+            "  +{} new, ~{} modified, -{} removed, >{} renamed",
+            t.added, t.modified, t.deleted, t.renamed
+        );
+        println!("  {} files changed total", changed.len());
         println!();
+
+        if !changed.is_empty() {
+            println!("Files:");
+            for f in changed.iter().take(30) {
+                println!("  {} {}", f.status.symbol(), f.path);
+            }
+            if changed.len() > 30 {
+                println!("  ... and {} more", changed.len() - 30);
+            }
+            println!();
+        }
     }
 
-    if !impact.high_salience_touched.is_empty() {
+    if filter.show_centrality && !impact.high_salience_touched.is_empty() {
         println!("High-Salience Files Touched:");
         for (name, sal, cls) in &impact.high_salience_touched {
             println!("  {name} (salience: {sal:.2}, {cls})");
@@ -327,7 +375,7 @@ fn print_text(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &ImpactRe
         println!();
     }
 
-    if !impact.low_bus_factor_touched.is_empty() {
+    if filter.show_coupling && !impact.low_bus_factor_touched.is_empty() {
         println!("Risk — Low Bus Factor:");
         for (name, bf) in &impact.low_bus_factor_touched {
             println!("  {name} (bus factor: {bf})");
@@ -335,12 +383,12 @@ fn print_text(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &ImpactRe
         println!();
     }
 
-    if !impact.modules_affected.is_empty() {
+    if filter.show_coupling && !impact.modules_affected.is_empty() {
         println!("Modules Affected: {}", impact.modules_affected.join(", "));
         println!();
     }
 
-    if !impact.communities_affected.is_empty() {
+    if filter.show_communities && !impact.communities_affected.is_empty() {
         println!(
             "Communities Affected: {}",
             impact.communities_affected.join(", ")
@@ -348,35 +396,43 @@ fn print_text(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &ImpactRe
     }
 }
 
-fn print_markdown(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &ImpactReport) {
+fn print_markdown(
+    ref1: &str,
+    ref2: &str,
+    changed: &[ChangedFile],
+    impact: &ImpactReport,
+    filter: &SectionFilter,
+) {
     println!("# Architectural Diff: {ref1} -> {ref2}");
     println!();
 
-    let t = &impact.topology;
-    println!("## Topology");
-    println!();
-    println!(
-        "- **+{}** new, **~{}** modified, **-{}** removed, **>{}** renamed",
-        t.added, t.modified, t.deleted, t.renamed
-    );
-    println!("- **{}** files changed total", changed.len());
-    println!();
+    if filter.show_topology {
+        let t = &impact.topology;
+        println!("## Topology");
+        println!();
+        println!(
+            "- **+{}** new, **~{}** modified, **-{}** removed, **>{}** renamed",
+            t.added, t.modified, t.deleted, t.renamed
+        );
+        println!("- **{}** files changed total", changed.len());
+        println!();
 
-    if !changed.is_empty() {
-        println!("## Changed Files");
-        println!();
-        println!("| Status | File |");
-        println!("|--------|------|");
-        for f in changed.iter().take(50) {
-            println!("| {} | `{}` |", f.status.label(), f.path);
+        if !changed.is_empty() {
+            println!("## Changed Files");
+            println!();
+            println!("| Status | File |");
+            println!("|--------|------|");
+            for f in changed.iter().take(50) {
+                println!("| {} | `{}` |", f.status.label(), f.path);
+            }
+            if changed.len() > 50 {
+                println!("| | ... and {} more |", changed.len() - 50);
+            }
+            println!();
         }
-        if changed.len() > 50 {
-            println!("| | ... and {} more |", changed.len() - 50);
-        }
-        println!();
     }
 
-    if !impact.high_salience_touched.is_empty() {
+    if filter.show_centrality && !impact.high_salience_touched.is_empty() {
         println!("## High-Salience Files Touched");
         println!();
         println!("| File | Salience | Classification |");
@@ -387,7 +443,7 @@ fn print_markdown(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &Impa
         println!();
     }
 
-    if !impact.low_bus_factor_touched.is_empty() {
+    if filter.show_coupling && !impact.low_bus_factor_touched.is_empty() {
         println!("## Risk: Low Bus Factor");
         println!();
         for (name, bf) in &impact.low_bus_factor_touched {
@@ -396,7 +452,7 @@ fn print_markdown(ref1: &str, ref2: &str, changed: &[ChangedFile], impact: &Impa
         println!();
     }
 
-    if !impact.modules_affected.is_empty() {
+    if filter.show_coupling && !impact.modules_affected.is_empty() {
         println!(
             "**Modules:** {}",
             impact
@@ -415,31 +471,78 @@ fn print_json(
     ref2: &str,
     changed: &[ChangedFile],
     impact: &ImpactReport,
+    filter: &SectionFilter,
 ) -> anyhow::Result<()> {
-    let t = &impact.topology;
-    let json = serde_json::json!({
+    let mut json = serde_json::json!({
         "ref1": ref1,
         "ref2": ref2,
-        "topology": {
-            "added": t.added,
-            "modified": t.modified,
-            "deleted": t.deleted,
-            "renamed": t.renamed,
-            "total_changed": changed.len(),
-        },
-        "changed_files": changed.iter().map(|f| serde_json::json!({
-            "path": f.path,
-            "status": f.status.label(),
-        })).collect::<Vec<_>>(),
-        "high_salience_touched": impact.high_salience_touched.iter().map(|(name, sal, cls)| {
-            serde_json::json!({ "file": name, "salience": sal, "classification": cls })
-        }).collect::<Vec<_>>(),
-        "low_bus_factor": impact.low_bus_factor_touched.iter().map(|(name, bf)| {
-            serde_json::json!({ "file": name, "bus_factor": bf })
-        }).collect::<Vec<_>>(),
-        "modules_affected": impact.modules_affected,
-        "communities_affected": impact.communities_affected,
     });
+    let obj = json.as_object_mut().unwrap();
+
+    if filter.show_topology {
+        let t = &impact.topology;
+        obj.insert(
+            "topology".into(),
+            serde_json::json!({
+                "added": t.added,
+                "modified": t.modified,
+                "deleted": t.deleted,
+                "renamed": t.renamed,
+                "total_changed": changed.len(),
+            }),
+        );
+        obj.insert(
+            "changed_files".into(),
+            serde_json::json!(
+                changed
+                    .iter()
+                    .map(|f| serde_json::json!({
+                        "path": f.path,
+                        "status": f.status.label(),
+                    }))
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+
+    if filter.show_centrality {
+        obj.insert(
+            "high_salience_touched".into(),
+            serde_json::json!(
+                impact
+                    .high_salience_touched
+                    .iter()
+                    .map(|(name, sal, cls)| {
+                        serde_json::json!({ "file": name, "salience": sal, "classification": cls })
+                    })
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+
+    if filter.show_coupling {
+        obj.insert(
+            "low_bus_factor".into(),
+            serde_json::json!(
+                impact
+                    .low_bus_factor_touched
+                    .iter()
+                    .map(|(name, bf)| { serde_json::json!({ "file": name, "bus_factor": bf }) })
+                    .collect::<Vec<_>>()
+            ),
+        );
+        obj.insert(
+            "modules_affected".into(),
+            serde_json::json!(impact.modules_affected),
+        );
+    }
+
+    if filter.show_communities {
+        obj.insert(
+            "communities_affected".into(),
+            serde_json::json!(impact.communities_affected),
+        );
+    }
 
     println!("{}", serde_json::to_string_pretty(&json)?);
     Ok(())

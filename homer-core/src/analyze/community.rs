@@ -21,8 +21,8 @@ use crate::store::HomerStore;
 use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind};
 
 use super::AnalyzeStats;
-use super::centrality::InMemoryGraph;
 use super::traits::Analyzer;
+use crate::types::InMemoryGraph;
 
 /// Adjacency list: node index → list of (neighbor, weight).
 type AdjList = HashMap<usize, Vec<(usize, f64)>>;
@@ -517,6 +517,17 @@ impl Analyzer for CommunityAnalyzer {
         "community"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::CommunityAssignment,
+            AnalysisKind::StabilityClassification,
+        ]
+    }
+
+    fn requires(&self) -> &'static [AnalysisKind] {
+        &[AnalysisKind::CompositeSalience]
+    }
+
     #[instrument(skip_all, name = "community_analyze")]
     async fn analyze(
         &self,
@@ -527,7 +538,8 @@ impl Analyzer for CommunityAnalyzer {
         let mut stats = AnalyzeStats::default();
 
         // Load import graph for community detection
-        let import_graph = InMemoryGraph::from_store(store, HyperedgeKind::Imports).await?;
+        let import_graph =
+            InMemoryGraph::from_edges(&store.get_edges_by_kind(HyperedgeKind::Imports).await?);
 
         if import_graph.node_count() == 0 {
             info!("No import graph data, skipping community detection");
@@ -709,9 +721,12 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
         setup_import_graph(&store).await;
 
-        let graph = InMemoryGraph::from_store(&store, HyperedgeKind::Imports)
-            .await
-            .unwrap();
+        let graph = InMemoryGraph::from_edges(
+            &store
+                .get_edges_by_kind(HyperedgeKind::Imports)
+                .await
+                .unwrap(),
+        );
         assert_eq!(graph.node_count(), 6);
 
         let communities = louvain_communities(&graph);

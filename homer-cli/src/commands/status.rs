@@ -25,7 +25,7 @@ pub async fn run(args: StatusArgs) -> anyhow::Result<()> {
         );
     }
 
-    let db_path = homer_dir.join("homer.db");
+    let db_path = super::resolve_db_path(&repo_path);
     if !db_path.exists() {
         anyhow::bail!("Database not found: {}", db_path.display());
     }
@@ -86,6 +86,17 @@ pub async fn run(args: StatusArgs) -> anyhow::Result<()> {
         None => println!("    graph_last_sha: (none)"),
     }
 
+    // Pending work
+    let pending_commits = count_pending_commits(&repo_path, git_checkpoint.as_ref());
+    if pending_commits > 0 {
+        println!();
+        println!("  Pending work:");
+        println!(
+            "    {pending_commits} new commit{} since last update",
+            if pending_commits == 1 { "" } else { "s" }
+        );
+    }
+
     // Check for AGENTS.md
     let agents_path = repo_path.join("AGENTS.md");
     println!();
@@ -101,6 +112,52 @@ pub async fn run(args: StatusArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Count commits between the last-processed SHA and HEAD.
+fn count_pending_commits(repo_path: &std::path::Path, checkpoint: Option<&String>) -> usize {
+    let Ok(repo) = gix::open(repo_path) else {
+        return 0;
+    };
+    let Ok(head) = repo.head_commit() else {
+        return 0;
+    };
+
+    let Some(last_sha) = checkpoint else {
+        // Never processed — count all commits (capped for display)
+        return count_ancestors(&head, None);
+    };
+
+    let head_str = head.id().to_string();
+    if head_str == *last_sha {
+        return 0;
+    }
+
+    let Ok(stop_id) = repo.rev_parse_single(last_sha.as_str()) else {
+        return 0;
+    };
+
+    count_ancestors(&head, Some(stop_id.detach()))
+}
+
+fn count_ancestors(commit: &gix::Commit<'_>, stop_at: Option<gix::ObjectId>) -> usize {
+    let mut count = 0usize;
+    let Ok(ancestors) = commit.ancestors().all() else {
+        return 0;
+    };
+    for info in ancestors {
+        let Ok(info) = info else { break };
+        if let Some(ref stop) = stop_at {
+            if info.id == *stop {
+                break;
+            }
+        }
+        count += 1;
+        if count >= 9999 {
+            break;
+        }
+    }
+    count
 }
 
 #[allow(clippy::cast_precision_loss)]

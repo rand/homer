@@ -14,6 +14,7 @@ path = "src/main.rs"
 homer-core = { workspace = true }
 homer-mcp = { path = "../homer-mcp" }
 
+gix = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
