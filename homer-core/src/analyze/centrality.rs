@@ -541,11 +541,13 @@ async fn compute_and_store_salience(
         .await?;
     for result in &freq_results {
         if let Some(inputs) = all_nodes.get_mut(&result.node_id) {
+            // Percentile is stored as 0-100; normalize to 0-1 for scoring
             inputs.change_frequency = result
                 .data
                 .get("percentile")
                 .and_then(serde_json::Value::as_f64)
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+                / 100.0;
         }
     }
 
@@ -1408,6 +1410,111 @@ mod tests {
         assert!(
             (test_presence - 1.0).abs() < f64::EPSILON,
             "test_presence should be 1.0 since auth_test.rs covers auth.rs"
+        );
+    }
+
+    #[tokio::test]
+    async fn change_frequency_percentile_normalized_to_unit_range() {
+        let store = SqliteStore::in_memory().unwrap();
+        let now = Utc::now();
+
+        // Create a function node
+        let func_id = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Function,
+                name: "src/lib.rs::hot_function".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Store a ChangeFrequency result with percentile=95 (raw 0-100 range)
+        store
+            .store_analysis(&AnalysisResult {
+                id: AnalysisResultId(0),
+                node_id: func_id,
+                kind: AnalysisKind::ChangeFrequency,
+                data: serde_json::json!({
+                    "total_changes": 50,
+                    "percentile": 95.0,
+                }),
+                input_hash: 0,
+                computed_at: now,
+            })
+            .await
+            .unwrap();
+
+        // Create a minimal call edge so composite salience runs
+        let caller_id = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::Function,
+                name: "src/lib.rs::caller".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::Calls,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: caller_id,
+                        role: "caller".to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: func_id,
+                        role: "callee".to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: 0.9,
+                last_updated: now,
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let analyzer = CentralityAnalyzer::default();
+        let config = HomerConfig::default();
+        analyzer.analyze(&store, &config).await.unwrap();
+
+        let salience = store
+            .get_analysis(func_id, AnalysisKind::CompositeSalience)
+            .await
+            .unwrap()
+            .expect("Should have salience for hot_function");
+
+        let composite = salience
+            .data
+            .get("score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
+        let change_freq = salience
+            .data
+            .get("components")
+            .and_then(|c| c.get("change_frequency"))
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
+
+        assert!(
+            (0.0..=1.0).contains(&change_freq),
+            "change_frequency should be normalized to [0,1], got {change_freq}"
+        );
+        assert!(
+            (0.0..=1.0).contains(&composite),
+            "composite salience should be in [0,1], got {composite}"
+        );
+        assert!(
+            (change_freq - 0.95).abs() < f64::EPSILON,
+            "percentile 95 should normalize to 0.95, got {change_freq}"
         );
     }
 }
