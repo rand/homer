@@ -108,6 +108,8 @@ pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
         for error in &result.errors {
             println!("    - {error}");
         }
+        // Signal partial success to the CLI (exit code 10)
+        anyhow::bail!("partial success: {} non-fatal errors", result.errors.len());
     }
 
     Ok(())

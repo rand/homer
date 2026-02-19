@@ -8,7 +8,7 @@ use std::time::Instant;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument, warn};
 
-use crate::config::HomerConfig;
+use crate::config::{AnalysisDepth, HomerConfig};
 use crate::llm::cache::{compute_input_hash, get_cached, has_quality_doc_comment, store_cached};
 use crate::llm::{AnalysisProvenance, CostTracker, LlmProvider, ProvenanceConfidence};
 use crate::store::HomerStore;
@@ -65,7 +65,7 @@ impl Analyzer for SemanticAnalyzer {
         let mut cost_tracker = CostTracker::default();
 
         let threshold = config.analysis.llm_salience_threshold;
-        let max_batch = config.analysis.max_llm_batch_size as usize;
+        let max_batch = depth_adjusted_batch_size(config);
         let budget = config.llm.cost_budget;
 
         // Collect high-salience entities
@@ -642,6 +642,20 @@ fn build_rationale_prompt(
     )
 }
 
+/// Compute effective batch size based on analysis depth.
+///
+/// Per CLI.md depth table: standard = 50, deep = 200, full = all high-salience.
+/// The config's `max_llm_batch_size` acts as the base for standard depth.
+fn depth_adjusted_batch_size(config: &HomerConfig) -> usize {
+    let base = config.analysis.max_llm_batch_size as usize;
+    match config.analysis.depth {
+        AnalysisDepth::Shallow => 0,
+        AnalysisDepth::Standard => base,
+        AnalysisDepth::Deep => base.max(200),
+        AnalysisDepth::Full => usize::MAX,
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -702,5 +716,22 @@ mod tests {
         assert!(prompt.contains("session tokens"));
         assert!(prompt.contains("src/auth.rs"));
         assert!(prompt.contains("rate limiting"));
+    }
+
+    #[test]
+    fn depth_adjusted_batch_size_scales() {
+        let mut config = HomerConfig::default();
+
+        config.analysis.depth = AnalysisDepth::Shallow;
+        assert_eq!(depth_adjusted_batch_size(&config), 0);
+
+        config.analysis.depth = AnalysisDepth::Standard;
+        assert_eq!(depth_adjusted_batch_size(&config), 50);
+
+        config.analysis.depth = AnalysisDepth::Deep;
+        assert_eq!(depth_adjusted_batch_size(&config), 200);
+
+        config.analysis.depth = AnalysisDepth::Full;
+        assert_eq!(depth_adjusted_batch_size(&config), usize::MAX);
     }
 }

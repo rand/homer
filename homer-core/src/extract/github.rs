@@ -45,10 +45,11 @@ pub struct GitHubExtractor {
 
 impl GitHubExtractor {
     /// Detect GitHub remote from a git repo and create the extractor.
-    pub fn from_repo(repo_path: &Path, _config: &HomerConfig) -> Option<Self> {
+    pub fn from_repo(repo_path: &Path, config: &HomerConfig) -> Option<Self> {
         let remote_url = detect_github_remote(repo_path)?;
         let (owner, repo) = parse_github_url(&remote_url)?;
-        let token = std::env::var("GITHUB_TOKEN").ok();
+        let token_env = &config.extraction.github.token_env;
+        let token = std::env::var(token_env).ok();
 
         Some(Self {
             owner,
@@ -77,6 +78,10 @@ impl GitHubExtractor {
 impl Extractor for GitHubExtractor {
     fn name(&self) -> &'static str {
         "github"
+    }
+
+    async fn has_work(&self, _store: &dyn HomerStore) -> crate::error::Result<bool> {
+        Ok(self.token.is_some())
     }
 
     #[instrument(skip_all, name = "github_extract")]

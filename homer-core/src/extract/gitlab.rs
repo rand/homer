@@ -76,6 +76,10 @@ impl Extractor for GitLabExtractor {
         "gitlab"
     }
 
+    async fn has_work(&self, _store: &dyn HomerStore) -> crate::error::Result<bool> {
+        Ok(self.token.is_some())
+    }
+
     #[instrument(skip_all, name = "gitlab_extract")]
     async fn extract(
         &self,
