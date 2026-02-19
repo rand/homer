@@ -5,6 +5,7 @@ use clap::Args;
 
 use homer_core::config::HomerConfig;
 use homer_core::pipeline::HomerPipeline;
+use homer_core::render::traits::merge_with_preserve;
 use homer_core::store::sqlite::SqliteStore;
 
 #[derive(Args, Debug)]
@@ -32,6 +33,11 @@ pub struct RenderArgs {
     /// Show what would be generated without writing files
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Show diff between existing artifacts and new render output
+    /// (automatically merges with `<!-- homer:preserve -->` blocks)
+    #[arg(long)]
+    pub diff: bool,
 }
 
 pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
@@ -97,6 +103,10 @@ pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.diff {
+        return show_diff(&store, &config, output_root, &name_refs).await;
+    }
+
     let pipeline = HomerPipeline::new(output_root);
     let result = pipeline
         .run_renderers(&store, &config, &name_refs)
@@ -117,4 +127,81 @@ pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn show_diff(
+    store: &SqliteStore,
+    config: &HomerConfig,
+    output_root: &std::path::Path,
+    names: &[&str],
+) -> anyhow::Result<()> {
+    let mut any_diff = false;
+
+    for name in names {
+        let Some(renderer) = HomerPipeline::build_renderer(name) else {
+            eprintln!("Unknown renderer: {name}");
+            continue;
+        };
+
+        let new_content = renderer
+            .render(store, config)
+            .await
+            .with_context(|| format!("Rendering {name} failed"))?;
+
+        let output_path = output_root.join(renderer.output_path());
+        let existing = if output_path.exists() {
+            std::fs::read_to_string(&output_path)
+                .with_context(|| format!("Cannot read {}", output_path.display()))?
+        } else {
+            String::new()
+        };
+
+        // Apply merge if the file exists (to match what write() would produce)
+        let final_content = if existing.is_empty() {
+            new_content
+        } else {
+            merge_with_preserve(&existing, &new_content)
+        };
+
+        if final_content == existing {
+            println!("--- {}: no changes", renderer.output_path());
+            continue;
+        }
+
+        any_diff = true;
+        println!("--- a/{}", renderer.output_path());
+        println!("+++ b/{}", renderer.output_path());
+
+        // Simple line-by-line diff
+        let old_lines: Vec<&str> = existing.lines().collect();
+        let new_lines: Vec<&str> = final_content.lines().collect();
+        print_simple_diff(&old_lines, &new_lines);
+        println!();
+    }
+
+    if !any_diff {
+        println!("No differences found.");
+    }
+
+    Ok(())
+}
+
+fn print_simple_diff(old: &[&str], new: &[&str]) {
+    let max = old.len().max(new.len());
+    let mut i = 0;
+    while i < max {
+        let old_line = old.get(i).copied();
+        let new_line = new.get(i).copied();
+        match (old_line, new_line) {
+            (Some(o), Some(n)) if o == n => {}
+            (Some(o), Some(n)) => {
+                println!("-{o}");
+                println!("+{n}");
+            }
+            (Some(o), None) => println!("-{o}"),
+            (None, Some(n)) => println!("+{n}"),
+            (None, None) => {}
+        }
+        i += 1;
+    }
 }

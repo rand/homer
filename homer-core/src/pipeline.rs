@@ -336,6 +336,19 @@ impl HomerPipeline {
             .await;
     }
 
+    /// Build a renderer by name, or `None` for unknown names.
+    pub fn build_renderer(name: &str) -> Option<Box<dyn Renderer>> {
+        match name {
+            "agents-md" => Some(Box::new(AgentsMdRenderer)),
+            "module-ctx" => Some(Box::new(ModuleContextRenderer)),
+            "risk-map" => Some(Box::new(RiskMapRenderer)),
+            "skills" => Some(Box::new(SkillsRenderer)),
+            "report" => Some(Box::new(ReportRenderer)),
+            "topos-spec" => Some(Box::new(ToposSpecRenderer)),
+            _ => None,
+        }
+    }
+
     async fn run_selected_renderers(
         &self,
         store: &dyn HomerStore,
