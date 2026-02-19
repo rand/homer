@@ -18,7 +18,8 @@ use tracing::{info, instrument};
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
 use crate::types::{
-    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeFilter, NodeId, NodeKind,
+    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, InMemoryGraph, NodeFilter,
+    NodeId, NodeKind,
 };
 
 use super::AnalyzeStats;
@@ -50,100 +51,6 @@ impl Default for CentralityConfig {
     }
 }
 
-// ── In-memory graph ────────────────────────────────────────────────
-
-/// A petgraph `DiGraph` loaded from the store, with `NodeId` ↔ `NodeIndex` mapping.
-#[derive(Debug)]
-pub struct InMemoryGraph {
-    pub graph: DiGraph<NodeId, f64>,
-    pub node_to_index: HashMap<NodeId, NodeIndex>,
-    pub index_to_node: HashMap<NodeIndex, NodeId>,
-}
-
-impl InMemoryGraph {
-    /// Load a directed graph from the store for the given edge kind.
-    ///
-    /// For `Calls` edges: caller → callee.
-    /// For `Imports` edges: importer → imported.
-    pub async fn from_store(
-        store: &dyn HomerStore,
-        edge_kind: HyperedgeKind,
-    ) -> crate::error::Result<Self> {
-        let edges = store.get_edges_by_kind(edge_kind).await?;
-
-        // Pre-allocate with capacity hints based on edge count
-        let estimated_nodes = edges.len(); // ~1 unique node per edge as lower bound
-        let mut graph = DiGraph::<NodeId, f64>::with_capacity(estimated_nodes, edges.len());
-        let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::with_capacity(estimated_nodes);
-        let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::with_capacity(estimated_nodes);
-
-        // Ensure all member nodes are in the graph
-        for edge in &edges {
-            for member in &edge.members {
-                node_to_index.entry(member.node_id).or_insert_with(|| {
-                    let idx = graph.add_node(member.node_id);
-                    index_to_node.insert(idx, member.node_id);
-                    idx
-                });
-            }
-        }
-
-        // Add directed edges: role "caller"→"callee" or position 0→1
-        for edge in &edges {
-            let (source, target) = extract_directed_pair(&edge.members);
-            if let (Some(&src_idx), Some(&tgt_idx)) =
-                (node_to_index.get(&source), node_to_index.get(&target))
-            {
-                graph.add_edge(src_idx, tgt_idx, edge.confidence);
-            }
-        }
-
-        Ok(Self {
-            graph,
-            node_to_index,
-            index_to_node,
-        })
-    }
-
-    pub fn node_count(&self) -> usize {
-        self.graph.node_count()
-    }
-
-    pub fn edge_count(&self) -> usize {
-        self.graph.edge_count()
-    }
-}
-
-/// Extract a directed (source, target) pair from hyperedge members.
-/// Uses roles ("caller"/"callee", "source"/"target") or falls back to position ordering.
-fn extract_directed_pair(members: &[crate::types::HyperedgeMember]) -> (NodeId, NodeId) {
-    if members.len() < 2 {
-        // Degenerate — self-loop or single member
-        let id = members.first().map_or(NodeId(0), |m| m.node_id);
-        return (id, id);
-    }
-
-    // Try role-based direction
-    let source_roles = ["caller", "source", "importer"];
-    let target_roles = ["callee", "target", "imported"];
-
-    let source = members
-        .iter()
-        .find(|m| source_roles.contains(&m.role.as_str()));
-    let target = members
-        .iter()
-        .find(|m| target_roles.contains(&m.role.as_str()));
-
-    if let (Some(s), Some(t)) = (source, target) {
-        return (s.node_id, t.node_id);
-    }
-
-    // Fallback: position ordering
-    let mut sorted = members.to_vec();
-    sorted.sort_by_key(|m| m.position);
-    (sorted[0].node_id, sorted[1].node_id)
-}
-
 // ── Centrality Analyzer ────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -167,7 +74,8 @@ impl Analyzer for CentralityAnalyzer {
         let mut stats = AnalyzeStats::default();
 
         // Load call graph for PageRank + HITS
-        let call_graph = InMemoryGraph::from_store(store, HyperedgeKind::Calls).await?;
+        let call_graph =
+            InMemoryGraph::from_edges(&store.get_edges_by_kind(HyperedgeKind::Calls).await?);
         info!(
             nodes = call_graph.node_count(),
             edges = call_graph.edge_count(),
@@ -175,7 +83,8 @@ impl Analyzer for CentralityAnalyzer {
         );
 
         // Load import graph for betweenness
-        let import_graph = InMemoryGraph::from_store(store, HyperedgeKind::Imports).await?;
+        let import_graph =
+            InMemoryGraph::from_edges(&store.get_edges_by_kind(HyperedgeKind::Imports).await?);
         info!(
             nodes = import_graph.node_count(),
             edges = import_graph.edge_count(),
@@ -1037,9 +946,9 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
         setup_call_graph(&store).await;
 
-        let graph = InMemoryGraph::from_store(&store, HyperedgeKind::Calls)
-            .await
-            .unwrap();
+        let graph = InMemoryGraph::from_edges(
+            &store.get_edges_by_kind(HyperedgeKind::Calls).await.unwrap(),
+        );
         assert_eq!(graph.node_count(), 5);
         assert_eq!(graph.edge_count(), 4);
 
@@ -1086,9 +995,12 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
         setup_import_graph(&store).await;
 
-        let graph = InMemoryGraph::from_store(&store, HyperedgeKind::Imports)
-            .await
-            .unwrap();
+        let graph = InMemoryGraph::from_edges(
+            &store
+                .get_edges_by_kind(HyperedgeKind::Imports)
+                .await
+                .unwrap(),
+        );
         assert_eq!(graph.node_count(), 4);
         assert_eq!(graph.edge_count(), 4);
 
@@ -1116,9 +1028,9 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
         setup_call_graph(&store).await;
 
-        let graph = InMemoryGraph::from_store(&store, HyperedgeKind::Calls)
-            .await
-            .unwrap();
+        let graph = InMemoryGraph::from_edges(
+            &store.get_edges_by_kind(HyperedgeKind::Calls).await.unwrap(),
+        );
 
         let config = CentralityConfig::default();
         let (hub_scores, auth_scores) = compute_hits(&graph, &config);

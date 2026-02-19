@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 
 use crate::types::{
-    AnalysisKind, AnalysisResult, GraphDiff, Hyperedge, HyperedgeId, HyperedgeKind, Node,
-    NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, SnapshotInfo, StoreStats,
+    AnalysisKind, AnalysisResult, GraphDiff, Hyperedge, HyperedgeId, HyperedgeKind, InMemoryGraph,
+    Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope, SnapshotId, SnapshotInfo,
+    StoreStats, SubgraphFilter,
 };
 
 /// The core store abstraction. All pipeline stages read/write through this trait.
@@ -127,6 +128,18 @@ pub trait HomerStore: Send + Sync {
         from: SnapshotId,
         to: SnapshotId,
     ) -> crate::error::Result<GraphDiff>;
+
+    // ── Graph loading ────────────────────────────────────────────────
+
+    /// Load the call graph (`Calls` edges) into memory, applying a subgraph filter.
+    async fn load_call_graph(&self, filter: &SubgraphFilter)
+    -> crate::error::Result<InMemoryGraph>;
+
+    /// Load the import graph (`Imports` edges) into memory, applying a subgraph filter.
+    async fn load_import_graph(
+        &self,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph>;
 
     // ── Metrics ────────────────────────────────────────────────────
 

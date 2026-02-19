@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
@@ -9,8 +11,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::{HomerError, StoreError};
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, GraphDiff, Hyperedge, HyperedgeId,
-    HyperedgeKind, HyperedgeMember, Node, NodeFilter, NodeId, NodeKind, SearchHit, SearchScope,
-    SnapshotId, SnapshotInfo, StoreStats,
+    HyperedgeKind, HyperedgeMember, InMemoryGraph, Node, NodeFilter, NodeId, NodeKind, SearchHit,
+    SearchScope, SnapshotId, SnapshotInfo, StoreStats, SubgraphFilter, extract_directed_pair,
 };
 
 use super::HomerStore;
@@ -134,6 +136,135 @@ impl SqliteStore {
             metadata: Self::parse_metadata(&metadata_str),
         })
     }
+
+    /// Build an `InMemoryGraph` from edges of a specific kind, applying a `SubgraphFilter`.
+    async fn load_filtered_graph(
+        &self,
+        kind: HyperedgeKind,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph> {
+        let edges = self.get_edges_by_kind(kind).await?;
+        if matches!(filter, SubgraphFilter::Full) {
+            return Ok(InMemoryGraph::from_edges(&edges));
+        }
+        let full_graph = InMemoryGraph::from_edges(&edges);
+        let allowed = resolve_filter(self, &full_graph, filter).await?;
+        let filtered_edges: Vec<Hyperedge> = edges
+            .into_iter()
+            .filter(|e| {
+                let (src, tgt) = extract_directed_pair(&e.members);
+                allowed.contains(&src) && allowed.contains(&tgt)
+            })
+            .collect();
+        Ok(InMemoryGraph::from_edges(&filtered_edges))
+    }
+}
+
+/// Resolve a `SubgraphFilter` into the set of `NodeId`s that pass the filter.
+/// Uses `Pin<Box>` to support recursive `And` filters.
+fn resolve_filter<'a>(
+    store: &'a SqliteStore,
+    graph: &'a InMemoryGraph,
+    filter: &'a SubgraphFilter,
+) -> Pin<Box<dyn Future<Output = crate::error::Result<HashSet<NodeId>>> + Send + 'a>> {
+    Box::pin(async move {
+        match filter {
+            SubgraphFilter::Full => Ok(graph.node_to_index.keys().copied().collect()),
+
+            SubgraphFilter::OfKind { kinds } => {
+                let mut allowed = HashSet::new();
+                for kind in kinds {
+                    let nodes = store
+                        .find_nodes(&NodeFilter {
+                            kind: Some(kind.clone()),
+                            ..Default::default()
+                        })
+                        .await?;
+                    for node in nodes {
+                        if graph.node_to_index.contains_key(&node.id) {
+                            allowed.insert(node.id);
+                        }
+                    }
+                }
+                Ok(allowed)
+            }
+
+            SubgraphFilter::Module { path_prefix } => {
+                let nodes = store
+                    .find_nodes(&NodeFilter {
+                        name_prefix: Some(path_prefix.clone()),
+                        ..Default::default()
+                    })
+                    .await?;
+                Ok(nodes
+                    .into_iter()
+                    .filter(|n| graph.node_to_index.contains_key(&n.id))
+                    .map(|n| n.id)
+                    .collect())
+            }
+
+            SubgraphFilter::HighSalience { min_score } => {
+                let analyses = store
+                    .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+                    .await?;
+                Ok(analyses
+                    .into_iter()
+                    .filter(|a| {
+                        a.data
+                            .get("score")
+                            .and_then(serde_json::Value::as_f64)
+                            .is_some_and(|s| s >= *min_score)
+                            && graph.node_to_index.contains_key(&a.node_id)
+                    })
+                    .map(|a| a.node_id)
+                    .collect())
+            }
+
+            SubgraphFilter::Neighborhood { centers, hops } => {
+                use petgraph::Direction;
+                use std::collections::VecDeque;
+
+                let mut visited = HashSet::new();
+                let mut queue = VecDeque::new();
+                for center in centers {
+                    if let Some(&idx) = graph.node_to_index.get(center) {
+                        if visited.insert(*center) {
+                            queue.push_back((idx, 0u32));
+                        }
+                    }
+                }
+                while let Some((idx, depth)) = queue.pop_front() {
+                    if depth >= *hops {
+                        continue;
+                    }
+                    let neighbors = graph
+                        .graph
+                        .neighbors_directed(idx, Direction::Outgoing)
+                        .chain(graph.graph.neighbors_directed(idx, Direction::Incoming));
+                    for neighbor_idx in neighbors {
+                        if let Some(&nid) = graph.index_to_node.get(&neighbor_idx) {
+                            if visited.insert(nid) {
+                                queue.push_back((neighbor_idx, depth + 1));
+                            }
+                        }
+                    }
+                }
+                Ok(visited)
+            }
+
+            SubgraphFilter::And(filters) => {
+                let mut result: Option<HashSet<NodeId>> = None;
+                for f in filters {
+                    let set = resolve_filter(store, graph, f).await?;
+                    result = Some(match result {
+                        None => set,
+                        Some(r) => r.intersection(&set).copied().collect(),
+                    });
+                }
+                Ok(result.unwrap_or_default())
+            }
+        }
+    })
 }
 
 #[async_trait::async_trait]
@@ -780,6 +911,23 @@ impl HomerStore for SqliteStore {
         })
     }
 
+    // ── Graph loading ────────────────────────────────────────────────
+
+    async fn load_call_graph(
+        &self,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph> {
+        self.load_filtered_graph(HyperedgeKind::Calls, filter).await
+    }
+
+    async fn load_import_graph(
+        &self,
+        filter: &SubgraphFilter,
+    ) -> crate::error::Result<InMemoryGraph> {
+        self.load_filtered_graph(HyperedgeKind::Imports, filter)
+            .await
+    }
+
     // ── Metrics ────────────────────────────────────────────────────
 
     async fn stats(&self) -> crate::error::Result<StoreStats> {
@@ -1205,6 +1353,140 @@ mod tests {
         let diff = store.get_snapshot_diff(snap1, snap2).await.unwrap();
         assert_eq!(diff.added_nodes.len(), 1, "should detect 1 added node");
         assert!(diff.removed_nodes.is_empty(), "no nodes removed");
+    }
+
+    /// Helper: create a directed edge between two nodes.
+    async fn insert_edge(
+        store: &SqliteStore,
+        kind: HyperedgeKind,
+        src: NodeId,
+        tgt: NodeId,
+        src_role: &str,
+        tgt_role: &str,
+    ) {
+        store
+            .upsert_hyperedge(&Hyperedge {
+                id: HyperedgeId(0),
+                kind,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: src,
+                        role: src_role.to_string(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: tgt,
+                        role: tgt_role.to_string(),
+                        position: 1,
+                    },
+                ],
+                confidence: 1.0,
+                last_updated: Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_call_graph_full() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store
+            .upsert_node(&make_test_node(NodeKind::Function, "main"))
+            .await
+            .unwrap();
+        let b = store
+            .upsert_node(&make_test_node(NodeKind::Function, "helper"))
+            .await
+            .unwrap();
+        let c = store
+            .upsert_node(&make_test_node(NodeKind::Function, "util"))
+            .await
+            .unwrap();
+
+        // main -> helper -> util
+        insert_edge(&store, HyperedgeKind::Calls, a, b, "caller", "callee").await;
+        insert_edge(&store, HyperedgeKind::Calls, b, c, "caller", "callee").await;
+
+        let graph = store.load_call_graph(&SubgraphFilter::Full).await.unwrap();
+        assert_eq!(graph.node_count(), 3);
+        assert_eq!(graph.edge_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn load_import_graph_module_filter() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store
+            .upsert_node(&make_test_node(NodeKind::File, "src/auth/login.rs"))
+            .await
+            .unwrap();
+        let b = store
+            .upsert_node(&make_test_node(NodeKind::File, "src/auth/token.rs"))
+            .await
+            .unwrap();
+        let c = store
+            .upsert_node(&make_test_node(NodeKind::File, "src/db/pool.rs"))
+            .await
+            .unwrap();
+
+        // login imports token and pool
+        insert_edge(&store, HyperedgeKind::Imports, a, b, "importer", "imported").await;
+        insert_edge(&store, HyperedgeKind::Imports, a, c, "importer", "imported").await;
+
+        // Filter to src/auth/ — pool.rs excluded, so only login->token edge survives
+        let graph = store
+            .load_import_graph(&SubgraphFilter::Module {
+                path_prefix: "src/auth/".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn load_call_graph_neighborhood_filter() {
+        let store = SqliteStore::in_memory().unwrap();
+        let a = store
+            .upsert_node(&make_test_node(NodeKind::Function, "a"))
+            .await
+            .unwrap();
+        let b = store
+            .upsert_node(&make_test_node(NodeKind::Function, "b"))
+            .await
+            .unwrap();
+        let c = store
+            .upsert_node(&make_test_node(NodeKind::Function, "c"))
+            .await
+            .unwrap();
+        let d = store
+            .upsert_node(&make_test_node(NodeKind::Function, "d"))
+            .await
+            .unwrap();
+
+        // a -> b -> c -> d (chain of 3 hops)
+        insert_edge(&store, HyperedgeKind::Calls, a, b, "caller", "callee").await;
+        insert_edge(&store, HyperedgeKind::Calls, b, c, "caller", "callee").await;
+        insert_edge(&store, HyperedgeKind::Calls, c, d, "caller", "callee").await;
+
+        // 1-hop from a: should include a and b
+        let graph = store
+            .load_call_graph(&SubgraphFilter::Neighborhood {
+                centers: vec![a],
+                hops: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(graph.node_count(), 2);
+        assert_eq!(graph.edge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn load_call_graph_empty() {
+        let store = SqliteStore::in_memory().unwrap();
+        let graph = store.load_call_graph(&SubgraphFilter::Full).await.unwrap();
+        assert_eq!(graph.node_count(), 0);
+        assert_eq!(graph.edge_count(), 0);
     }
 }
 
