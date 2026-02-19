@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -78,6 +78,7 @@ impl Extractor for GitHubExtractor {
         "github"
     }
 
+    #[instrument(skip_all, name = "github_extract")]
     async fn extract(
         &self,
         store: &dyn HomerStore,

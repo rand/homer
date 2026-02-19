@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -38,6 +38,7 @@ impl Extractor for PromptExtractor {
         "prompt"
     }
 
+    #[instrument(skip_all, name = "prompt_extract")]
     async fn extract(
         &self,
         store: &dyn HomerStore,

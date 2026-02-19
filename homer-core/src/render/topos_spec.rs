@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -33,6 +33,7 @@ impl Renderer for ToposSpecRenderer {
         "spec/homer-spec.tps"
     }
 
+    #[instrument(skip_all, name = "topos_spec_render")]
     async fn render(
         &self,
         db: &dyn HomerStore,

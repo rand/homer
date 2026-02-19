@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::llm::cache::{compute_input_hash, get_cached, has_quality_doc_comment, store_cached};
@@ -40,6 +40,7 @@ impl Analyzer for SemanticAnalyzer {
         "semantic"
     }
 
+    #[instrument(skip_all, name = "semantic_analyze")]
     async fn analyze(
         &self,
         store: &dyn HomerStore,

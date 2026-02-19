@@ -12,7 +12,7 @@ use std::time::Instant;
 use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::HomerConfig;
 use crate::error::{ExtractError, HomerError};
@@ -75,6 +75,7 @@ impl Extractor for GitLabExtractor {
         "gitlab"
     }
 
+    #[instrument(skip_all, name = "gitlab_extract")]
     async fn extract(
         &self,
         store: &dyn HomerStore,

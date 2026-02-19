@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
 
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
@@ -30,6 +30,7 @@ impl Renderer for ModuleContextRenderer {
         ".context.md"
     }
 
+    #[instrument(skip_all, name = "module_context_render")]
     async fn render(
         &self,
         _store: &dyn HomerStore,
