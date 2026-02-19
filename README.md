@@ -40,6 +40,9 @@ Homer creates a `.homer/` directory containing a SQLite database and configurati
 | **AGENTS.md** | `AGENTS.md` | AI coding agents (Claude Code, Cursor, etc.) |
 | **Module Context** | `*/.context.md` | AI agents (scoped per directory) |
 | **Risk Map** | `homer-risk.json` | AI agents, CI pipelines |
+| **Skills** | `.claude/skills/*.md` | Claude Code skill system |
+| **Topos Spec** | `spec/*.toml` | Formal specification consumers |
+| **Report** | `homer-report.html` | Humans (HTML or Markdown) |
 | **Graph Metrics** | In database | `homer query`, `homer graph`, MCP server |
 
 ## Commands
@@ -52,9 +55,12 @@ Homer creates a `.homer/` directory containing a SQLite database and configurati
 | `homer query <entity>` | Query metrics for a file, function, or module |
 | `homer graph` | Explore graph analysis (PageRank, betweenness, communities) |
 | `homer diff <ref1> <ref2>` | Compare architectural state between two git refs |
+| `homer render [path]` | Run specific renderers (or `--all`) to regenerate artifacts |
+| `homer snapshot <action>` | Create, list, or delete graph snapshots |
+| `homer risk-check [path]` | CI gate: fail if any file exceeds a risk threshold |
 | `homer serve` | Start MCP server for AI agent integration |
 
-See [docs/getting-started.md](docs/getting-started.md) for detailed usage.
+See [docs/cli-reference.md](docs/cli-reference.md) for the full CLI reference or [docs/getting-started.md](docs/getting-started.md) for a walkthrough.
 
 ## How It Works
 
@@ -63,9 +69,9 @@ Homer combines four disciplines:
 1. **Behavioral analysis** — Mining git history for change frequency, churn velocity, co-change patterns, contributor concentration (bus factor)
 2. **Structural graph analysis** — Call graphs, import graphs, centrality metrics (PageRank, betweenness, HITS), community detection (Louvain)
 3. **Composite salience** — Combining behavioral and structural signals into a single score that identifies the most important code, including stable high-centrality nodes that behavioral analysis alone would miss
-4. **Tree-sitter extraction** — Heuristic parsing of function definitions, call sites, imports, and doc comments for Rust, Python, TypeScript, JavaScript, Go, and Java
+4. **Tree-sitter extraction** — Scope-graph-based parsing of function definitions, call sites, imports, and doc comments for Rust, Python, TypeScript, JavaScript, Go, and Java
 
-The pipeline runs in three stages: **Extract** (git history, file structure, call/import graphs, documents) -> **Analyze** (behavioral metrics, centrality, community detection, composite salience) -> **Render** (AGENTS.md, context maps, risk map).
+The pipeline runs in four stages: **Extract** (git history, file structure, call/import graphs, documents, GitHub/GitLab PRs, prompts) -> **Auto Snapshots** (release-triggered and commit-count-triggered graph snapshots) -> **Analyze** (behavioral, centrality, community, temporal, convention, task pattern, semantic) -> **Render** (AGENTS.md, context maps, risk map, skills, topos-spec, report).
 
 See [docs/concepts.md](docs/concepts.md) for a deeper explanation.
 
@@ -84,7 +90,7 @@ max_commits = 2000  # 0 = unlimited
 languages = "auto"  # or ["rust", "python", "typescript"]
 
 [renderers]
-enabled = ["agents-md", "module-ctx", "risk-map"]
+enabled = ["agents-md", "module-ctx", "risk-map"]  # also: skills, topos-spec, report
 ```
 
 See [docs/configuration.md](docs/configuration.md) for the full reference.
@@ -93,12 +99,12 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 | Language | Extraction Tier |
 |----------|----------------|
-| Rust | Heuristic (tree-sitter) |
-| Python | Heuristic (tree-sitter) |
-| TypeScript | Heuristic (tree-sitter) |
-| JavaScript | Heuristic (tree-sitter) |
-| Go | Heuristic (tree-sitter) |
-| Java | Heuristic (tree-sitter) |
+| Rust | Precise (scope graph) |
+| Python | Precise (scope graph) |
+| TypeScript | Precise (scope graph) |
+| JavaScript | Precise (scope graph) |
+| Go | Precise (scope graph) |
+| Java | Precise (scope graph) |
 
 ## Architecture
 
@@ -132,8 +138,13 @@ cargo test --workspace
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation, first run, interpreting results |
+| [CLI Reference](docs/cli-reference.md) | All 10 commands with every flag and option |
 | [Concepts](docs/concepts.md) | How Homer works — pipeline, data model, algorithms |
 | [Configuration](docs/configuration.md) | Full `.homer/config.toml` reference |
+| [MCP Integration](docs/mcp-integration.md) | Using Homer's MCP server with AI tools |
+| [Cookbook](docs/cookbook.md) | Recipes for CI, PR review, onboarding, and more |
+| [Internals](docs/internals.md) | Architecture deep dive for contributors |
+| [Extending Homer](docs/extending.md) | Adding languages, analyzers, renderers |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
 | [Specification](homer-spec/README.md) | Full design specification (12 documents) |
 
