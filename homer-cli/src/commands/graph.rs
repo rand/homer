@@ -43,7 +43,7 @@ pub async fn run(args: GraphArgs) -> anyhow::Result<()> {
     let repo_path = std::fs::canonicalize(&args.path)
         .with_context(|| format!("Cannot resolve path: {}", args.path.display()))?;
 
-    let db_path = repo_path.join(".homer/homer.db");
+    let db_path = super::resolve_db_path(&repo_path);
     if !db_path.exists() {
         anyhow::bail!(
             "Homer is not initialized in {}. Run `homer init` first.",

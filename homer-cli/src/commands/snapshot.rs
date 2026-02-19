@@ -44,7 +44,7 @@ pub async fn run(args: SnapshotArgs) -> anyhow::Result<()> {
         );
     }
 
-    let db_path = homer_dir.join("homer.db");
+    let db_path = super::resolve_db_path(&repo_path);
     let store = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 

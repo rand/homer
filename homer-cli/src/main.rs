@@ -29,11 +29,10 @@ struct Cli {
 ///   2  — configuration error
 ///   3  — repository not found / not initialized
 ///   4  — database error
-///   5  — extraction failed
-///   6  — analysis failed
+///   5  — GitHub/forge API error (auth, rate limit)
+///   6  — LLM API error
 ///   7  — render failed
 ///   8  — MCP server error
-///   9  — interrupted (SIGINT)
 ///   10 — partial success (some stages had non-fatal errors)
 fn classify_exit_code(err: &anyhow::Error) -> i32 {
     let msg = format!("{err:#}");
@@ -48,10 +47,14 @@ fn classify_exit_code(err: &anyhow::Error) -> i32 {
         || lower.contains("cannot open database")
     {
         4 // database error
-    } else if lower.contains("extraction failed") {
-        5 // extraction failed
-    } else if lower.contains("analysis failed") {
-        6 // analysis failed
+    } else if lower.contains("github api")
+        || lower.contains("gitlab api")
+        || lower.contains("rate limit")
+        || lower.contains("api auth")
+    {
+        5 // forge API error
+    } else if lower.contains("llm") || lower.contains("api_key") || lower.contains("llm api") {
+        6 // LLM API error
     } else if lower.contains("rendering failed") || lower.contains("render") {
         7 // render failed
     } else if lower.contains("mcp") {
@@ -127,6 +130,18 @@ mod tests {
     fn exit_code_database() {
         let err = anyhow::anyhow!("Cannot open database: /foo/.homer/homer.db");
         assert_eq!(classify_exit_code(&err), 4);
+    }
+
+    #[test]
+    fn exit_code_github_api() {
+        let err = anyhow::anyhow!("GitHub API error: rate limit exceeded");
+        assert_eq!(classify_exit_code(&err), 5);
+    }
+
+    #[test]
+    fn exit_code_llm_api() {
+        let err = anyhow::anyhow!("LLM provider error: api_key not set");
+        assert_eq!(classify_exit_code(&err), 6);
     }
 
     #[test]

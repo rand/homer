@@ -9,7 +9,7 @@ pub mod snapshot;
 pub mod status;
 pub mod update;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use homer_core::config::HomerConfig;
@@ -44,6 +44,15 @@ pub fn load_config(repo_path: &Path) -> Option<HomerConfig> {
     let config_path = repo_path.join(".homer/config.toml");
     let content = std::fs::read_to_string(&config_path).ok()?;
     toml::from_str(&content).ok()
+}
+
+/// Resolve the database path using (in priority order):
+/// 1. `HOMER_DB_PATH` environment variable
+/// 2. Default: `<repo_path>/.homer/homer.db`
+pub fn resolve_db_path(repo_path: &Path) -> PathBuf {
+    std::env::var("HOMER_DB_PATH")
+        .ok()
+        .map_or_else(|| repo_path.join(".homer/homer.db"), PathBuf::from)
 }
 
 pub async fn run(cmd: Command) -> anyhow::Result<()> {

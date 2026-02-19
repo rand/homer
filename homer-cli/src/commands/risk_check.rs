@@ -46,7 +46,7 @@ pub async fn run(args: RiskCheckArgs) -> anyhow::Result<()> {
     let _config: HomerConfig = toml::from_str(&config_str)
         .with_context(|| format!("Cannot parse config: {}", config_path.display()))?;
 
-    let db_path = homer_dir.join("homer.db");
+    let db_path = super::resolve_db_path(&repo_path);
     let db = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 

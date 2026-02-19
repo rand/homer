@@ -31,9 +31,13 @@ pub struct InitArgs {
     #[arg(long)]
     pub languages: Option<String>,
 
-    /// Custom database location
+    /// Custom database location (overrides `HOMER_DB_PATH`)
     #[arg(long)]
     pub db_path: Option<PathBuf>,
+
+    /// Config file path [default: .homer/config.toml]
+    #[arg(long)]
+    pub config: Option<PathBuf>,
 }
 
 pub async fn run(args: InitArgs) -> anyhow::Result<()> {
@@ -41,7 +45,7 @@ pub async fn run(args: InitArgs) -> anyhow::Result<()> {
         .with_context(|| format!("Cannot resolve path: {}", args.path.display()))?;
 
     let homer_dir = repo_path.join(".homer");
-    let config_path = homer_dir.join("config.toml");
+    let config_path = args.config.unwrap_or_else(|| homer_dir.join("config.toml"));
 
     // Check if already initialized
     if homer_dir.exists() && config_path.exists() {
@@ -78,8 +82,10 @@ pub async fn run(args: InitArgs) -> anyhow::Result<()> {
 
     info!(config_path = %config_path.display(), "Wrote config.toml");
 
-    // Open database
-    let db_path = args.db_path.unwrap_or_else(|| homer_dir.join("homer.db"));
+    // Open database (CLI flag > HOMER_DB_PATH > default)
+    let db_path = args
+        .db_path
+        .unwrap_or_else(|| super::resolve_db_path(&repo_path));
     let store = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 
