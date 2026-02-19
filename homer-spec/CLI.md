@@ -39,12 +39,12 @@ Options:
 
 **Depth levels**:
 
-| Level | Git History | GitHub | Graph Extraction | Behavioral | Centrality | Semantic (LLM) |
-|-------|-----------|--------|-----------------|-----------|-----------|----------------|
-| `shallow` | Last 500 commits | No | Heuristic only | Yes | Yes | No |
-| `standard` | Last 2000 commits | Yes (last 200 PRs) | Precise where available | Yes | Yes | Top 50 entities |
-| `deep` | All commits | Yes (last 500 PRs) | Precise where available | Yes | Yes | Top 200 entities |
-| `full` | All commits | Yes (all PRs/issues) | Precise where available | Yes | Yes | All high-salience |
+| Level | Git History | Forge (GitHub/GitLab) | Graph Extraction | Behavioral | Centrality | Semantic (LLM) |
+|-------|-----------|----------------------|-----------------|-----------|-----------|----------------|
+| `shallow` | Last 500 commits | Skipped (no API calls) | Heuristic only | Yes | Yes | No |
+| `standard` | Last 2000 commits | Last 200 PRs/MRs, 500 issues | Precise where available | Yes | Yes | Top 50 entities |
+| `deep` | All commits | Last 500 PRs/MRs, 1000 issues | Precise where available | Yes | Yes | Top 200 entities |
+| `full` | All commits | All PRs/MRs/issues | Precise where available | Yes | Yes | All high-salience |
 
 ### `homer update`
 
@@ -219,6 +219,51 @@ Subcommands:
   delete <LABEL>   Delete a snapshot
 ```
 
+### `homer risk-check`
+
+CI-friendly risk gate — exits non-zero if any file exceeds a risk threshold.
+
+```
+homer risk-check [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  Path to git repository (default: current directory)
+
+Options:
+  --threshold <SCORE>    Risk score threshold (0.0-1.0) — fail if any file exceeds this [default: 0.7]
+  --filter <GLOB>        Only check files matching this glob pattern
+  --format <FORMAT>      Output format: text, json [default: text]
+```
+
+**Risk score formula** (0.0–1.0):
+
+| Component | Weight | Scoring |
+|-----------|--------|---------|
+| Composite salience | 40% | Raw salience score (0.0–1.0) |
+| Bus factor | 30% | 1 contributor → 0.3, 2 → 0.15, 3+ → 0.0 |
+| Change frequency | 30% | >20 changes → 0.3, >10 → 0.2, >5 → 0.1, ≤5 → 0.0 |
+
+**Exit codes**: 0 if all files pass, 1 if any file exceeds threshold.
+
+**Example output** (text format):
+```
+Risk check FAIL — 2 files exceed threshold 0.7:
+
+  src/store/sqlite.rs: risk=0.85, salience=0.92, bus_factor=1, changes=18
+  src/pipeline.rs: risk=0.72, salience=0.87, bus_factor=2, changes=22
+```
+
+**Example output** (json format):
+```json
+{
+  "threshold": 0.7,
+  "violations": 2,
+  "results": [
+    { "file": "src/store/sqlite.rs", "risk_score": 0.85, "salience": 0.92, "bus_factor": 1, "change_frequency": 18 }
+  ]
+}
+```
+
 ### `homer status`
 
 Show current state of Homer's knowledge base.
@@ -369,12 +414,20 @@ cost_budget = 0.0
 [extraction]
 # Git history
 max_commits = 2000           # 0 = unlimited
-# GitHub
-github_token_env = "GITHUB_TOKEN"
-max_pr_history = 200
-max_issue_history = 500
-include_comments = true
-include_reviews = true
+
+[extraction.github]
+token_env = "GITHUB_TOKEN"         # Environment variable for auth token
+max_pr_history = 500               # Max PRs to fetch on initial run (0 = unlimited)
+max_issue_history = 1000           # Max issues to fetch on initial run (0 = unlimited)
+include_comments = true            # Fetch PR/issue comments
+include_reviews = true             # Fetch PR reviews
+
+[extraction.gitlab]
+token_env = "GITLAB_TOKEN"         # Environment variable for auth token
+max_mr_history = 500               # Max MRs to fetch on initial run (0 = unlimited)
+max_issue_history = 1000           # Max issues to fetch on initial run (0 = unlimited)
+include_comments = true            # Fetch MR/issue comments
+include_reviews = true             # Fetch MR approvals
 
 [extraction.structure]
 include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.go", "**/*.java"]
@@ -460,4 +513,6 @@ transport = "stdio"
 | 4 | Database error (corrupted, incompatible version) |
 | 5 | GitHub API error (auth, rate limit) |
 | 6 | LLM API error |
-| 10 | Partial success (some files failed, results are incomplete) |
+| 7 | Render failed (artifact generation error) |
+| 8 | MCP server error (startup, transport) |
+| 10 | Partial success (some stages had non-fatal errors) |
