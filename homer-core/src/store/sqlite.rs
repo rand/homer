@@ -1840,7 +1840,7 @@ mod proptests {
                 let result = AnalysisResult {
                     id: AnalysisResultId(0),
                     node_id,
-                    kind: kind.clone(),
+                    kind,
                     data: serde_json::json!({"score": score}),
                     input_hash,
                     computed_at: Utc::now(),
@@ -1848,7 +1848,7 @@ mod proptests {
 
                 store.store_analysis(&result).await.unwrap();
 
-                let results = store.get_analyses_by_kind(kind.clone()).await.unwrap();
+                let results = store.get_analyses_by_kind(kind).await.unwrap();
                 prop_assert_eq!(results.len(), 1);
                 let r = &results[0];
                 prop_assert_eq!(r.node_id, node_id);
