@@ -64,6 +64,22 @@ impl Analyzer for CentralityAnalyzer {
         "centrality"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::PageRank,
+            AnalysisKind::BetweennessCentrality,
+            AnalysisKind::HITSScore,
+            AnalysisKind::CompositeSalience,
+        ]
+    }
+
+    fn requires(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::ChangeFrequency,
+            AnalysisKind::ContributorConcentration,
+        ]
+    }
+
     #[instrument(skip_all, name = "centrality_analyze")]
     async fn analyze(
         &self,

@@ -23,6 +23,12 @@ pub trait Extractor {
     /// Human-readable name for this extractor (e.g. "git", "structure").
     fn name(&self) -> &'static str;
 
+    /// Check if this extractor has new data to process since the last run.
+    /// Default: always returns `true` (conservative).
+    async fn has_work(&self, _store: &dyn HomerStore) -> crate::error::Result<bool> {
+        Ok(true)
+    }
+
     /// Run extraction, populating the store with nodes and edges.
     async fn extract(
         &self,

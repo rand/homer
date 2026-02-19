@@ -40,6 +40,16 @@ impl Analyzer for ConventionAnalyzer {
         "convention"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::NamingPattern,
+            AnalysisKind::ErrorHandlingPattern,
+            AnalysisKind::TestingPattern,
+            AnalysisKind::DocumentationStylePattern,
+            AnalysisKind::AgentRuleValidation,
+        ]
+    }
+
     #[instrument(skip_all, name = "convention_analyze")]
     async fn analyze(
         &self,

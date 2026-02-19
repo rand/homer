@@ -31,6 +31,16 @@ impl Analyzer for BehavioralAnalyzer {
         "behavioral"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::ChangeFrequency,
+            AnalysisKind::ChurnVelocity,
+            AnalysisKind::ContributorConcentration,
+            AnalysisKind::DocumentationCoverage,
+            AnalysisKind::DocumentationFreshness,
+        ]
+    }
+
     #[instrument(skip_all, name = "behavioral_analyze")]
     async fn analyze(
         &self,

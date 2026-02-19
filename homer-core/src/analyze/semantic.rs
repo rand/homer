@@ -40,6 +40,21 @@ impl Analyzer for SemanticAnalyzer {
         "semantic"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::SemanticSummary,
+            AnalysisKind::InvariantDescription,
+        ]
+    }
+
+    fn requires(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::CompositeSalience,
+            AnalysisKind::PageRank,
+            AnalysisKind::BetweennessCentrality,
+        ]
+    }
+
     #[instrument(skip_all, name = "semantic_analyze")]
     async fn analyze(
         &self,

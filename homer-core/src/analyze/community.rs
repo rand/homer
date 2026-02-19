@@ -517,6 +517,17 @@ impl Analyzer for CommunityAnalyzer {
         "community"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::CommunityAssignment,
+            AnalysisKind::StabilityClassification,
+        ]
+    }
+
+    fn requires(&self) -> &'static [AnalysisKind] {
+        &[AnalysisKind::CompositeSalience]
+    }
+
     #[instrument(skip_all, name = "community_analyze")]
     async fn analyze(
         &self,

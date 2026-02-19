@@ -24,6 +24,15 @@ impl Analyzer for TaskPatternAnalyzer {
         "task_pattern"
     }
 
+    fn produces(&self) -> &'static [AnalysisKind] {
+        &[
+            AnalysisKind::TaskPattern,
+            AnalysisKind::CorrectionHotspot,
+            AnalysisKind::PromptHotspot,
+            AnalysisKind::DomainVocabulary,
+        ]
+    }
+
     #[instrument(skip_all, name = "task_pattern_analyze")]
     async fn analyze(
         &self,
