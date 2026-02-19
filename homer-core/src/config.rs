@@ -311,14 +311,133 @@ impl<'de> Deserialize<'de> for LanguageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderersSection {
     pub enabled: Vec<String>,
+    #[serde(default, rename = "agents-md")]
+    pub agents_md: AgentsMdConfig,
+    #[serde(default, rename = "module-ctx")]
+    pub module_ctx: ModuleContextConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    #[serde(default, rename = "topos-spec")]
+    pub topos_spec: ToposSpecConfig,
+    #[serde(default)]
+    pub report: ReportConfig,
+    #[serde(default, rename = "risk-map")]
+    pub risk_map: RiskMapConfig,
 }
 
 impl Default for RenderersSection {
     fn default() -> Self {
         Self {
             enabled: vec!["agents-md".into(), "module-ctx".into(), "risk-map".into()],
+            agents_md: AgentsMdConfig::default(),
+            module_ctx: ModuleContextConfig::default(),
+            skills: SkillsConfig::default(),
+            topos_spec: ToposSpecConfig::default(),
+            report: ReportConfig::default(),
+            risk_map: RiskMapConfig::default(),
         }
     }
+}
+
+/// Per-renderer config for `agents-md`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentsMdConfig {
+    /// Max entries in the Load-Bearing Code table.
+    pub max_load_bearing: u32,
+    /// Max entries in the Change Patterns tables.
+    pub max_change_patterns: u32,
+    /// Max entries in the Key Design Decisions list.
+    pub max_design_decisions: u32,
+    /// How to handle existing AGENTS.md: `auto`, `diff`, `merge`, `overwrite`.
+    pub circularity_mode: String,
+}
+
+impl Default for AgentsMdConfig {
+    fn default() -> Self {
+        Self {
+            max_load_bearing: 20,
+            max_change_patterns: 10,
+            max_design_decisions: 10,
+            circularity_mode: "auto".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `module-ctx`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModuleContextConfig {
+    /// Filename for per-directory context files.
+    pub filename: String,
+    /// Whether to generate one file per directory.
+    pub per_directory: bool,
+}
+
+impl Default for ModuleContextConfig {
+    fn default() -> Self {
+        Self {
+            filename: ".context.md".to_string(),
+            per_directory: true,
+        }
+    }
+}
+
+/// Per-renderer config for `skills`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkillsConfig {
+    /// Output directory for skill files (relative to repo root).
+    pub output_dir: String,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            output_dir: ".claude/skills/".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `topos-spec`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToposSpecConfig {
+    /// Output directory for spec files (relative to repo root).
+    pub output_dir: String,
+    /// Spec format: `topos`.
+    pub format: String,
+}
+
+impl Default for ToposSpecConfig {
+    fn default() -> Self {
+        Self {
+            output_dir: "spec/".to_string(),
+            format: "topos".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `report`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReportConfig {
+    /// Report format: `html` or `markdown`.
+    pub format: String,
+}
+
+impl Default for ReportConfig {
+    fn default() -> Self {
+        Self {
+            format: "html".to_string(),
+        }
+    }
+}
+
+/// Per-renderer config for `risk-map`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RiskMapConfig {
+    _placeholder: (),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,5 +467,85 @@ impl Default for LlmSection {
             cost_budget: 0.0,
             enabled: false, // opt-in by default
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_config_defaults() {
+        let config = RenderersSection::default();
+        assert_eq!(config.agents_md.max_load_bearing, 20);
+        assert_eq!(config.agents_md.max_change_patterns, 10);
+        assert_eq!(config.agents_md.max_design_decisions, 10);
+        assert_eq!(config.agents_md.circularity_mode, "auto");
+        assert_eq!(config.module_ctx.filename, ".context.md");
+        assert!(config.module_ctx.per_directory);
+        assert_eq!(config.skills.output_dir, ".claude/skills/");
+        assert_eq!(config.topos_spec.output_dir, "spec/");
+        assert_eq!(config.topos_spec.format, "topos");
+        assert_eq!(config.report.format, "html");
+    }
+
+    #[test]
+    fn renderer_config_from_toml() {
+        let toml_str = r#"
+[renderers]
+enabled = ["agents-md", "risk-map"]
+
+[renderers.agents-md]
+max_load_bearing = 30
+max_change_patterns = 5
+max_design_decisions = 15
+circularity_mode = "overwrite"
+
+[renderers.module-ctx]
+filename = ".module.md"
+per_directory = false
+
+[renderers.skills]
+output_dir = "skills/"
+
+[renderers.topos-spec]
+output_dir = "docs/spec/"
+format = "topos"
+
+[renderers.report]
+format = "markdown"
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.renderers.enabled,
+            vec!["agents-md".to_string(), "risk-map".to_string()]
+        );
+        assert_eq!(config.renderers.agents_md.max_load_bearing, 30);
+        assert_eq!(config.renderers.agents_md.max_change_patterns, 5);
+        assert_eq!(config.renderers.agents_md.max_design_decisions, 15);
+        assert_eq!(config.renderers.agents_md.circularity_mode, "overwrite");
+        assert_eq!(config.renderers.module_ctx.filename, ".module.md");
+        assert!(!config.renderers.module_ctx.per_directory);
+        assert_eq!(config.renderers.skills.output_dir, "skills/");
+        assert_eq!(config.renderers.topos_spec.output_dir, "docs/spec/");
+        assert_eq!(config.renderers.report.format, "markdown");
+    }
+
+    #[test]
+    fn renderer_config_partial_toml_uses_defaults() {
+        let toml_str = r#"
+[renderers]
+enabled = ["agents-md"]
+
+[renderers.agents-md]
+max_load_bearing = 50
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.renderers.agents_md.max_load_bearing, 50);
+        // Unspecified fields get defaults
+        assert_eq!(config.renderers.agents_md.max_change_patterns, 10);
+        assert_eq!(config.renderers.agents_md.circularity_mode, "auto");
+        assert_eq!(config.renderers.module_ctx.filename, ".context.md");
+        assert!(config.renderers.module_ctx.per_directory);
     }
 }

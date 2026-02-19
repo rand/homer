@@ -28,9 +28,10 @@ impl Renderer for AgentsMdRenderer {
     async fn render(
         &self,
         store: &dyn HomerStore,
-        _config: &HomerConfig,
+        config: &HomerConfig,
     ) -> crate::error::Result<String> {
         let mut out = String::with_capacity(4096);
+        let rc = &config.renderers.agents_md;
 
         writeln!(out, "# AGENTS.md").unwrap();
         writeln!(out).unwrap();
@@ -54,10 +55,10 @@ impl Renderer for AgentsMdRenderer {
         render_key_documents(&mut out, store).await?;
 
         // Change Patterns
-        render_change_patterns(&mut out, store).await?;
+        render_change_patterns(&mut out, store, rc.max_change_patterns).await?;
 
         // Load-Bearing Code (top entities by composite salience)
-        render_load_bearing_code(&mut out, store).await?;
+        render_load_bearing_code(&mut out, store, rc.max_load_bearing).await?;
 
         // Danger Zones
         render_danger_zones(&mut out, store).await?;
@@ -75,7 +76,7 @@ impl Renderer for AgentsMdRenderer {
         render_domain_vocabulary(&mut out, store).await?;
 
         // Key Design Decisions (from high-impact PRs and ADR documents)
-        render_key_design_decisions(&mut out, store).await?;
+        render_key_design_decisions(&mut out, store, rc.max_design_decisions).await?;
 
         info!(bytes = out.len(), "AGENTS.md rendered");
         Ok(out)
@@ -435,6 +436,7 @@ async fn render_module_map(out: &mut String, store: &dyn HomerStore) -> crate::e
 async fn render_change_patterns(
     out: &mut String,
     store: &dyn HomerStore,
+    max_entries: u32,
 ) -> crate::error::Result<()> {
     writeln!(out, "## Change Patterns").unwrap();
     writeln!(out).unwrap();
@@ -473,7 +475,7 @@ async fn render_change_patterns(
     writeln!(out, "| File | Changes |").unwrap();
     writeln!(out, "|------|--------:|").unwrap();
 
-    for (name, total) in named_freqs.iter().take(10) {
+    for (name, total) in named_freqs.iter().take(max_entries as usize) {
         writeln!(out, "| `{name}` | {total} |").unwrap();
     }
     writeln!(out).unwrap();
@@ -522,6 +524,7 @@ async fn render_change_patterns(
 async fn render_load_bearing_code(
     out: &mut String,
     store: &dyn HomerStore,
+    max_entries: u32,
 ) -> crate::error::Result<()> {
     writeln!(out, "## Load-Bearing Code").unwrap();
     writeln!(out).unwrap();
@@ -563,8 +566,7 @@ async fn render_load_bearing_code(
 
     entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Show top 20
-    let top_n = entries.iter().take(20);
+    let top_n = entries.iter().take(max_entries as usize);
 
     writeln!(out, "| Entity | Salience | Classification |").unwrap();
     writeln!(out, "|--------|----------|----------------|").unwrap();
@@ -1196,6 +1198,7 @@ async fn render_domain_vocabulary(
 async fn render_key_design_decisions(
     out: &mut String,
     store: &dyn HomerStore,
+    max_entries: u32,
 ) -> crate::error::Result<()> {
     // Look for ADR documents or high-impact PRs
     let doc_filter = crate::types::NodeFilter {
@@ -1225,7 +1228,8 @@ async fn render_key_design_decisions(
     writeln!(out).unwrap();
 
     // Show ADR documents
-    for adr in adrs.iter().take(10) {
+    let limit = max_entries as usize;
+    for adr in adrs.iter().take(limit) {
         let status = adr
             .metadata
             .get("status")
@@ -1235,7 +1239,7 @@ async fn render_key_design_decisions(
     }
 
     // Show extracted design rationale
-    for result in rationale_results.iter().take(10) {
+    for result in rationale_results.iter().take(limit) {
         let rationale = result
             .data
             .get("rationale")

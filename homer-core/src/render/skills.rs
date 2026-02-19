@@ -54,7 +54,7 @@ impl Renderer for SkillsRenderer {
             return Ok(());
         }
 
-        let skills_dir = repo_root.join(".claude/skills");
+        let skills_dir = repo_root.join(&config.renderers.skills.output_dir);
         std::fs::create_dir_all(&skills_dir)
             .map_err(|e| crate::error::HomerError::Extract(crate::error::ExtractError::Io(e)))?;
 

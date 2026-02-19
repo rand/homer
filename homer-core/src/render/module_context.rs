@@ -387,7 +387,7 @@ async fn load_dir_entities(
 
 async fn render_all_module_contexts(
     db: &dyn HomerStore,
-    _config: &HomerConfig,
+    config: &HomerConfig,
     repo_root: &Path,
 ) -> crate::error::Result<u32> {
     let modules = db
@@ -402,6 +402,7 @@ async fn render_all_module_contexts(
     }
 
     let data = load_module_data(db).await?;
+    let filename = &config.renderers.module_ctx.filename;
     let mut count = 0u32;
 
     for module in &modules {
@@ -415,7 +416,7 @@ async fn render_all_module_contexts(
 
         let content = render_single_module(dir, &data);
 
-        let output_path = repo_root.join(dir).join(".context.md");
+        let output_path = repo_root.join(dir).join(filename);
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 crate::error::HomerError::Extract(crate::error::ExtractError::Io(e))
