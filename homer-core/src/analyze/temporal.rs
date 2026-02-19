@@ -36,6 +36,7 @@ impl Analyzer for TemporalAnalyzer {
         &[
             AnalysisKind::CentralityTrend,
             AnalysisKind::ArchitecturalDrift,
+            AnalysisKind::StabilityClassification,
         ]
     }
 
@@ -43,7 +44,6 @@ impl Analyzer for TemporalAnalyzer {
         &[
             AnalysisKind::CompositeSalience,
             AnalysisKind::CommunityAssignment,
-            AnalysisKind::StabilityClassification,
         ]
     }
 

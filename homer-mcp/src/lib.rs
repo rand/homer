@@ -287,8 +287,9 @@ impl HomerMcpServer {
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let mut entries = Vec::new();
-        for (node_id, val, data) in scored.iter().take(top_n) {
+        // Resolve names and apply scope filter BEFORE top-N truncation.
+        let mut named: Vec<(String, f64, &serde_json::Value)> = Vec::new();
+        for (node_id, val, data) in &scored {
             let name = self
                 .store
                 .get_node(*node_id)
@@ -297,19 +298,26 @@ impl HomerMcpServer {
                 .flatten()
                 .map_or_else(|| format!("node:{}", node_id.0), |n| n.name);
 
-            // Filter by scope prefix if provided
             if let Some(ref scope) = params.scope {
                 if !name.starts_with(scope.as_str()) {
                     continue;
                 }
             }
 
-            entries.push(serde_json::json!({
-                "name": name,
-                "score": val,
-                "data": data,
-            }));
+            named.push((name, *val, *data));
         }
+
+        let entries: Vec<_> = named
+            .iter()
+            .take(top_n)
+            .map(|(name, val, data)| {
+                serde_json::json!({
+                    "name": name,
+                    "score": val,
+                    "data": data,
+                })
+            })
+            .collect();
 
         serde_json::to_string_pretty(&serde_json::json!({
             "metric": metric,
