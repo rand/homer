@@ -5,9 +5,10 @@
     clippy::cast_sign_loss
 )]
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
 use reqwest::Client;
@@ -23,6 +24,11 @@ use crate::types::{
 
 use super::traits::{ExtractStats, Extractor};
 
+/// Maximum retry attempts for rate-limited requests.
+const MAX_RETRIES: u32 = 5;
+/// Pause and wait for reset when remaining drops below this threshold.
+const RATE_LIMIT_PAUSE_THRESHOLD: u32 = 5;
+
 /// GitHub REST API extractor.
 #[derive(Debug)]
 pub struct GitHubExtractor {
@@ -30,6 +36,10 @@ pub struct GitHubExtractor {
     repo: String,
     token: Option<String>,
     client: Client,
+    /// Remaining API calls before rate limit resets.
+    rate_remaining: Cell<u32>,
+    /// Unix timestamp when the rate limit window resets.
+    rate_reset: Cell<u64>,
 }
 
 impl GitHubExtractor {
@@ -44,6 +54,8 @@ impl GitHubExtractor {
             repo,
             token,
             client: Client::new(),
+            rate_remaining: Cell::new(u32::MAX),
+            rate_reset: Cell::new(0),
         })
     }
 
@@ -54,6 +66,8 @@ impl GitHubExtractor {
             repo,
             token,
             client: Client::new(),
+            rate_remaining: Cell::new(u32::MAX),
+            rate_reset: Cell::new(0),
         }
     }
 }
@@ -73,7 +87,13 @@ impl Extractor for GitHubExtractor {
         let mut stats = ExtractStats::default();
         let gh_config = &config.extraction.github;
 
-        info!(owner = %self.owner, repo = %self.repo, "GitHub extraction starting");
+        let estimated = estimate_api_calls(gh_config);
+        info!(
+            owner = %self.owner,
+            repo = %self.repo,
+            estimated_api_calls = estimated,
+            "GitHub extraction starting"
+        );
 
         // Get checkpoints for incremental updates
         let last_pr = store
@@ -520,49 +540,114 @@ impl GitHubExtractor {
 
     // ── HTTP Client ─────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_lines)]
     async fn api_get<T: serde::de::DeserializeOwned>(&self, path: &str) -> crate::error::Result<T> {
         let url = format!("https://api.github.com{path}");
 
-        let mut req = self
-            .client
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "homer-cli/0.1");
+        // Pre-check: if remaining is low, wait for reset
+        self.wait_for_rate_reset().await;
 
-        if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {token}"));
-        }
+        let mut delay = Duration::from_secs(1);
 
-        debug!(url = %url, "GitHub API request");
+        for attempt in 0..=MAX_RETRIES {
+            let mut req = self
+                .client
+                .get(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "homer-cli/0.1");
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| HomerError::Extract(ExtractError::Git(format!("GitHub API: {e}"))))?;
-
-        // Check rate limit headers
-        if let Some(remaining) = resp
-            .headers()
-            .get("x-ratelimit-remaining")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u32>().ok())
-        {
-            if remaining < 10 {
-                warn!(remaining, "GitHub API rate limit low");
+            if let Some(token) = &self.token {
+                req = req.header("Authorization", format!("Bearer {token}"));
             }
-        }
 
-        if !resp.status().is_success() {
+            debug!(url = %url, attempt, "GitHub API request");
+
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| HomerError::Extract(ExtractError::Git(format!("GitHub API: {e}"))))?;
+
+            self.update_rate_limit(&resp);
+
+            if resp.status().is_success() {
+                return resp.json().await.map_err(|e| {
+                    HomerError::Extract(ExtractError::Git(format!("Parse response: {e}")))
+                });
+            }
+
+            // Rate limited — retry with backoff
             let status = resp.status().as_u16();
+            if (status == 403 || status == 429) && attempt < MAX_RETRIES {
+                let wait = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map_or(delay, Duration::from_secs);
+                warn!(
+                    attempt,
+                    status,
+                    wait_secs = wait.as_secs(),
+                    "Rate limited, backing off"
+                );
+                tokio::time::sleep(wait).await;
+                delay = (delay * 2).min(Duration::from_secs(60));
+                continue;
+            }
+
             let body = resp.text().await.unwrap_or_default();
             return Err(HomerError::Extract(ExtractError::Git(format!(
                 "GitHub API {status}: {body}"
             ))));
         }
 
-        resp.json()
-            .await
-            .map_err(|e| HomerError::Extract(ExtractError::Git(format!("Parse response: {e}"))))
+        Err(HomerError::Extract(ExtractError::Git(format!(
+            "GitHub API: max retries exceeded for {url}"
+        ))))
+    }
+
+    /// Update rate limit state from response headers.
+    fn update_rate_limit(&self, resp: &reqwest::Response) {
+        if let Some(remaining) = resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u32>().ok())
+        {
+            self.rate_remaining.set(remaining);
+            if remaining < 10 {
+                warn!(remaining, "GitHub API rate limit low");
+            }
+        }
+        if let Some(reset) = resp
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            self.rate_reset.set(reset);
+        }
+    }
+
+    /// Sleep until the rate limit window resets if remaining is low.
+    async fn wait_for_rate_reset(&self) {
+        if self.rate_remaining.get() > RATE_LIMIT_PAUSE_THRESHOLD {
+            return;
+        }
+        let reset_at = self.rate_reset.get();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if reset_at > now {
+            let wait = reset_at - now + 1;
+            warn!(
+                remaining = self.rate_remaining.get(),
+                wait_secs = wait,
+                "Rate limit low, waiting for reset"
+            );
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+        }
     }
 }
 
@@ -692,6 +777,20 @@ fn extract_issue_number(text: &str) -> Option<u64> {
     num_str.parse().ok()
 }
 
+/// Estimate upper bound of API calls for a GitHub extraction run.
+fn estimate_api_calls(gh_config: &crate::config::GitHubExtractionConfig) -> u32 {
+    let pr_pages = gh_config.max_pr_history / 100 + 1;
+    let mut calls = pr_pages;
+    if gh_config.include_reviews {
+        calls += gh_config.max_pr_history;
+    }
+    if gh_config.include_comments {
+        calls += gh_config.max_pr_history;
+    }
+    calls += gh_config.max_issue_history / 100 + 1;
+    calls
+}
+
 /// Detect GitHub remote URL from a git repo.
 fn detect_github_remote(repo_path: &Path) -> Option<String> {
     let repo = gix::open(repo_path).ok()?;
@@ -796,6 +895,41 @@ mod tests {
         assert_eq!(extract_issue_number("#42"), Some(42));
         assert_eq!(extract_issue_number("  #100"), Some(100));
         assert_eq!(extract_issue_number("#abc"), None);
+    }
+
+    #[test]
+    fn estimate_api_calls_upper_bound() {
+        let config = crate::config::GitHubExtractionConfig {
+            max_pr_history: 100,
+            max_issue_history: 200,
+            include_reviews: true,
+            include_comments: true,
+            ..crate::config::GitHubExtractionConfig::default()
+        };
+        // PR pages (2) + reviews (100) + comments (100) + issue pages (3) = 205
+        let est = estimate_api_calls(&config);
+        assert_eq!(est, 205);
+    }
+
+    #[test]
+    fn estimate_api_calls_no_extras() {
+        let config = crate::config::GitHubExtractionConfig {
+            max_pr_history: 100,
+            max_issue_history: 200,
+            include_reviews: false,
+            include_comments: false,
+            ..crate::config::GitHubExtractionConfig::default()
+        };
+        // PR pages (2) + issue pages (3) = 5
+        let est = estimate_api_calls(&config);
+        assert_eq!(est, 5);
+    }
+
+    #[test]
+    fn rate_limit_fields_initialized() {
+        let ext = GitHubExtractor::new("owner".to_string(), "repo".to_string(), None);
+        assert_eq!(ext.rate_remaining.get(), u32::MAX);
+        assert_eq!(ext.rate_reset.get(), 0);
     }
 
     #[test]
