@@ -17,7 +17,7 @@ use tracing::info;
 
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
-use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
+use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeId, NodeKind};
 
 // ── Tool parameter types ──────────────────────────────────────────
 
@@ -191,6 +191,58 @@ impl ServerHandler for HomerMcpServer {
 // ── Tool logic (separated for testability) ────────────────────────
 
 impl HomerMcpServer {
+    /// Resolve call-graph edges for a node, returning (incoming callers, outgoing callees).
+    async fn resolve_call_edges(&self, id: NodeId) -> (Vec<String>, Vec<String>) {
+        let Ok(edges) = self.store.get_edges_involving(id).await else {
+            return (Vec::new(), Vec::new());
+        };
+        let mut incoming = Vec::new();
+        let mut outgoing = Vec::new();
+        for edge in &edges {
+            if edge.kind != HyperedgeKind::Calls {
+                continue;
+            }
+            for m in &edge.members {
+                if m.node_id == id {
+                    continue;
+                }
+                if let Ok(Some(n)) = self.store.get_node(m.node_id).await {
+                    if m.role == "caller" {
+                        incoming.push(n.name);
+                    } else if m.role == "callee" {
+                        outgoing.push(n.name);
+                    }
+                }
+            }
+        }
+        (incoming, outgoing)
+    }
+
+    /// Resolve names of nodes related via a specific edge kind.
+    async fn resolve_related_names(&self, id: NodeId, kind: HyperedgeKind) -> Vec<String> {
+        let Ok(edges) = self.store.get_edges_involving(id).await else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        for edge in &edges {
+            if edge.kind != kind {
+                continue;
+            }
+            for m in &edge.members {
+                if m.node_id == id {
+                    continue;
+                }
+                let name = if let Ok(Some(n)) = self.store.get_node(m.node_id).await {
+                    n.name
+                } else {
+                    format!("node:{}", m.node_id.0)
+                };
+                names.push(name);
+            }
+        }
+        names
+    }
+
     async fn do_query(&self, params: QueryParams) -> Result<String, String> {
         let kind = params.kind.as_deref().and_then(parse_node_kind);
         let filter = NodeFilter {
@@ -241,6 +293,23 @@ impl HomerMcpServer {
                 {
                     entry["change_frequency"] = freq.data;
                 }
+            }
+
+            if include.iter().any(|s| s == "callers" || s == "callees") {
+                let (incoming, outgoing) = self.resolve_call_edges(node.id).await;
+                if include.iter().any(|s| s == "callers") {
+                    entry["callers"] = serde_json::json!(incoming);
+                }
+                if include.iter().any(|s| s == "callees") {
+                    entry["callees"] = serde_json::json!(outgoing);
+                }
+            }
+
+            if include.iter().any(|s| s == "co_changes") {
+                entry["co_changes"] = serde_json::json!(
+                    self.resolve_related_names(node.id, HyperedgeKind::CoChanges)
+                        .await
+                );
             }
 
             results.push(entry);
