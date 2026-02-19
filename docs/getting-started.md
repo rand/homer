@@ -64,7 +64,7 @@ Homer initialized in /path/to/your-project
 
 ## Generated Artifacts
 
-After `homer init`, you'll find these new files:
+After `homer init`, you'll find these new files (depending on which renderers are enabled):
 
 ### AGENTS.md
 
@@ -85,6 +85,19 @@ Per-directory context files providing scoped information about each module. Thes
 ### homer-risk.json
 
 Machine-readable risk annotations in JSON format. Contains per-file risk factors (high salience + high churn, low bus factor, etc.) that CI pipelines or agent guardrails can consume.
+
+Three additional renderers are available but not enabled by default:
+
+- **Skills** (`.claude/skills/*.md`) — Claude Code skill files encoding domain knowledge
+- **Topos Spec** (`spec/*.toml`) — Formal topological specification of the codebase
+- **Report** (`homer-report.html`) — Human-readable HTML or Markdown analysis report
+
+Enable them in `.homer/config.toml`:
+
+```toml
+[renderers]
+enabled = ["agents-md", "module-ctx", "risk-map", "skills", "topos-spec", "report"]
+```
 
 ## Exploring Results
 
@@ -160,6 +173,45 @@ homer diff main feature-branch --format markdown
 
 Shows topology changes, high-salience files touched, bus factor risks, affected modules, and affected communities.
 
+### Render specific artifacts
+
+```bash
+# Re-render just AGENTS.md
+homer render --format agents-md
+
+# Render all 6 artifacts
+homer render --all
+
+# Dry run — see what would change without writing
+homer render --all --dry-run
+```
+
+### Manage snapshots
+
+```bash
+# Create a named snapshot of the current graph state
+homer snapshot create v1.0-baseline
+
+# List all snapshots
+homer snapshot list
+
+# Delete a snapshot
+homer snapshot delete v1.0-baseline
+```
+
+### Check risk for CI
+
+```bash
+# Fail if any file exceeds a risk threshold (for CI pipelines)
+homer risk-check --threshold 0.7
+
+# Check specific files
+homer risk-check --filter src/auth/
+
+# JSON output for programmatic consumption
+homer risk-check --format json
+```
+
 ## Incremental Updates
 
 After new commits, update Homer's database incrementally:
@@ -212,16 +264,16 @@ Control how deeply Homer analyzes your repository:
 ```bash
 homer init --depth shallow   # Fast: last 500 commits, no GitHub, no LLM
 homer init --depth standard  # Default: last 2000 commits
-homer init --depth deep      # Thorough: all commits
-homer init --depth full      # Maximum: all commits, all PRs, LLM enrichment
+homer init --depth deep      # Thorough: all commits, more GitHub data
+homer init --depth full      # Maximum: all commits, all PRs/issues, LLM enrichment
 ```
 
-| Level | Git History | Graph | Behavioral | Centrality |
-|-------|-----------|-------|-----------|-----------|
-| `shallow` | Last 500 commits | Heuristic | Yes | Yes |
-| `standard` | Last 2000 commits | Heuristic | Yes | Yes |
-| `deep` | All commits | Heuristic | Yes | Yes |
-| `full` | All commits | Heuristic | Yes | Yes |
+| Level | Git History | GitHub PRs | GitHub Issues | LLM Batch |
+|-------|-----------|------------|---------------|-----------|
+| `shallow` | Last 500 | Skip | Skip | 0 |
+| `standard` | Last 2000 | 200 | 500 | 50 |
+| `deep` | All | 500 | 1000 | 200 |
+| `full` | All | Unlimited | Unlimited | Config value |
 
 ## Verbosity
 
@@ -251,6 +303,9 @@ Add these to `.gitignore`:
 
 ## Next Steps
 
+- [CLI Reference](cli-reference.md) — Full reference for all 10 commands
 - [Concepts](concepts.md) — Understand how Homer's pipeline and algorithms work
 - [Configuration](configuration.md) — Customize extraction, analysis, and rendering
+- [MCP Integration](mcp-integration.md) — Connect Homer to AI tools via MCP
+- [Cookbook](cookbook.md) — Recipes for CI, PR review, onboarding, and more
 - [Troubleshooting](troubleshooting.md) — Common issues and solutions

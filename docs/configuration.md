@@ -4,11 +4,13 @@ Homer stores its configuration in `.homer/config.toml`, created during `homer in
 
 ## Sections
 
-- [analysis](#analysis) — Depth and LLM gating
-- [extraction](#extraction) — Git, structure, document, prompt extraction
-- [graph](#graph) — Language selection
-- [renderers](#renderers) — Output artifact control
+- [homer](#homer) — Version and database path
+- [analysis](#analysis) — Depth, LLM gating, invalidation policy
+- [extraction](#extraction) — Git, structure, document, prompt, GitHub, GitLab extraction
+- [graph](#graph) — Language selection and snapshot policy
+- [renderers](#renderers) — Output artifact control and per-renderer configuration
 - [llm](#llm) — LLM provider settings
+- [mcp](#mcp) — MCP server transport
 
 ## Full Default Configuration
 
@@ -20,6 +22,10 @@ version = "0.1.0"
 depth = "standard"
 llm_salience_threshold = 0.7
 max_llm_batch_size = 50
+
+[analysis.invalidation]
+global_centrality_on_topology_change = true
+conservative_semantic_invalidation = true
 
 [extraction]
 max_commits = 2000
@@ -50,6 +56,13 @@ redact_sensitive = true
 store_full_text = false
 hash_session_ids = true
 
+[extraction.github]
+token_env = "GITHUB_TOKEN"
+max_pr_history = 500
+max_issue_history = 1000
+include_comments = true
+include_reviews = true
+
 [extraction.gitlab]
 token_env = "GITLAB_TOKEN"
 max_mr_history = 500
@@ -60,8 +73,37 @@ include_reviews = true
 [graph]
 languages = "auto"
 
+[graph.snapshots]
+at_releases = true
+every_n_commits = 100
+
 [renderers]
 enabled = ["agents-md", "module-ctx", "risk-map"]
+
+[renderers.agents-md]
+output_path = "AGENTS.md"
+max_load_bearing = 20
+max_change_patterns = 10
+max_design_decisions = 10
+circularity_mode = "auto"
+
+[renderers.module-ctx]
+filename = ".context.md"
+per_directory = true
+
+[renderers.skills]
+output_dir = ".claude/skills/"
+
+[renderers.topos-spec]
+output_dir = "spec/"
+format = "topos"
+
+[renderers.report]
+output_path = "homer-report.html"
+format = "html"
+
+[renderers.risk-map]
+output_path = "homer-risk.json"
 
 [llm]
 provider = "anthropic"
@@ -70,7 +112,23 @@ api_key_env = "ANTHROPIC_API_KEY"
 max_concurrent = 5
 cost_budget = 0.0
 enabled = false
+
+[mcp]
+transport = "stdio"
+host = "127.0.0.1"
+port = 3000
 ```
+
+---
+
+## `[homer]`
+
+Top-level metadata.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `version` | string | `"0.1.0"` | Config schema version |
+| `db_path` | string | none | Custom database location (overrides default `.homer/homer.db`) |
 
 ---
 
@@ -86,14 +144,27 @@ Controls analysis behavior and depth.
 
 ### Depth Levels
 
-| Level | Git History | Description |
-|-------|-----------|-------------|
-| `shallow` | Last 500 commits | Fast analysis for large repos |
-| `standard` | Last 2000 commits | Good balance of speed and coverage |
-| `deep` | All commits | Full history analysis |
-| `full` | All commits | Everything including LLM enrichment |
+Each depth level overrides extraction and analysis limits:
+
+| Level | Git History | GitHub PRs | GitHub Issues | LLM Batch |
+|-------|-----------|------------|---------------|-----------|
+| `shallow` | Last 500 commits | 0 (skip) | 0 (skip) | 0 |
+| `standard` | Last 2000 commits | 200 | 500 | 50 |
+| `deep` | All commits | 500 | 1000 | 200 |
+| `full` | All commits | Unlimited | Unlimited | Config value |
 
 Set via config or CLI flag: `homer init --depth deep`.
+
+### `[analysis.invalidation]`
+
+Controls how analysis results are invalidated when the graph changes.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `global_centrality_on_topology_change` | bool | `true` | Any graph topology change invalidates all centrality scores (PageRank, betweenness, HITS, composite salience) |
+| `conservative_semantic_invalidation` | bool | `true` | Only invalidate semantic summaries when a node's own content hash changes, not when neighbors change |
+
+The defaults are conservative: centrality is globally recomputed on any topology change (correct, since PageRank is a global property), while LLM-derived summaries are only refreshed when the summarized code itself changes (saving API costs).
 
 ---
 
@@ -145,15 +216,29 @@ Controls AI agent interaction mining. **Disabled by default** for privacy.
 | `store_full_text` | bool | `false` | Store raw prompt text (default: metadata only) |
 | `hash_session_ids` | bool | `true` | Hash session identifiers for privacy |
 
+### `[extraction.github]`
+
+Controls GitHub API extraction (for GitHub-hosted repositories). Requires `GITHUB_TOKEN`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `token_env` | string | `"GITHUB_TOKEN"` | Environment variable holding the GitHub PAT |
+| `max_pr_history` | integer | `500` | Max pull requests to fetch (0 = unlimited) |
+| `max_issue_history` | integer | `1000` | Max issues to fetch (0 = unlimited) |
+| `include_comments` | bool | `true` | Include PR/issue comments as metadata |
+| `include_reviews` | bool | `true` | Include PR reviews and create Reviewed edges |
+
+GitHub extraction creates PullRequest and Issue nodes, along with Resolves edges (PR → issue) and Reviewed edges (contributor → PR).
+
 ### `[extraction.gitlab]`
 
-Controls GitLab API extraction (for GitLab-hosted repositories).
+Controls GitLab API extraction (for GitLab-hosted repositories). Requires `GITLAB_TOKEN`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `token_env` | string | `"GITLAB_TOKEN"` | Environment variable holding the GitLab PAT |
-| `max_mr_history` | integer | `500` | Max merge requests to fetch |
-| `max_issue_history` | integer | `1000` | Max issues to fetch |
+| `max_mr_history` | integer | `500` | Max merge requests to fetch (0 = unlimited) |
+| `max_issue_history` | integer | `1000` | Max issues to fetch (0 = unlimited) |
 | `include_comments` | bool | `true` | Include MR comments |
 | `include_reviews` | bool | `true` | Include approvals/reviews |
 
@@ -176,6 +261,23 @@ languages = ["rust", "python", "typescript"]
 
 Supported language identifiers: `rust`, `python`, `typescript`, `javascript`, `go`, `java`.
 
+### `[graph.snapshots]`
+
+Controls automatic graph snapshot creation. Snapshots capture the graph state at a point in time, enabling `homer snapshot diff` comparisons.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `at_releases` | bool | `true` | Create a snapshot at each tagged release |
+| `every_n_commits` | integer | `100` | Create a snapshot every N commits (0 = disabled) |
+
+Release snapshots use the release tag as their label (e.g., `v1.0.0`). Commit-count snapshots use `auto-N` labels (e.g., `auto-100`, `auto-200`).
+
+```toml
+[graph.snapshots]
+at_releases = true
+every_n_commits = 50  # Snapshot every 50 commits
+```
+
 ---
 
 ## `[renderers]`
@@ -193,13 +295,62 @@ Available renderers:
 | `agents-md` | `AGENTS.md` | Context file for AI coding agents |
 | `module-ctx` | `*/.context.md` | Per-directory context files |
 | `risk-map` | `homer-risk.json` | Machine-readable risk annotations |
+| `skills` | `.claude/skills/*.md` | Claude Code skill files |
+| `topos-spec` | `spec/*.toml` | Topological specification files |
+| `report` | `homer-report.html` | Human-readable analysis report |
 
-Disable specific renderers:
+Disable specific renderers or enable all 6:
 
 ```toml
 [renderers]
 enabled = ["agents-md"]  # Only generate AGENTS.md
+
+# Or enable everything:
+enabled = ["agents-md", "module-ctx", "risk-map", "skills", "topos-spec", "report"]
 ```
+
+### `[renderers.agents-md]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `output_path` | string | `"AGENTS.md"` | Output file path relative to repo root |
+| `max_load_bearing` | integer | `20` | Max entries in the Load-Bearing Code table |
+| `max_change_patterns` | integer | `10` | Max entries in the Change Patterns tables |
+| `max_design_decisions` | integer | `10` | Max entries in the Key Design Decisions list |
+| `circularity_mode` | string | `"auto"` | How to handle existing AGENTS.md: `auto`, `diff`, `merge`, `overwrite` |
+
+### `[renderers.module-ctx]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `filename` | string | `".context.md"` | Filename for per-directory context files |
+| `per_directory` | bool | `true` | Whether to generate one file per directory |
+
+### `[renderers.skills]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `output_dir` | string | `".claude/skills/"` | Output directory for skill files |
+
+### `[renderers.topos-spec]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `output_dir` | string | `"spec/"` | Output directory for spec files |
+| `format` | string | `"topos"` | Spec format |
+
+### `[renderers.report]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `output_path` | string | `"homer-report.html"` | Output file path |
+| `format` | string | `"html"` | Report format: `html` or `markdown` |
+
+### `[renderers.risk-map]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `output_path` | string | `"homer-risk.json"` | Output file path |
 
 ---
 
@@ -229,6 +380,27 @@ cost_budget = 5.0  # $5 max per run
 
 LLM enrichment is gated by salience — only entities above `analysis.llm_salience_threshold` are sent to the LLM. Entities with quality doc comments may skip LLM summarization entirely.
 
+The semantic analyzer produces three analysis kinds: `SemanticSummary`, `DesignRationale`, and `InvariantDescription`. It is automatically skipped at `shallow` depth or when `llm.enabled = false`.
+
+---
+
+## `[mcp]`
+
+Controls the MCP (Model Context Protocol) server, started via `homer serve`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `transport` | string | `"stdio"` | Transport type: `stdio` or `sse` |
+| `host` | string | `"127.0.0.1"` | Host for SSE transport |
+| `port` | integer | `3000` | Port for SSE transport |
+
+Currently only `stdio` transport is implemented. SSE support is planned.
+
+```toml
+[mcp]
+transport = "stdio"
+```
+
 ---
 
 ## CLI Overrides
@@ -239,11 +411,15 @@ Some configuration options can be overridden via CLI flags:
 |--------|----------|---------|
 | `analysis.depth` | `--depth <level>` | `homer init` |
 | `graph.languages` | `--languages <list>` | `homer init` |
+| `homer.db_path` | `--db-path <path>` | `homer init` |
 | n/a | `--no-github` | `homer init` |
 | n/a | `--no-llm` | `homer init` |
 | n/a | `--force` | `homer update` |
 | n/a | `--force-analysis` | `homer update` |
-| n/a | `--db-path <path>` | `homer init` |
+| n/a | `--force-semantic` | `homer update` |
+| `mcp.transport` | `--transport <type>` | `homer serve` |
+| `mcp.host` | `--host <addr>` | `homer serve` |
+| `mcp.port` | `--port <num>` | `homer serve` |
 
 ---
 
@@ -255,12 +431,14 @@ Some configuration options can be overridden via CLI flags:
 | `OPENAI_API_KEY` | API key for OpenAI LLM provider |
 | `GITHUB_TOKEN` | GitHub API token for PR/issue extraction |
 | `GITLAB_TOKEN` | GitLab API token for MR/issue extraction |
+| `HOMER_DB_PATH` | Override database location (lower priority than `--db-path`) |
 | `RUST_LOG` | Fine-grained logging control (e.g., `homer_core=debug`) |
 
 ---
 
 ## Next Steps
 
+- [CLI Reference](cli-reference.md) — Full command reference
 - [Getting Started](getting-started.md) — First run walkthrough
 - [Concepts](concepts.md) — How the pipeline works
 - [Troubleshooting](troubleshooting.md) — Common issues

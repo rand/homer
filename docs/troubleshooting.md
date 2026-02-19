@@ -79,7 +79,7 @@ homer init
 Error: Homer is not initialized in /path/to/repo. Run `homer init` first.
 ```
 
-Run `homer init` before using other commands. This error appears for `update`, `status`, `query`, `graph`, `diff`, and `serve`.
+Run `homer init` before using other commands. This error appears for `update`, `status`, `query`, `graph`, `diff`, `render`, `snapshot`, `risk-check`, and `serve`.
 
 ### Slow initialization on large repos
 
@@ -212,7 +212,7 @@ ps aux | grep homer
 ls -la .homer/homer.db*
 ```
 
-## Output Issues
+## Render Issues
 
 ### AGENTS.md is overwritten
 
@@ -222,8 +222,10 @@ Homer regenerates `AGENTS.md` on each run. To preserve human-curated sections, w
 <!-- homer:preserve -->
 ## My Custom Section
 This content will be preserved across Homer updates.
-<!-- homer:end-preserve -->
+<!-- /homer:preserve -->
 ```
+
+Note the closing tag is `<!-- /homer:preserve -->` (with a forward slash).
 
 ### .context.md files cluttering diffs
 
@@ -240,6 +242,125 @@ Or disable the renderer:
 enabled = ["agents-md", "risk-map"]  # Removed "module-ctx"
 ```
 
+### Render produces empty or minimal output
+
+If `homer render` produces near-empty files:
+
+1. Check that the database has analysis results: `homer status`
+2. If only nodes/edges exist but no analyses, run: `homer update --force-analysis`
+3. For specific renderers, ensure they're enabled in config or use `--format <name>`
+
+### Unknown renderer name
+
+```
+Error: Unknown renderer: my-renderer
+```
+
+Valid renderer names: `agents-md`, `module-ctx`, `risk-map`, `skills`, `topos-spec`, `report`.
+
+## Snapshot Issues
+
+### "Snapshot already exists"
+
+Snapshot labels must be unique. Use `homer snapshot list` to see existing labels, then choose a different name.
+
+### Snapshot diff shows no changes
+
+If two snapshots were created close together without new commits between them, the diff will be empty. Snapshots capture the graph state at a point in time — if the graph hasn't changed, neither has the snapshot.
+
+## Risk Check Issues
+
+### Risk check fails in CI
+
+`homer risk-check` exits with a non-zero code when files exceed the threshold. This is by design — it's a CI gate. To fix:
+
+1. Lower the threshold: `homer risk-check --threshold 0.9`
+2. Address the risk: improve bus factor (get more reviewers) or reduce change frequency
+3. Filter to specific paths: `homer risk-check --filter src/critical/`
+
+### All files show zero risk
+
+If no analysis data exists, risk scores default to zero. Ensure you've run the full pipeline:
+
+```bash
+homer update --force-analysis
+homer risk-check
+```
+
+## GitHub/GitLab API Issues
+
+### "GITHUB_TOKEN not set" or extraction skipped
+
+GitHub extraction requires a personal access token:
+
+```bash
+export GITHUB_TOKEN=ghp_your_token_here
+homer update --force
+```
+
+The token needs `repo` scope for private repositories, or just `public_repo` for public ones.
+
+### Rate limiting
+
+```
+Error: GitHub API rate limit exceeded
+```
+
+GitHub's API rate limit is 5,000 requests/hour with authentication. For large repos with many PRs:
+
+1. Reduce PR history: set `extraction.github.max_pr_history` in config
+2. Use `--depth shallow` to skip GitHub extraction entirely
+3. Wait for the rate limit to reset (check `X-RateLimit-Reset` header)
+
+### GitLab token permissions
+
+GitLab tokens need `read_api` scope. For private projects, you may also need `read_repository`.
+
+```bash
+export GITLAB_TOKEN=glpat-your_token_here
+homer update --force
+```
+
+## LLM Integration Issues
+
+### "Environment variable not set"
+
+```
+Skipping semantic analysis (LLM provider unavailable)
+```
+
+This is informational, not an error. Set the API key to enable LLM features:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### LLM costs higher than expected
+
+Check your `cost_budget` setting:
+
+```toml
+[llm]
+cost_budget = 2.0  # $2 max per run
+```
+
+Also check `analysis.llm_salience_threshold` — lowering it sends more entities to the LLM:
+
+```toml
+[analysis]
+llm_salience_threshold = 0.8  # Only the most important entities
+```
+
+### Refreshing stale LLM summaries
+
+After upgrading the LLM model or changing prompts:
+
+```bash
+homer update --force-semantic
+```
+
+This clears only LLM-derived results and regenerates them.
+
 ## Getting Help
 
 For bugs and feature requests, open an issue at: https://github.com/rand/homer/issues
@@ -251,3 +372,10 @@ homer init -vvv 2> homer-debug.log
 ```
 
 This captures trace-level logging to a file for debugging.
+
+## Next Steps
+
+- [CLI Reference](cli-reference.md) — Full command reference
+- [Configuration](configuration.md) — All config options
+- [MCP Integration](mcp-integration.md) — AI tool integration
+- [Getting Started](getting-started.md) — First run walkthrough

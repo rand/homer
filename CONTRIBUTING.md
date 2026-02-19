@@ -28,9 +28,9 @@ cargo test --workspace
 Before submitting a PR:
 
 ```bash
-cargo test --workspace           # All 187 tests pass
-cargo clippy --workspace -- -D warnings  # Zero warnings
-cargo fmt --all -- --check       # Formatted
+cargo test --workspace                        # All 357 tests pass
+cargo clippy --workspace --all-targets -- -D warnings  # Zero warnings (--all-targets catches test code)
+cargo fmt --all -- --check                    # Formatted
 ```
 
 CI runs these on both Linux and macOS.
@@ -51,10 +51,11 @@ docs/           User documentation
 
 Homer uses clippy pedantic and forbids `unsafe`. A few conventions worth knowing:
 
-- Tests live next to the code they test (`#[cfg(test)]` modules), with integration tests in `homer-test/tests/`
+- Tests live next to the code they test (`#[cfg(test)]` modules), with integration tests in `homer-test/tests/` (14 pipeline tests)
+- Use `proptest` for anything involving round-trip correctness (store, serialization, type serde)
 - Pipeline stages collect errors rather than aborting — one broken file shouldn't stop the whole analysis
 - Node and edge types are exhaustive enums, not stringly-typed — if you add a new kind, the compiler tells you everywhere that needs updating
-- Prefer `proptest` for anything involving round-trip correctness (store, serialization)
+- See [docs/extending.md](docs/extending.md) for step-by-step guides on adding a language, analyzer, renderer, or extractor
 
 ## Pull Requests
 
