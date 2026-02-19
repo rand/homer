@@ -76,6 +76,10 @@ impl Extractor for GitLabExtractor {
         "gitlab"
     }
 
+    async fn has_work(&self, _store: &dyn HomerStore) -> crate::error::Result<bool> {
+        Ok(self.token.is_some())
+    }
+
     #[instrument(skip_all, name = "gitlab_extract")]
     async fn extract(
         &self,
@@ -117,7 +121,10 @@ impl Extractor for GitLabExtractor {
         }
 
         // Fetch issues
-        match self.fetch_issues(store, &mut stats, last_issue).await {
+        match self
+            .fetch_issues(store, &mut stats, last_issue, config)
+            .await
+        {
             Ok(max_issue) => {
                 if max_issue > last_issue {
                     store
@@ -154,8 +161,10 @@ impl GitLabExtractor {
         since_iid: u64,
         config: &HomerConfig,
     ) -> crate::error::Result<u64> {
+        let max_limit = config.extraction.gitlab.max_mr_history;
         let mut max_iid = since_iid;
         let mut page = 1u32;
+        let mut fetched = 0u32;
 
         loop {
             let mrs = self
@@ -173,11 +182,15 @@ impl GitLabExtractor {
                 if mr.iid <= since_iid {
                     continue;
                 }
+                if max_limit > 0 && fetched >= max_limit {
+                    break;
+                }
                 max_iid = max_iid.max(mr.iid);
+                fetched += 1;
                 self.store_merge_request(store, stats, mr, config).await?;
             }
 
-            if mrs.len() < 100 {
+            if mrs.len() < 100 || (max_limit > 0 && fetched >= max_limit) {
                 break;
             }
             page += 1;
@@ -362,9 +375,12 @@ impl GitLabExtractor {
         store: &dyn HomerStore,
         stats: &mut ExtractStats,
         since_iid: u64,
+        config: &HomerConfig,
     ) -> crate::error::Result<u64> {
+        let max_limit = config.extraction.gitlab.max_issue_history;
         let mut max_iid = since_iid;
         let mut page = 1u32;
+        let mut fetched = 0u32;
 
         loop {
             let issues = self
@@ -382,7 +398,11 @@ impl GitLabExtractor {
                 if issue.iid <= since_iid {
                     continue;
                 }
+                if max_limit > 0 && fetched >= max_limit {
+                    break;
+                }
                 max_iid = max_iid.max(issue.iid);
+                fetched += 1;
 
                 let mut metadata = HashMap::new();
                 metadata.insert("title".to_string(), serde_json::json!(issue.title));
@@ -409,7 +429,7 @@ impl GitLabExtractor {
                 stats.nodes_created += 1;
             }
 
-            if issues.len() < 100 {
+            if issues.len() < 100 || (max_limit > 0 && fetched >= max_limit) {
                 break;
             }
             page += 1;

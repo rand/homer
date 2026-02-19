@@ -38,7 +38,9 @@ fn classify_exit_code(err: &anyhow::Error) -> i32 {
     let msg = format!("{err:#}");
     let lower = msg.to_lowercase();
 
-    if lower.contains("not initialized") || lower.contains("cannot resolve path") {
+    if lower.contains("partial success") {
+        10 // partial success — some stages had non-fatal errors
+    } else if lower.contains("not initialized") || lower.contains("cannot resolve path") {
         3 // repo not found
     } else if lower.contains("config") || lower.contains("unknown depth") {
         2 // config error
@@ -142,6 +144,12 @@ mod tests {
     fn exit_code_llm_api() {
         let err = anyhow::anyhow!("LLM provider error: api_key not set");
         assert_eq!(classify_exit_code(&err), 6);
+    }
+
+    #[test]
+    fn exit_code_partial_success() {
+        let err = anyhow::anyhow!("partial success: 3 non-fatal errors");
+        assert_eq!(classify_exit_code(&err), 10);
     }
 
     #[test]

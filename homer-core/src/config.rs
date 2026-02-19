@@ -12,6 +12,9 @@ pub enum AnalysisDepth {
 }
 
 /// Top-level Homer configuration, matching `.homer/config.toml`.
+///
+/// Call [`HomerConfig::with_depth_overrides`] after loading to apply
+/// the depth table (CLI.md) limits to extraction and analysis settings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HomerConfig {
     #[serde(default)]
@@ -28,6 +31,55 @@ pub struct HomerConfig {
     pub llm: LlmSection,
     #[serde(default)]
     pub mcp: McpSection,
+}
+
+impl HomerConfig {
+    /// Apply the depth table from CLI.md to extraction and analysis settings.
+    ///
+    /// | Level    | max_commits | GitHub PRs | GitHub Issues | LLM batch |
+    /// |----------|-------------|------------|---------------|-----------|
+    /// | shallow  | 500         | 0 (skip)   | 0 (skip)      | 0         |
+    /// | standard | 2000        | 200        | 500           | 50        |
+    /// | deep     | 0 (all)     | 500        | 1000          | 200       |
+    /// | full     | 0 (all)     | 0 (all)    | 0 (all)       | max       |
+    #[must_use]
+    pub fn with_depth_overrides(mut self) -> Self {
+        match self.analysis.depth {
+            AnalysisDepth::Shallow => {
+                self.extraction.max_commits = 500;
+                self.extraction.github.max_pr_history = 0;
+                self.extraction.github.max_issue_history = 0;
+                self.extraction.gitlab.max_mr_history = 0;
+                self.extraction.gitlab.max_issue_history = 0;
+                self.analysis.max_llm_batch_size = 0;
+            }
+            AnalysisDepth::Standard => {
+                self.extraction.max_commits = 2000;
+                self.extraction.github.max_pr_history = 200;
+                self.extraction.github.max_issue_history = 500;
+                self.extraction.gitlab.max_mr_history = 200;
+                self.extraction.gitlab.max_issue_history = 500;
+                self.analysis.max_llm_batch_size = 50;
+            }
+            AnalysisDepth::Deep => {
+                self.extraction.max_commits = 0; // 0 = unlimited
+                self.extraction.github.max_pr_history = 500;
+                self.extraction.github.max_issue_history = 1000;
+                self.extraction.gitlab.max_mr_history = 500;
+                self.extraction.gitlab.max_issue_history = 1000;
+                self.analysis.max_llm_batch_size = 200;
+            }
+            AnalysisDepth::Full => {
+                self.extraction.max_commits = 0;
+                self.extraction.github.max_pr_history = 0; // 0 = unlimited
+                self.extraction.github.max_issue_history = 0;
+                self.extraction.gitlab.max_mr_history = 0;
+                self.extraction.gitlab.max_issue_history = 0;
+                // LLM batch: keep config value (depth_adjusted_batch_size handles usize::MAX)
+            }
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -684,5 +736,45 @@ port = 8080
         assert_eq!(config.mcp.transport, "sse");
         assert_eq!(config.mcp.host, "0.0.0.0");
         assert_eq!(config.mcp.port, 8080);
+    }
+
+    #[test]
+    fn depth_overrides_shallow() {
+        let mut config = HomerConfig::default();
+        config.analysis.depth = AnalysisDepth::Shallow;
+        let config = config.with_depth_overrides();
+        assert_eq!(config.extraction.max_commits, 500);
+        assert_eq!(config.extraction.github.max_pr_history, 0);
+        assert_eq!(config.extraction.gitlab.max_mr_history, 0);
+        assert_eq!(config.analysis.max_llm_batch_size, 0);
+    }
+
+    #[test]
+    fn depth_overrides_standard() {
+        let config = HomerConfig::default().with_depth_overrides();
+        assert_eq!(config.extraction.max_commits, 2000);
+        assert_eq!(config.extraction.github.max_pr_history, 200);
+        assert_eq!(config.extraction.github.max_issue_history, 500);
+        assert_eq!(config.analysis.max_llm_batch_size, 50);
+    }
+
+    #[test]
+    fn depth_overrides_deep() {
+        let mut config = HomerConfig::default();
+        config.analysis.depth = AnalysisDepth::Deep;
+        let config = config.with_depth_overrides();
+        assert_eq!(config.extraction.max_commits, 0); // unlimited
+        assert_eq!(config.extraction.github.max_pr_history, 500);
+        assert_eq!(config.analysis.max_llm_batch_size, 200);
+    }
+
+    #[test]
+    fn depth_overrides_full() {
+        let mut config = HomerConfig::default();
+        config.analysis.depth = AnalysisDepth::Full;
+        let config = config.with_depth_overrides();
+        assert_eq!(config.extraction.max_commits, 0);
+        assert_eq!(config.extraction.github.max_pr_history, 0); // unlimited
+        assert_eq!(config.extraction.github.max_issue_history, 0);
     }
 }

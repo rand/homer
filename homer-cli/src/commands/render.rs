@@ -9,6 +9,7 @@ use homer_core::render::traits::merge_with_preserve;
 use homer_core::store::sqlite::SqliteStore;
 
 #[derive(Args, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RenderArgs {
     /// Path to git repository (default: current directory)
     #[arg(default_value = ".")]
@@ -38,6 +39,11 @@ pub struct RenderArgs {
     /// (automatically merges with `<!-- homer:preserve -->` blocks)
     #[arg(long)]
     pub diff: bool,
+
+    /// Merge Homer output with existing human-curated preserve blocks.
+    /// Enabled by default for agents-md; use --no-merge to overwrite.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub merge: bool,
 }
 
 pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
@@ -107,6 +113,10 @@ pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
         return show_diff(&store, &config, output_root, &name_refs).await;
     }
 
+    if !args.merge {
+        return render_no_merge(&store, &config, output_root, &name_refs).await;
+    }
+
     let pipeline = HomerPipeline::new(output_root);
     let result = pipeline
         .run_renderers(&store, &config, &name_refs)
@@ -126,6 +136,36 @@ pub async fn run(args: RenderArgs) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Render artifacts without merging preserve blocks — overwrites existing files.
+async fn render_no_merge(
+    store: &SqliteStore,
+    config: &HomerConfig,
+    output_root: &std::path::Path,
+    names: &[&str],
+) -> anyhow::Result<()> {
+    let mut written = 0u32;
+    for name in names {
+        let Some(renderer) = HomerPipeline::build_renderer(name) else {
+            eprintln!("Unknown renderer: {name}");
+            continue;
+        };
+        let content = renderer
+            .render(store, config)
+            .await
+            .with_context(|| format!("Rendering {name} failed"))?;
+        let output = output_root.join(renderer.output_path());
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Cannot create directory: {}", parent.display()))?;
+        }
+        std::fs::write(&output, &content)
+            .with_context(|| format!("Cannot write: {}", output.display()))?;
+        written += 1;
+    }
+    println!("Rendered {written} artifacts (no merge)");
     Ok(())
 }
 

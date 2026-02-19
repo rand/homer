@@ -44,11 +44,12 @@ pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
         );
     }
 
-    // Load config
+    // Load config and apply depth-table overrides
     let config_str = std::fs::read_to_string(&config_path)
         .with_context(|| format!("Cannot read config: {}", config_path.display()))?;
-    let config: HomerConfig = toml::from_str(&config_str)
-        .with_context(|| format!("Cannot parse config: {}", config_path.display()))?;
+    let config: HomerConfig = toml::from_str::<HomerConfig>(&config_str)
+        .with_context(|| format!("Cannot parse config: {}", config_path.display()))?
+        .with_depth_overrides();
 
     // Open database
     let db_path = super::resolve_db_path(&repo_path);
@@ -108,6 +109,8 @@ pub async fn run(args: UpdateArgs) -> anyhow::Result<()> {
         for error in &result.errors {
             println!("    - {error}");
         }
+        // Signal partial success to the CLI (exit code 10)
+        anyhow::bail!("partial success: {} non-fatal errors", result.errors.len());
     }
 
     Ok(())

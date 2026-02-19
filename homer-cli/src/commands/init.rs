@@ -75,12 +75,15 @@ pub async fn run(args: InitArgs) -> anyhow::Result<()> {
         config.graph.languages = homer_core::config::LanguageConfig::Explicit(lang_list);
     }
 
-    // Write config.toml
+    // Write config.toml (before depth overrides, so the file stores user intent)
     let config_toml = toml::to_string_pretty(&config).context("Failed to serialize config")?;
     std::fs::write(&config_path, &config_toml)
         .with_context(|| format!("Cannot write config: {}", config_path.display()))?;
 
     info!(config_path = %config_path.display(), "Wrote config.toml");
+
+    // Apply depth-table overrides for extraction and analysis limits
+    let config = config.with_depth_overrides();
 
     // Open database (CLI flag > HOMER_DB_PATH > default)
     let db_path = args

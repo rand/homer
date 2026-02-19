@@ -36,7 +36,7 @@ pub struct ExtractStats {
 
 ## Git History Extractor
 
-**Crate dependency**: `git2` (Rust bindings for libgit2)
+**Crate dependency**: `gix` (pure-Rust git implementation)
 
 ### What It Extracts
 
@@ -84,7 +84,7 @@ On update:
 
 ### Performance Notes
 
-- Use `git2::DiffOptions` with `skip_binary_check` for speed
+- Use `gix` diff options with binary check skipping for speed
 - Batch commit processing: load 100 commits, process diffs, write to store in single transaction
 - For initial extraction of very large repos (100K+ commits), provide progress reporting via callback
 
@@ -92,7 +92,7 @@ On update:
 
 ## GitHub API Extractor
 
-**Crate dependencies**: `octocrab` (GitHub API client) or `reqwest` + custom types
+**Crate dependencies**: `reqwest` (HTTP client)
 
 ### What It Extracts
 
@@ -173,6 +173,65 @@ pub trait ForgeExtractor: Extractor {
     fn detect(repo_path: &Path) -> Option<ForgeConfig>;  // Auto-detect from remotes
 }
 ```
+
+---
+
+## GitLab API Extractor
+
+**Crate dependencies**: `reqwest` (HTTP client)
+
+### What It Extracts
+
+| Data | Node/Edge | API Endpoint |
+|------|-----------|-------------|
+| Merge requests | `Node(PullRequest)` | `GET /projects/{id}/merge_requests` |
+| MR approvals | `Hyperedge(Reviewed)` | `GET /projects/{id}/merge_requests/{iid}/approvals` |
+| MR → commit links | `Hyperedge(Modifies)` cross-ref | MR metadata contains merge commit SHA |
+| Issues | `Node(Issue)` | `GET /projects/{id}/issues` |
+| Issue → MR links | `Hyperedge(Resolves)` | Cross-reference parsing ("closes #N", "fixes #N") |
+| Labels | Stored in node metadata | Included in issue response |
+
+### Remote Detection
+
+Homer detects GitLab remotes from the repository's push URL. Both SSH (`git@gitlab.example.com:owner/repo.git`) and HTTPS (`https://gitlab.example.com/owner/repo.git`) formats are supported, including self-hosted instances (any host containing "gitlab").
+
+### Node Mapping
+
+GitLab merge requests map to `NodeKind::PullRequest` (same as GitHub PRs) for a unified forge model. MR names are prefixed `MR!{iid}`, GitLab issues use `GLIssue#{iid}`.
+
+### Rate Limiting
+
+GitLab API has rate limits (varies by instance). Homer:
+
+1. Reads `ratelimit-remaining` header from responses
+2. Warns when remaining requests drop below 10
+3. Paginates results (100 per page)
+
+### Incrementality
+
+```
+Checkpoint: gitlab_last_mr = 42, gitlab_last_issue = 87
+
+On update:
+1. Fetch MRs where iid > 42 (sorted ascending by created_at)
+2. Fetch issues where iid > 87 (sorted ascending by created_at)
+3. Update checkpoints to max iid values seen
+```
+
+### Configuration
+
+```toml
+[extraction.gitlab]
+token_env = "GITLAB_TOKEN"         # Environment variable for auth token
+max_mr_history = 500               # Max MRs to fetch on initial run (0 = unlimited)
+max_issue_history = 1000           # Max issues to fetch on initial run (0 = unlimited)
+include_comments = true            # Fetch MR/issue comments as metadata
+include_reviews = true             # Fetch MR approvals and create Reviewed edges
+```
+
+### `has_work` Override
+
+The GitLab extractor returns `false` from `has_work()` when no token is available (`GITLAB_TOKEN` not set), silently skipping extraction. This is the same behavior as the GitHub extractor — missing forge credentials are not an error.
 
 ---
 
