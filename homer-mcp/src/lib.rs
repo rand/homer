@@ -25,10 +25,15 @@ use homer_core::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
 pub struct QueryParams {
     /// Entity name or substring to search for
     #[schemars(description = "Entity name or substring to search for")]
-    pub name: String,
+    pub entity: String,
     /// Kind filter: function, type, file, module, or all
     #[schemars(description = "Kind filter: function, type, file, module (omit for all)")]
     pub kind: Option<String>,
+    /// Sections to include in the response
+    #[schemars(
+        description = "Sections to include: summary, metrics, callers, callees, history, co_changes (omit for default)"
+    )]
+    pub include: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -39,13 +44,16 @@ pub struct GraphParams {
     /// Metric: pagerank, betweenness, hits, salience (default: salience)
     #[schemars(description = "Metric: pagerank, betweenness, hits, salience (default: salience)")]
     pub metric: Option<String>,
+    /// File path prefix to scope results
+    #[schemars(description = "File path prefix to scope results (e.g. 'src/core/')")]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RiskParams {
-    /// File path relative to repo root
-    #[schemars(description = "File path relative to repo root")]
-    pub path: String,
+    /// File paths relative to repo root
+    #[schemars(description = "File paths relative to repo root")]
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -58,6 +66,9 @@ pub struct CoChangesParams {
     /// Maximum co-change pairs to return (default: 10)
     #[schemars(description = "Maximum co-change pairs to return (default: 10)")]
     pub top: Option<u32>,
+    /// Minimum confidence threshold (default: 0.3)
+    #[schemars(description = "Minimum confidence threshold (default: 0.3)")]
+    pub min_confidence: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -67,6 +78,9 @@ pub struct ConventionsParams {
         description = "Convention type: naming, testing, error_handling, documentation, agent_rules (default: all)"
     )]
     pub category: Option<String>,
+    /// Module path or empty for project-wide
+    #[schemars(description = "Module path to scope conventions to, or omit for project-wide")]
+    pub scope: Option<String>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────
@@ -181,7 +195,7 @@ impl HomerMcpServer {
         let kind = params.kind.as_deref().and_then(parse_node_kind);
         let filter = NodeFilter {
             kind,
-            name_contains: Some(params.name.clone()),
+            name_contains: Some(params.entity.clone()),
             ..Default::default()
         };
 
@@ -192,23 +206,41 @@ impl HomerMcpServer {
             .map_err(|e| format!("Store error: {e}"))?;
 
         if nodes.is_empty() {
-            return Ok(format!("No entities found matching '{}'", params.name));
+            return Ok(format!("No entities found matching '{}'", params.entity));
         }
+
+        let include = params.include.as_deref().unwrap_or(&[]);
+        let include_all = include.is_empty();
 
         let mut results = Vec::new();
         for node in nodes.iter().take(20) {
             let mut entry = serde_json::json!({
                 "name": node.name,
                 "kind": node.kind.as_str(),
-                "metadata": node.metadata,
             });
 
-            if let Ok(Some(sal)) = self
-                .store
-                .get_analysis(node.id, AnalysisKind::CompositeSalience)
-                .await
-            {
-                entry["salience"] = sal.data;
+            if include_all || include.iter().any(|s| s == "summary") {
+                entry["metadata"] = serde_json::json!(node.metadata);
+            }
+
+            if include_all || include.iter().any(|s| s == "metrics") {
+                if let Ok(Some(sal)) = self
+                    .store
+                    .get_analysis(node.id, AnalysisKind::CompositeSalience)
+                    .await
+                {
+                    entry["salience"] = sal.data;
+                }
+            }
+
+            if include.iter().any(|s| s == "history") {
+                if let Ok(Some(freq)) = self
+                    .store
+                    .get_analysis(node.id, AnalysisKind::ChangeFrequency)
+                    .await
+                {
+                    entry["change_frequency"] = freq.data;
+                }
             }
 
             results.push(entry);
@@ -264,6 +296,14 @@ impl HomerMcpServer {
                 .ok()
                 .flatten()
                 .map_or_else(|| format!("node:{}", node_id.0), |n| n.name);
+
+            // Filter by scope prefix if provided
+            if let Some(ref scope) = params.scope {
+                if !name.starts_with(scope.as_str()) {
+                    continue;
+                }
+            }
+
             entries.push(serde_json::json!({
                 "name": name,
                 "score": val,
@@ -280,46 +320,57 @@ impl HomerMcpServer {
     }
 
     async fn do_risk(&self, params: RiskParams) -> Result<String, String> {
-        let node = self
-            .store
-            .get_node_by_name(NodeKind::File, &params.path)
-            .await
-            .map_err(|e| format!("Store error: {e}"))?;
+        let mut results = Vec::new();
 
-        let Some(file_node) = node else {
-            return Ok(format!(
-                "File '{}' not found in Homer database",
-                params.path
-            ));
-        };
+        for path in &params.paths {
+            let node = self
+                .store
+                .get_node_by_name(NodeKind::File, path)
+                .await
+                .map_err(|e| format!("Store error: {e}"))?;
 
-        let mut risk = serde_json::json!({ "file": params.path });
+            let Some(file_node) = node else {
+                results.push(serde_json::json!({
+                    "file": path,
+                    "error": "not found in Homer database",
+                }));
+                continue;
+            };
 
-        let analyses = [
-            (AnalysisKind::ChangeFrequency, "change_frequency"),
-            (
-                AnalysisKind::ContributorConcentration,
-                "contributor_concentration",
-            ),
-            (AnalysisKind::CompositeSalience, "salience"),
-            (AnalysisKind::CommunityAssignment, "community"),
-            (AnalysisKind::StabilityClassification, "stability"),
-        ];
+            let mut risk = serde_json::json!({ "file": path });
 
-        for (kind, key) in analyses {
-            if let Ok(Some(result)) = self.store.get_analysis(file_node.id, kind).await {
-                risk[key] = result.data;
+            let analyses = [
+                (AnalysisKind::ChangeFrequency, "change_frequency"),
+                (
+                    AnalysisKind::ContributorConcentration,
+                    "contributor_concentration",
+                ),
+                (AnalysisKind::CompositeSalience, "salience"),
+                (AnalysisKind::CommunityAssignment, "community"),
+                (AnalysisKind::StabilityClassification, "stability"),
+            ];
+
+            for (kind, key) in analyses {
+                if let Ok(Some(result)) = self.store.get_analysis(file_node.id, kind).await {
+                    risk[key] = result.data;
+                }
             }
+
+            risk["risk_level"] = serde_json::json!(compute_risk_level(&risk));
+            results.push(risk);
         }
 
-        risk["risk_level"] = serde_json::json!(compute_risk_level(&risk));
-
-        serde_json::to_string_pretty(&risk).map_err(|e| format!("JSON error: {e}"))
+        serde_json::to_string_pretty(&serde_json::json!({
+            "count": results.len(),
+            "results": results,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
     }
 
     #[allow(clippy::cast_possible_truncation)]
     async fn do_co_changes(&self, params: CoChangesParams) -> Result<String, String> {
         let top_n = params.top.unwrap_or(10) as usize;
+        let min_conf = params.min_confidence.unwrap_or(0.3);
 
         // Validate file path first (before querying edges)
         let target_node_id = if let Some(ref path) = params.path {
@@ -357,7 +408,11 @@ impl HomerMcpServer {
             edges.iter().collect()
         };
 
-        let mut scored: Vec<_> = filtered.iter().map(|e| (e, e.confidence)).collect();
+        let mut scored: Vec<_> = filtered
+            .iter()
+            .filter(|e| e.confidence >= min_conf)
+            .map(|e| (e, e.confidence))
+            .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut results = Vec::new();
@@ -601,8 +656,9 @@ mod tests {
 
         let result = server
             .do_query(QueryParams {
-                name: "nonexistent".to_string(),
+                entity: "nonexistent".to_string(),
                 kind: None,
+                include: None,
             })
             .await
             .unwrap();
@@ -617,7 +673,7 @@ mod tests {
 
         let result = server
             .do_risk(RiskParams {
-                path: "src/missing.rs".to_string(),
+                paths: vec!["src/missing.rs".to_string()],
             })
             .await
             .unwrap();
@@ -634,6 +690,7 @@ mod tests {
             .do_co_changes(CoChangesParams {
                 path: None,
                 top: None,
+                min_confidence: None,
             })
             .await
             .unwrap();
@@ -650,6 +707,7 @@ mod tests {
             .do_co_changes(CoChangesParams {
                 path: Some("nonexistent.rs".to_string()),
                 top: None,
+                min_confidence: None,
             })
             .await
             .unwrap();
@@ -663,7 +721,10 @@ mod tests {
         let server = HomerMcpServer::from_store(store);
 
         let result = server
-            .do_conventions(ConventionsParams { category: None })
+            .do_conventions(ConventionsParams {
+                category: None,
+                scope: None,
+            })
             .await
             .unwrap();
 
@@ -678,6 +739,7 @@ mod tests {
         let result = server
             .do_conventions(ConventionsParams {
                 category: Some("bogus".to_string()),
+                scope: None,
             })
             .await
             .unwrap();
