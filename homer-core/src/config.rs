@@ -622,11 +622,12 @@ pub struct McpSection {
 }
 
 /// Supported MCP transport types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum McpTransport {
     /// Standard input/output transport (the only supported transport).
     #[serde(alias = "sse")]
+    #[default]
     Stdio,
 }
 
@@ -636,12 +637,6 @@ impl McpTransport {
         match self {
             Self::Stdio => "stdio",
         }
-    }
-}
-
-impl Default for McpTransport {
-    fn default() -> Self {
-        Self::Stdio
     }
 }
 
