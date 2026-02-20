@@ -1,6 +1,6 @@
 //! Homer core library — pipeline, extractors, analyzers, renderers, and store.
 //!
-//! The main entry point is [`pipeline::Orchestrator`], which runs the
+//! The main entry point is [`pipeline::HomerPipeline`], which runs the
 //! Extract → Analyze → Render pipeline over a [`store::HomerStore`].
 
 pub mod analyze;
