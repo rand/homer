@@ -5,6 +5,7 @@
 
 pub mod analyze;
 pub mod config;
+pub mod contracts;
 pub mod error;
 pub mod extract;
 pub mod llm;

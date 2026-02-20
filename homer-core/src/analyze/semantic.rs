@@ -9,6 +9,7 @@ use tokio::sync::Semaphore;
 use tracing::{debug, info, instrument, warn};
 
 use crate::config::{AnalysisDepth, HomerConfig};
+use crate::contracts::analysis_keys;
 use crate::llm::cache::{compute_input_hash, get_cached, has_quality_doc_comment, store_cached};
 use crate::llm::{AnalysisProvenance, CostTracker, LlmProvider, ProvenanceConfidence};
 use crate::store::HomerStore;
@@ -170,14 +171,20 @@ async fn collect_candidates(
     let pagerank_map: std::collections::HashMap<_, f64> = pagerank_results
         .iter()
         .filter_map(|r| {
-            let v = r.data.get("score").and_then(serde_json::Value::as_f64)?;
+            let v = r
+                .data
+                .get(analysis_keys::PAGERANK)
+                .and_then(serde_json::Value::as_f64)?;
             Some((r.node_id, v))
         })
         .collect();
     let betweenness_map: std::collections::HashMap<_, f64> = betweenness_results
         .iter()
         .filter_map(|r| {
-            let v = r.data.get("score").and_then(serde_json::Value::as_f64)?;
+            let v = r
+                .data
+                .get(analysis_keys::BETWEENNESS)
+                .and_then(serde_json::Value::as_f64)?;
             Some((r.node_id, v))
         })
         .collect();

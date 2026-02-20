@@ -142,6 +142,9 @@ cargo test --workspace
 | [Concepts](docs/concepts.md) | How Homer works — pipeline, data model, algorithms |
 | [Configuration](docs/configuration.md) | Full `.homer/config.toml` reference |
 | [MCP Integration](docs/mcp-integration.md) | Using Homer's MCP server with AI tools |
+| [Compatibility Policy](docs/compatibility.md) | Canonical contract migration and deprecation rules |
+| [Performance Regression](docs/performance-regression.md) | Threshold-based performance checks for key paths |
+| [Rollout Notes](docs/rollout-notes.md) | Upgrade, migration, and fallback guidance |
 | [Cookbook](docs/cookbook.md) | Recipes for CI, PR review, onboarding, and more |
 | [Internals](docs/internals.md) | Architecture deep dive for contributors |
 | [Extending Homer](docs/extending.md) | Adding languages, analyzers, renderers |

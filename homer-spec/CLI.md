@@ -204,12 +204,10 @@ homer serve [OPTIONS]
 
 Options:
   --transport <TYPE>    Transport: stdio [default: stdio]
-  --port <PORT>         Port for SSE transport [default: 3000] (reserved, not yet implemented)
-  --host <HOST>         Host for SSE transport [default: 127.0.0.1] (reserved, not yet implemented)
   --path <PATH>         Path to git repository [default: current directory]
 ```
 
-> **Note**: Only `stdio` transport is currently implemented. The `--host` and `--port` flags are accepted but reserved for future SSE support.
+> **Note**: Only `stdio` transport is supported.
 
 ### `homer snapshot`
 
@@ -501,8 +499,6 @@ output_path = "homer-risk.json"
 
 [mcp]
 transport = "stdio"
-# host = "127.0.0.1"
-# port = 3000
 ```
 
 ---

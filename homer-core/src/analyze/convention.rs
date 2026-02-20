@@ -15,6 +15,7 @@ use serde::Serialize;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, NodeFilter, NodeKind};
 
@@ -882,16 +883,7 @@ fn check_naming_rules(
 async fn find_root_module(
     store: &dyn HomerStore,
 ) -> crate::error::Result<Option<crate::types::NodeId>> {
-    let mod_filter = NodeFilter {
-        kind: Some(NodeKind::Module),
-        ..Default::default()
-    };
-    let modules = store.find_nodes(&mod_filter).await?;
-
-    // Root module is typically "." or the shortest-named module
-    let root = modules.iter().min_by_key(|m| m.name.len());
-
-    Ok(root.map(|m| m.id))
+    contracts::find_root_module_id(store).await
 }
 
 async fn store_result<T: Serialize>(
@@ -1027,21 +1019,19 @@ mod tests {
         assert_eq!(stats.results_stored, 5, "Should store 5 convention results");
 
         // Check naming result
-        let mod_filter = NodeFilter {
-            kind: Some(NodeKind::Module),
-            ..Default::default()
-        };
-        let modules = db.find_nodes(&mod_filter).await.unwrap();
-        let root = modules.iter().min_by_key(|m| m.name.len()).unwrap();
+        let root_id = crate::contracts::find_root_module_id(&db)
+            .await
+            .unwrap()
+            .unwrap();
 
         let naming_result = db
-            .get_analysis(root.id, AnalysisKind::NamingPattern)
+            .get_analysis(root_id, AnalysisKind::NamingPattern)
             .await
             .unwrap();
         assert!(naming_result.is_some(), "Should have naming pattern result");
 
         let testing_result = db
-            .get_analysis(root.id, AnalysisKind::TestingPattern)
+            .get_analysis(root_id, AnalysisKind::TestingPattern)
             .await
             .unwrap();
         assert!(

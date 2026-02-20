@@ -97,14 +97,16 @@ let recovered = stored as u64;   // bit-reinterpret back
 
 **Batch operations**: `upsert_nodes_batch` wraps multiple inserts in a single transaction for 10-100x throughput improvement on large extractions.
 
-**Schema**: Defined in `schema.rs` with `CREATE TABLE IF NOT EXISTS` statements. Tables: `nodes`, `hyperedges`, `hyperedge_members`, `analysis_results`, `checkpoints`, `snapshots`, `snapshot_nodes`, `snapshot_edges`, `nodes_fts` (FTS5).
+**Schema**: Defined in `schema.rs` with `CREATE TABLE IF NOT EXISTS` statements. Tables: `nodes`, `hyperedges` (with deterministic `identity_key`), `hyperedge_members`, `analysis_results`, `checkpoints`, `snapshots`, `snapshot_nodes`, `snapshot_edges`, `nodes_fts` (FTS5).
 
 ### Incrementality
 
 The `incremental.rs` module manages checkpoint-based incrementality:
 
 - **Git extractor**: Stores `git_last_sha` checkpoint. On update, only processes commits after this SHA.
-- **Content hashing**: Structure and graph extractors compute a hash of each file's content. The store's upsert logic skips unchanged files.
+- **Extractor checkpoints**: Structure/document/prompt extractors store `*_last_sha` checkpoints and skip when unchanged.
+- **Changed-file graph extraction**: Graph extractor tracks `graph_last_sha` and scopes parsing to files changed since that checkpoint.
+- **Idempotent edges**: Hyperedges are upserted by deterministic semantic identity.
 - **Analysis invalidation**: Controlled by `[analysis.invalidation]` config. Centrality scores are invalidated globally on topology changes; semantic summaries only on direct content changes.
 
 ## Graph Engine

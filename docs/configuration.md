@@ -115,8 +115,6 @@ enabled = false
 
 [mcp]
 transport = "stdio"
-host = "127.0.0.1"
-port = 3000
 ```
 
 ---
@@ -390,11 +388,11 @@ Controls the MCP (Model Context Protocol) server, started via `homer serve`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `transport` | string | `"stdio"` | Transport type: `stdio` or `sse` |
-| `host` | string | `"127.0.0.1"` | Host for SSE transport |
-| `port` | integer | `3000` | Port for SSE transport |
+| `transport` | string | `"stdio"` | Transport type (`stdio` only) |
 
-Currently only `stdio` transport is implemented. SSE support is planned.
+Only `stdio` transport is supported.
+For backward compatibility, legacy `transport = "sse"` is accepted and mapped to
+`stdio`.
 
 ```toml
 [mcp]
@@ -418,8 +416,6 @@ Some configuration options can be overridden via CLI flags:
 | n/a | `--force-analysis` | `homer update` |
 | n/a | `--force-semantic` | `homer update` |
 | `mcp.transport` | `--transport <type>` | `homer serve` |
-| `mcp.host` | `--host <addr>` | `homer serve` |
-| `mcp.port` | `--port <num>` | `homer serve` |
 
 ---
 

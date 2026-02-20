@@ -7,6 +7,7 @@ use chrono::Utc;
 use tracing::{info, instrument, warn};
 
 use crate::config::HomerConfig;
+use crate::contracts::roles;
 use crate::error::{ExtractError, HomerError};
 use crate::store::HomerStore;
 use crate::types::{
@@ -32,6 +33,12 @@ impl DocumentExtractor {
 impl Extractor for DocumentExtractor {
     fn name(&self) -> &'static str {
         "document"
+    }
+
+    async fn has_work(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let document_sha = store.get_checkpoint("document_last_sha").await?;
+        let git_sha = store.get_checkpoint("git_last_sha").await?;
+        Ok(git_sha.is_none() || document_sha != git_sha)
     }
 
     #[instrument(skip_all, name = "document_extract")]
@@ -60,6 +67,10 @@ impl Extractor for DocumentExtractor {
                     stats.errors.push((path_str, e));
                 }
             }
+        }
+
+        if let Some(git_sha) = store.get_checkpoint("git_last_sha").await? {
+            store.set_checkpoint("document_last_sha", &git_sha).await?;
         }
 
         stats.duration = start.elapsed();
@@ -167,12 +178,12 @@ impl DocumentExtractor {
                         members: vec![
                             HyperedgeMember {
                                 node_id: doc_node_id,
-                                role: "document".to_string(),
+                                role: roles::DOCUMENT.to_string(),
                                 position: 0,
                             },
                             HyperedgeMember {
                                 node_id: target_node.id,
-                                role: "subject".to_string(),
+                                role: roles::CODE_ENTITY.to_string(),
                                 position: 1,
                             },
                         ],

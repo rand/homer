@@ -294,11 +294,10 @@ exclude_patterns = [
 
 ### Incrementality
 
-The structure extractor re-snapshots on every run (fast operation) and diffs against stored state:
-- New files → create nodes
-- Deleted files → mark nodes stale
-- Modified files → update content hash (triggers graph re-extraction)
-- Unchanged files → skip
+Structure extraction is checkpoint-gated:
+- Checkpoint key: `structure_last_sha`
+- If `structure_last_sha == git_last_sha`, extractor skips
+- Otherwise, the extractor scans configured include patterns and upserts file/module nodes
 
 ---
 
@@ -361,14 +360,13 @@ The extracted data is stored in the code entity node's metadata as `doc_comment`
 
 ### Incrementality
 
-Graph extraction tracks `graph_head_sha` checkpoint:
+Graph extraction tracks `graph_last_sha` checkpoint:
 
-1. On update: identify files changed since checkpoint
-2. For each changed file: rebuild its scope graph subgraph
-3. Diff old subgraph vs. new subgraph → record edge additions/removals
-4. Re-extract doc comments for changed definitions
-5. Store new subgraph, update checkpoint
-6. Edge diffs are first-class data consumed by [temporal analyzer](ANALYZERS.md#temporal-analyzer)
+1. On update: identify files changed since checkpoint commit range
+2. Parse only changed files for definitions/calls/imports
+3. Run scope-graph resolution over the selected file set
+4. Upsert resulting edges by deterministic hyperedge identity
+5. Update `graph_last_sha` to current git checkpoint
 
 ---
 
@@ -485,10 +483,10 @@ This is the same pattern that formatters and linters use — don't destroy human
 
 ### Incrementality
 
-Documents change infrequently. The document extractor:
-1. Computes content hash for each document on every run
-2. Only re-processes documents whose hash changed
-3. Re-resolves cross-references when either the document or the referenced code entities change
+Document extraction is checkpoint-gated:
+1. Checkpoint key: `document_last_sha`
+2. If unchanged from git checkpoint, extractor skips
+3. When it runs, document nodes still use content hashes for idempotent node upserts
 
 ---
 
@@ -673,5 +671,6 @@ When `store_full_text = false`, Homer extracts structured data (file references,
 
 ### Incrementality
 
-- **Prompt sessions:** Track last-processed timestamp per source. Only process new sessions.
-- **Agent rules:** Track content hash. Only re-process when the file changes. Also track git history of these files to see how agent context has evolved over time.
+- Checkpoint key: `prompt_last_sha`
+- If unchanged from git checkpoint, prompt extraction skips
+- Agent rule/session nodes still use content hashes to avoid node churn when content is unchanged

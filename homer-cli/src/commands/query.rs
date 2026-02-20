@@ -79,7 +79,7 @@ pub async fn run(args: QueryArgs) -> anyhow::Result<()> {
     let sections = IncludeSections::parse(&args.include);
 
     match args.format.as_str() {
-        "json" => print_json(&db, &node, &sections).await?,
+        "json" => print_json(&db, &node, &sections, args.depth).await?,
         "markdown" | "md" => print_markdown(&db, &node, &sections, args.depth).await?,
         _ => print_text(&db, &node, &sections, args.depth).await?,
     }
@@ -414,6 +414,7 @@ async fn print_json(
     db: &SqliteStore,
     node: &homer_core::types::Node,
     sections: &IncludeSections,
+    depth: u32,
 ) -> anyhow::Result<()> {
     let mut data = serde_json::json!({
         "kind": node.kind.as_str(),
@@ -440,13 +441,13 @@ async fn print_json(
     }
 
     if sections.callers {
-        let callers = query::collect_neighbors_bfs(db, node.id, "callee", "caller", 1).await?;
+        let callers = query::collect_neighbors_bfs(db, node.id, "callee", "caller", depth).await?;
         data["callers"] =
             serde_json::Value::Array(callers.into_iter().map(|(_, n)| n.into()).collect());
     }
 
     if sections.callees {
-        let callees = query::collect_neighbors_bfs(db, node.id, "caller", "callee", 1).await?;
+        let callees = query::collect_neighbors_bfs(db, node.id, "caller", "callee", depth).await?;
         data["callees"] =
             serde_json::Value::Array(callees.into_iter().map(|(_, n)| n.into()).collect());
     }

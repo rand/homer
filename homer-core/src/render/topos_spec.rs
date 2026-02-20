@@ -15,6 +15,7 @@ use std::fmt::Write as _;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, NodeFilter, NodeKind};
 
@@ -51,19 +52,15 @@ async fn render_spec(
     _config: &HomerConfig,
 ) -> crate::error::Result<()> {
     // Derive spec name from root module
-    let modules = db
-        .find_nodes(&NodeFilter {
-            kind: Some(NodeKind::Module),
-            ..Default::default()
-        })
-        .await?;
-    let root_name = modules
-        .iter()
-        .min_by_key(|m| m.name.len())
-        .map(|m| &m.name)
-        .map_or("project", String::as_str);
+    let root_name = if let Some(root_id) = contracts::find_root_module_id(db).await? {
+        db.get_node(root_id)
+            .await?
+            .map_or_else(|| "project".to_string(), |m| m.name)
+    } else {
+        "project".to_string()
+    };
 
-    let spec_id = sanitize_identifier(root_name);
+    let spec_id = sanitize_identifier(&root_name);
     let _ = writeln!(out, "spec {spec_id}");
 
     render_principles(out, db).await?;

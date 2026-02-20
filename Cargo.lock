@@ -1716,6 +1716,7 @@ dependencies = [
 name = "homer-mcp"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "homer-core",
  "rmcp",
  "schemars 0.8.22",

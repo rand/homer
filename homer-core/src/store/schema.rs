@@ -1,5 +1,5 @@
 /// Current schema version.
-pub const SCHEMA_VERSION: &str = "1";
+pub const SCHEMA_VERSION: &str = "2";
 
 /// Full SQL schema for Homer's `SQLite` database.
 pub const SCHEMA_SQL: &str = r"
@@ -26,6 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
 CREATE TABLE IF NOT EXISTS hyperedges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
+    identity_key TEXT,
     confidence REAL DEFAULT 1.0,
     last_updated TEXT NOT NULL,
     metadata TEXT DEFAULT '{}'
@@ -199,6 +200,6 @@ mod tests {
 
     #[test]
     fn schema_version_is_set() {
-        assert_eq!(SCHEMA_VERSION, "1");
+        assert_eq!(SCHEMA_VERSION, "2");
     }
 }

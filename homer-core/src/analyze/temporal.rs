@@ -15,6 +15,7 @@ use chrono::Utc;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId};
 
@@ -239,9 +240,7 @@ async fn compute_architectural_drift(
     let mut new_cross: Vec<(NodeId, NodeId)> = Vec::new();
 
     for edge in &import_edges {
-        let src = edge.members.iter().find(|m| m.role == "source");
-        let tgt = edge.members.iter().find(|m| m.role == "target");
-        let Some((s, t)) = src.zip(tgt) else {
+        let Some((s, t)) = contracts::find_import_pair(&edge.members) else {
             continue;
         };
 
@@ -472,12 +471,12 @@ mod tests {
                     members: vec![
                         HyperedgeMember {
                             node_id: src.id,
-                            role: "source".to_string(),
+                            role: contracts::roles::IMPORTER.to_string(),
                             position: 0,
                         },
                         HyperedgeMember {
                             node_id: tgt.id,
-                            role: "target".to_string(),
+                            role: contracts::roles::IMPORTED.to_string(),
                             position: 1,
                         },
                     ],

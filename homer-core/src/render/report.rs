@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, NodeFilter, NodeId, NodeKind};
 
@@ -406,11 +407,7 @@ async fn load_contributor_distribution(
             .get("bus_factor")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as u32;
-        let top_pct = r
-            .data
-            .get("top_contributor_pct")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.0);
+        let top_pct = contracts::read_top_contributor_share(&r.data).unwrap_or(0.0);
         if bus_factor <= 1 || top_pct > 0.8 {
             let name = resolve_name(store, r.node_id).await?;
             entries.push(ContributorEntry {
@@ -446,17 +443,9 @@ fn render_html(data: &ReportData) -> String {
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     );
     let _ = writeln!(h, "<title>Homer Report</title>");
-    let _ = writeln!(
-        h,
-        "<script src=\"https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js\"></script>"
-    );
     let _ = writeln!(h, "<style>{REPORT_CSS}</style>");
     let _ = writeln!(h, "</head>");
     let _ = writeln!(h, "<body>");
-    let _ = writeln!(
-        h,
-        "<script>mermaid.initialize({{startOnLoad:true}});</script>"
-    );
 
     render_executive_summary(&mut h, data);
     render_architecture_diagram(&mut h, data);
@@ -513,7 +502,7 @@ fn render_architecture_diagram(h: &mut String, data: &ReportData) {
 
     let _ = writeln!(h, "<section>");
     let _ = writeln!(h, "<h2>Architecture Diagram</h2>");
-    let _ = writeln!(h, "<div class=\"mermaid\">");
+    let _ = writeln!(h, "<pre class=\"diagram\"><code>");
     let _ = writeln!(h, "graph TD");
 
     let mut sorted: Vec<_> = data.communities.iter().collect();
@@ -534,7 +523,7 @@ fn render_architecture_diagram(h: &mut String, data: &ReportData) {
         let _ = writeln!(h, "  end");
     }
 
-    let _ = writeln!(h, "</div>");
+    let _ = writeln!(h, "</code></pre>");
     let _ = writeln!(h, "</section>");
 }
 
@@ -588,7 +577,8 @@ fn render_coupling_section(h: &mut String, data: &ReportData) {
         let _ = writeln!(
             h,
             "<tr><td><code>{sa}</code></td><td><code>{sb}</code></td>\
-             <td>{conf:.0}%</td></tr>"
+             <td>{:.0}%</td></tr>",
+            contracts::fraction_to_percent(*conf)
         );
     }
 
@@ -770,7 +760,7 @@ code{background:#f0f0f0;padding:2px 6px;border-radius:3px;font-size:.9em}\
 .bar{height:16px;border-radius:3px}\
 section{margin-bottom:2rem}\
 footer{margin-top:3rem;text-align:center;color:#aaa;font-size:.85rem}\
-.mermaid{background:#fff;padding:1rem;border-radius:8px}";
+.diagram{background:#fff;padding:1rem;border-radius:8px;overflow-x:auto}";
 
 #[cfg(test)]
 mod tests {

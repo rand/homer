@@ -220,7 +220,10 @@ After new commits, update Homer's database incrementally:
 homer update
 ```
 
-The git extractor processes only commits since the last checkpoint. Structure and graph extractors use content-hash-based upsert semantics, so unchanged files are skipped efficiently.
+The git extractor processes only commits since the last checkpoint.
+Structure/document/prompt extractors skip when their checkpoints match git
+HEAD, and the graph extractor scopes parsing to files changed since its last
+checkpoint.
 
 Force a full re-extraction if the database seems stale:
 

@@ -13,6 +13,7 @@ use chrono::Utc;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeKind,
@@ -746,10 +747,8 @@ async fn compute_doc_coverage(
     let doc_edges = store.get_edges_by_kind(HyperedgeKind::Documents).await?;
     let mut documented_files: HashSet<NodeId> = HashSet::new();
     for edge in &doc_edges {
-        for member in &edge.members {
-            if member.role == "subject" {
-                documented_files.insert(member.node_id);
-            }
+        if let Some((_, entity_member)) = contracts::find_document_pair(&edge.members) {
+            documented_files.insert(entity_member.node_id);
         }
     }
 
@@ -801,17 +800,15 @@ async fn compute_doc_freshness(
 ) -> crate::error::Result<()> {
     let now = Utc::now();
 
-    // Get Documents edges → map subject_id → last_updated
+    // Get Documents edges → map code_entity_id → last_updated
     let doc_edges = store.get_edges_by_kind(HyperedgeKind::Documents).await?;
     let mut doc_timestamps: HashMap<NodeId, chrono::DateTime<Utc>> = HashMap::new();
 
     for edge in &doc_edges {
-        for member in &edge.members {
-            if member.role == "subject" {
-                let existing = doc_timestamps.get(&member.node_id);
-                if existing.is_none_or(|&ts| edge.last_updated > ts) {
-                    doc_timestamps.insert(member.node_id, edge.last_updated);
-                }
+        if let Some((_, entity_member)) = contracts::find_document_pair(&edge.members) {
+            let existing = doc_timestamps.get(&entity_member.node_id);
+            if existing.is_none_or(|&ts| edge.last_updated > ts) {
+                doc_timestamps.insert(entity_member.node_id, edge.last_updated);
             }
         }
     }
@@ -1493,12 +1490,12 @@ mod tests {
                 members: vec![
                     HyperedgeMember {
                         node_id: doc,
-                        role: "document".to_string(),
+                        role: crate::contracts::roles::DOCUMENT.to_string(),
                         position: 0,
                     },
                     HyperedgeMember {
                         node_id: file,
-                        role: "subject".to_string(),
+                        role: crate::contracts::roles::CODE_ENTITY.to_string(),
                         position: 1,
                     },
                 ],

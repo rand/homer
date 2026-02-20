@@ -38,6 +38,12 @@ impl Extractor for PromptExtractor {
         "prompt"
     }
 
+    async fn has_work(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let prompt_sha = store.get_checkpoint("prompt_last_sha").await?;
+        let git_sha = store.get_checkpoint("git_last_sha").await?;
+        Ok(git_sha.is_none() || prompt_sha != git_sha)
+    }
+
     #[instrument(skip_all, name = "prompt_extract")]
     async fn extract(
         &self,
@@ -52,6 +58,9 @@ impl Extractor for PromptExtractor {
 
         // Prompt session extraction is opt-in.
         if !config.extraction.prompts.enabled {
+            if let Some(git_sha) = store.get_checkpoint("git_last_sha").await? {
+                store.set_checkpoint("prompt_last_sha", &git_sha).await?;
+            }
             info!("Prompt session extraction disabled (opt-in via config)");
             stats.duration = start.elapsed();
             return Ok(stats);
@@ -67,6 +76,10 @@ impl Extractor for PromptExtractor {
         // Correlate sessions with commits by shared modified files
         self.correlate_sessions_with_commits(store, &mut stats)
             .await;
+
+        if let Some(git_sha) = store.get_checkpoint("git_last_sha").await? {
+            store.set_checkpoint("prompt_last_sha", &git_sha).await?;
+        }
 
         stats.duration = start.elapsed();
         info!(

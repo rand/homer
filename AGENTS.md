@@ -96,38 +96,42 @@ The codebase organizes into 71 architectural clusters:
 
 | Module | Files | Functions | Types |
 |--------|------:|----------:|------:|
-| `homer` | 15 | 0 | 0 |
-| `homer-cli` | 3 | 0 | 0 |
-| `homer-cli/src` | 6 | 10 | 3 |
-| `homer-cli/src/commands` | 30 | 59 | 29 |
-| `homer-core` | 6 | 0 | 0 |
-| `homer-core/benches` | 9 | 14 | 0 |
-| `homer-core/src` | 36 | 105 | 77 |
-| `homer-core/src/analyze` | 27 | 168 | 47 |
-| `homer-core/src/extract` | 29 | 198 | 43 |
-| `homer-core/src/llm` | 9 | 34 | 23 |
-| `homer-core/src/query` | 3 | 7 | 1 |
-| `homer-core/src/render` | 24 | 138 | 37 |
-| `homer-core/src/store` | 15 | 97 | 10 |
-| `homer-graphs` | 3 | 0 | 0 |
-| `homer-graphs/src` | 18 | 37 | 40 |
-| `homer-graphs/src/languages` | 30 | 264 | 25 |
-| `homer-mcp` | 3 | 0 | 0 |
-| `homer-mcp/src` | 3 | 25 | 7 |
-| `homer-test` | 6 | 0 | 0 |
-| `homer-test/src` | 3 | 8 | 1 |
-| `homer-test/tests` | 3 | 14 | 0 |
+| `homer` | 20 | 0 | 0 |
+| `homer-cli` | 4 | 0 | 0 |
+| `homer-cli/src` | 8 | 10 | 3 |
+| `homer-cli/src/commands` | 41 | 59 | 29 |
+| `homer-core` | 8 | 0 | 0 |
+| `homer-core/benches` | 12 | 14 | 0 |
+| `homer-core/src` | 48 | 105 | 77 |
+| `homer-core/src/analyze` | 36 | 168 | 47 |
+| `homer-core/src/extract` | 39 | 198 | 43 |
+| `homer-core/src/llm` | 12 | 34 | 23 |
+| `homer-core/src/query` | 4 | 7 | 1 |
+| `homer-core/src/render` | 32 | 138 | 37 |
+| `homer-core/src/store` | 20 | 97 | 10 |
+| `homer-graphs` | 4 | 0 | 0 |
+| `homer-graphs/src` | 24 | 37 | 40 |
+| `homer-graphs/src/languages` | 40 | 264 | 25 |
+| `homer-mcp` | 4 | 0 | 0 |
+| `homer-mcp/src` | 4 | 25 | 7 |
+| `homer-test` | 8 | 0 | 0 |
+| `homer-test/src` | 4 | 8 | 1 |
+| `homer-test/tests` | 4 | 14 | 0 |
 
 ## Key Documents
 
 | Document | Type | References |
 |----------|------|----------:|
-| `README.md` | document | 33 |
-| `docs/getting-started.md` | document | 12 |
-| `docs/configuration.md` | document | 9 |
-| `docs/troubleshooting.md` | document | 9 |
-| `docs/concepts.md` | document | 6 |
-| `CONTRIBUTING.md` | document | 3 |
+| `README.md` | document | 50 |
+| `docs/getting-started.md` | document | 17 |
+| `docs/configuration.md` | document | 13 |
+| `docs/troubleshooting.md` | document | 12 |
+| `docs/concepts.md` | document | 9 |
+| `docs/extending.md` | document | 6 |
+| `docs/internals.md` | document | 6 |
+| `CONTRIBUTING.md` | document | 5 |
+| `docs/cli-reference.md` | document | 2 |
+| `docs/cookbook.md` | document | 1 |
 
 ## Change Patterns
 
@@ -135,24 +139,24 @@ The codebase organizes into 71 architectural clusters:
 
 | File | Changes |
 |------|--------:|
-| `homer-core` | 39 |
-| `homer-core/src` | 37 |
-| `homer-core/src/extract` | 25 |
-| `homer-core/src/analyze` | 23 |
-| `homer-cli/src/commands` | 22 |
-| `homer-cli` | 22 |
-| `homer-cli/src` | 22 |
-| `homer-core/src/render` | 18 |
-| `homer-core/src/store` | 15 |
-| `homer-graphs/src` | 15 |
+| `homer-core` | 46 |
+| `homer-core/src` | 42 |
+| `homer-core/src/extract` | 29 |
+| `homer-cli` | 28 |
+| `homer-core/src/analyze` | 28 |
+| `homer-cli/src/commands` | 26 |
+| `homer-cli/src` | 26 |
+| `homer-core/src/render` | 21 |
+| `homer-graphs` | 20 |
+| `homer-core/src/store` | 18 |
 
 **Files that change together:**
 
-- `homer-cli/src/commands` + `homer-cli/src/commands/mod.rs` (confidence: 1%)
-- `homer-cli/src/commands` + `homer-core/src/analyze/traits.rs` (confidence: 1%)
-- `homer-cli/src/commands` + `homer-test/src/.context.md` (confidence: 1%)
+- `homer-cli/src/commands` + `homer-cli/src/commands/graph.rs` (confidence: 1%)
+- `homer-cli/src/commands` + `homer-core/src/progress.rs` (confidence: 1%)
+- `homer-cli/src/commands` + `homer-cli/src/commands/serve.rs` (confidence: 1%)
+- `homer-cli/src/commands/graph.rs` + `homer-cli/src/commands` (confidence: 1%)
 - `homer-cli/src/commands/graph.rs` + `homer-cli` (confidence: 1%)
-- `homer-cli/src/commands/graph.rs` + `homer-cli/src` (confidence: 1%)
 
 ## Load-Bearing Code
 
@@ -161,26 +165,26 @@ Modifications require understanding all callers and running the full test suite.
 
 | Entity | Salience | Classification |
 |--------|----------|----------------|
-| `homer-core/src/store/sqlite.rs` | 0.38 | ActiveLocalized |
+| `homer-core/src/store/sqlite.rs` | 0.37 | ActiveLocalized |
 | `homer-test/tests/pipeline.rs` | 0.27 | ActiveLocalized |
-| `homer-core/src/pipeline.rs` | 0.26 | ActiveLocalized |
 | `homer-core/src/analyze/semantic.rs` | 0.23 | ActiveLocalized |
 | `homer-core/src/render/agents_md.rs` | 0.22 | ActiveLocalized |
-| `homer-core/src/analyze/behavioral.rs` | 0.22 | ActiveLocalized |
+| `homer-core/src/analyze/behavioral.rs` | 0.21 | ActiveLocalized |
 | `homer-core/src/analyze/centrality.rs` | 0.21 | ActiveLocalized |
-| `homer-core/src/config.rs` | 0.20 | ActiveLocalized |
+| `homer-core/src/pipeline.rs` | 0.21 | ActiveLocalized |
 | `homer-core/src/extract/github.rs` | 0.20 | ActiveLocalized |
+| `homer-core/src/config.rs` | 0.20 | ActiveLocalized |
 | `homer-core/src/extract/git.rs` | 0.20 | ActiveLocalized |
-| `homer-core/src/extract/graph.rs` | 0.20 | ActiveLocalized |
-| `homer-core/src/analyze/community.rs` | 0.19 | ActiveLocalized |
 | `homer-core/src/extract/gitlab.rs` | 0.19 | ActiveLocalized |
-| `homer-core/src/extract/prompt.rs` | 0.19 | ActiveLocalized |
-| `homer-mcp/src/lib.rs` | 0.19 | ActiveLocalized |
-| `homer-graphs/src/languages/rust.rs` | 0.19 | ActiveLocalized |
 | `homer-cli/src/commands/update.rs` | 0.18 | ActiveLocalized |
-| `homer-graphs/src/languages/python.rs` | 0.18 | ActiveLocalized |
+| `homer-core/src/extract/graph.rs` | 0.18 | ActiveLocalized |
 | `homer-cli/src/commands/init.rs` | 0.18 | ActiveLocalized |
-| `homer-core/src/analyze/task_pattern.rs` | 0.18 | ActiveLocalized |
+| `homer-core/src/analyze/community.rs` | 0.18 | ActiveLocalized |
+| `homer-core/src/extract/prompt.rs` | 0.18 | ActiveLocalized |
+| `homer-graphs/src/languages/python.rs` | 0.17 | ActiveLocalized |
+| `homer-mcp/src/lib.rs` | 0.17 | ActiveLocalized |
+| `homer-core/src/extract/structure.rs` | 0.17 | ActiveLocalized |
+| `homer-core/src/analyze/mod.rs` | 0.17 | ActiveLocalized |
 
 ## Danger Zones
 
@@ -188,16 +192,16 @@ Files with high change frequency and low bus factor require extra care.
 
 | File | Changes | Bus Factor | Top Contributor |
 |------|--------:|-----------:|----------------:|
-| `homer-core` | 39 | 1 | 90% |
-| `homer-core/src` | 37 | 1 | 89% |
-| `homer-core/src/extract` | 25 | 1 | 84% |
-| `homer-core/src/analyze` | 23 | 1 | 83% |
-| `homer-cli/src/commands` | 22 | 1 | 82% |
-| `homer-cli` | 22 | 1 | 82% |
-| `homer-cli/src` | 22 | 1 | 82% |
-| `homer-core/src/render` | 18 | 1 | 83% |
-| `homer-core/src/store` | 15 | 1 | 80% |
-| `homer-graphs/src` | 15 | 1 | 87% |
+| `homer-core` | 46 | 1 | 87% |
+| `homer-core/src` | 42 | 1 | 86% |
+| `homer-core/src/render` | 21 | 1 | 81% |
+| `homer-graphs` | 20 | 1 | 85% |
+| `homer-test` | 18 | 1 | 83% |
+| `homer-graphs/src` | 18 | 1 | 83% |
+| `homer-graphs/src/languages` | 17 | 1 | 82% |
+| `homer-test/tests` | 15 | 1 | 80% |
+| `homer-test/src` | 11 | 1 | 82% |
+| `README.md` | 7 | 1 | 86% |
 
 ## Conventions
 
@@ -226,3 +230,29 @@ Files with high change frequency and low bus factor require extra care.
 
 **Agent rules:** CLAUDE.md
 
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds

@@ -160,10 +160,11 @@ sqlite3 .homer/homer.db "VACUUM;"
 ### "Unsupported transport"
 
 ```
-Error: Unsupported transport: sse. Supported: stdio
+error: invalid value for '--transport <TRANSPORT>': ...
 ```
 
-Currently only `stdio` transport is supported. The MCP server communicates over stdin/stdout using JSON-RPC.
+Homer supports `stdio` transport only. The MCP server communicates over
+stdin/stdout using JSON-RPC.
 
 ### MCP server not responding
 
@@ -194,7 +195,13 @@ Use an absolute path — relative paths may resolve differently depending on the
 
 ### Update is slower than expected
 
-`homer update` re-runs the full pipeline. The git extractor is incremental (only processes new commits), but structure and graph extraction re-scan all files (using content hashes to skip unchanged files). Analysis always recomputes all metrics.
+`homer update` re-runs the full pipeline, but extraction is checkpoint-driven:
+- Git extractor processes only commits after `git_last_sha`.
+- Structure/document/prompt extractors skip entirely when their checkpoints
+  match git HEAD.
+- Graph extractor processes only files changed since `graph_last_sha`.
+
+Analysis still recomputes configured metrics each run.
 
 For faster updates:
 - Use `--force-analysis` to skip re-extraction and just recompute metrics

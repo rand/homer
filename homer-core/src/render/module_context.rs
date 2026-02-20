@@ -12,6 +12,7 @@ use std::path::Path;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeId, NodeKind};
 
@@ -116,9 +117,7 @@ async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleDat
     let doc_edges = db.get_edges_by_kind(HyperedgeKind::Documents).await?;
     let mut doc_refs: HashMap<String, Vec<String>> = HashMap::new();
     for edge in &doc_edges {
-        let doc_member = edge.members.iter().find(|m| m.role == "document");
-        let entity_member = edge.members.iter().find(|m| m.role == "entity");
-        if let (Some(d), Some(e)) = (doc_member, entity_member) {
+        if let Some((d, e)) = contracts::find_document_pair(&edge.members) {
             let doc_name = db.get_node(d.node_id).await?.map(|n| n.name);
             let entity_name = db.get_node(e.node_id).await?.map(|n| n.name);
             if let (Some(dn), Some(en)) = (doc_name, entity_name) {
@@ -191,12 +190,7 @@ async fn load_module_data(db: &dyn HomerStore) -> crate::error::Result<ModuleDat
     }
 
     // Global naming convention
-    let mod_filter = NodeFilter {
-        kind: Some(NodeKind::Module),
-        ..Default::default()
-    };
-    let modules = db.find_nodes(&mod_filter).await?;
-    let root_id = modules.iter().min_by_key(|m| m.name.len()).map(|m| m.id);
+    let root_id = contracts::find_root_module_id(db).await?;
     let naming_convention = if let Some(rid) = root_id {
         db.get_analysis(rid, AnalysisKind::NamingPattern)
             .await?
@@ -311,9 +305,7 @@ async fn load_import_relationships(
     let mut by: HashMap<String, Vec<String>> = HashMap::new();
 
     for edge in &edges {
-        let src = edge.members.iter().find(|m| m.role == "source");
-        let tgt = edge.members.iter().find(|m| m.role == "target");
-        if let (Some(s), Some(t)) = (src, tgt) {
+        if let Some((s, t)) = contracts::find_import_pair(&edge.members) {
             let sn = db.get_node(s.node_id).await?.map(|n| n.name);
             let tn = db.get_node(t.node_id).await?.map(|n| n.name);
             if let (Some(sn), Some(tn)) = (sn, tn) {

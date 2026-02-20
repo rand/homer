@@ -293,7 +293,9 @@ The current execution order is: behavioral → centrality → community → temp
 Homer is designed for incremental updates:
 
 - **Git extractor** tracks a `git_last_sha` checkpoint. On update, it only processes commits after the checkpoint.
-- **Structure and graph extractors** use content-hash-based upsert semantics. Nodes and edges are identified by (kind, name) pairs. Re-extracting unchanged files is idempotent — no duplicates are created.
+- **Structure/document/prompt extractors** track checkpoint keys (`*_last_sha`) and skip when unchanged.
+- **Graph extractor** tracks `graph_last_sha` and scopes extraction to files changed since that checkpoint.
+- **Hyperedges** use deterministic semantic identity keys, so repeated equivalent writes are idempotent (no duplicate growth).
 - **Analyzers** check `needs_rerun()` to decide whether to recompute. The `--force-analysis` flag clears cached results explicitly. `--force-semantic` clears only LLM-derived results.
 - **Invalidation policy** controls how aggressively results are recomputed (see `[analysis.invalidation]`).
 
@@ -302,7 +304,7 @@ Homer is designed for incremental updates:
 All data is stored in a single SQLite database (`.homer/homer.db`) using WAL mode for concurrent read/write performance. The schema includes:
 
 - `nodes` — All graph nodes with kind, name, metadata (JSON), content hash
-- `hyperedges` — All relationships with kind and confidence score
+- `hyperedges` — All relationships with kind, confidence, and deterministic identity key
 - `hyperedge_members` — N-ary membership (node_id, role, position)
 - `analysis_results` — Computed metrics (kind, node_id, data as JSON)
 - `checkpoints` — Incrementality state (key-value pairs)

@@ -15,6 +15,7 @@ use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_router};
 use serde::Deserialize;
 use tracing::info;
 
+use homer_core::contracts::analysis_keys;
 use homer_core::query;
 use homer_core::store::HomerStore;
 use homer_core::store::sqlite::SqliteStore;
@@ -207,7 +208,12 @@ impl HomerMcpServer {
             .map_err(|e| format!("Store error: {e}"))?;
 
         if nodes.is_empty() {
-            return Ok(format!("No entities found matching '{}'", params.entity));
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "count": 0,
+                "results": [],
+                "note": format!("No entities found matching '{}'", params.entity),
+            }))
+            .map_err(|e| format!("JSON error: {e}"));
         }
 
         let include = params.include.as_deref().unwrap_or(&[]);
@@ -290,10 +296,10 @@ impl HomerMcpServer {
             .map_err(|e| format!("Store error: {e}"))?;
 
         let score_field = match metric {
-            "pagerank" => "pagerank",
-            "betweenness" => "betweenness",
-            "hits" => "authority",
-            _ => "score",
+            "pagerank" => analysis_keys::PAGERANK,
+            "betweenness" => analysis_keys::BETWEENNESS,
+            "hits" => analysis_keys::AUTHORITY_SCORE,
+            _ => analysis_keys::SCORE,
         };
 
         let mut scored: Vec<_> = results
@@ -402,7 +408,12 @@ impl HomerMcpServer {
             match node {
                 Some(n) => Some(n.id),
                 None => {
-                    return Ok(format!("File '{path}' not found in Homer database"));
+                    return serde_json::to_string_pretty(&serde_json::json!({
+                        "count": 0,
+                        "results": [],
+                        "error": format!("File '{path}' not found in Homer database"),
+                    }))
+                    .map_err(|e| format!("JSON error: {e}"));
                 }
             }
         } else {
@@ -476,9 +487,14 @@ impl HomerMcpServer {
             }
             Some("agent_rules") => vec![(AnalysisKind::AgentRuleValidation, "agent_rules")],
             Some(other) => {
-                return Ok(format!(
-                    "Unknown category '{other}'. Use: naming, testing, error_handling, documentation, agent_rules"
-                ));
+                return serde_json::to_string_pretty(&serde_json::json!({
+                    "count": 0,
+                    "categories": {},
+                    "error": format!(
+                        "Unknown category '{other}'. Use: naming, testing, error_handling, documentation, agent_rules"
+                    ),
+                }))
+                .map_err(|e| format!("JSON error: {e}"));
             }
             None => vec![
                 (AnalysisKind::NamingPattern, "naming"),
@@ -609,6 +625,15 @@ pub fn resolve_db_path(repo_path: &std::path::Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use homer_core::config::HomerConfig;
+    use homer_core::contracts;
+    use homer_core::pipeline::HomerPipeline;
+    use homer_core::store::HomerStore;
+    use homer_core::types::{
+        AnalysisResult, AnalysisResultId, HyperedgeKind, Node, NodeFilter, NodeId, NodeKind,
+    };
+    use std::process::Command;
 
     #[test]
     fn risk_level_computation() {
@@ -643,7 +668,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.contains("No entities found"));
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["count"], 0);
+        assert!(
+            json["note"]
+                .as_str()
+                .unwrap_or("")
+                .contains("No entities found")
+        );
     }
 
     #[tokio::test]
@@ -692,7 +724,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.contains("not found"));
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["count"], 0);
+        assert!(json["error"].as_str().unwrap_or("").contains("not found"));
     }
 
     #[tokio::test]
@@ -724,6 +758,167 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.contains("Unknown category"));
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["count"], 0);
+        assert!(
+            json["error"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Unknown category")
+        );
+    }
+
+    #[tokio::test]
+    async fn server_graph_hits_uses_authority_score_field() {
+        let store = SqliteStore::in_memory().unwrap();
+        let now = Utc::now();
+
+        let node_id = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/main.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: std::collections::HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        store
+            .store_analysis(&AnalysisResult {
+                id: AnalysisResultId(0),
+                node_id,
+                kind: AnalysisKind::HITSScore,
+                data: serde_json::json!({
+                    "hub_score": 0.2,
+                    "authority_score": 0.9
+                }),
+                input_hash: 0,
+                computed_at: now,
+            })
+            .await
+            .unwrap();
+
+        let server = HomerMcpServer::from_store(store);
+        let result = server
+            .do_graph(GraphParams {
+                top: Some(5),
+                metric: Some("hits".to_string()),
+                scope: None,
+            })
+            .await
+            .unwrap();
+
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["metric"], "hits");
+        assert_eq!(json["count"], 1);
+        assert_eq!(json["results"][0]["score"], 0.9);
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_DATE", "2025-01-15T10:00:00+00:00")
+            .env("GIT_COMMITTER_DATE", "2025-01-15T10:00:00+00:00")
+            .output()
+            .unwrap_or_else(|e| panic!("git {}: {e}", args.join(" ")));
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn make_repo_with_docs_and_imports() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        git(root, &["init"]);
+        git(root, &["config", "user.email", "test@homer.dev"]);
+        git(root, &["config", "user.name", "Test"]);
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"mcp-contract-test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub mod util;\n\npub fn greet() -> String {\n    util::format_name(\"world\")\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/util.rs"),
+            "pub fn format_name(name: &str) -> String {\n    format!(\"Hello, {name}!\")\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("README.md"),
+            "# MCP Contract Test\n\nSee [lib](src/lib.rs).\n",
+        )
+        .unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "Initial commit"]);
+
+        dir
+    }
+
+    async fn build_server_from_pipeline() -> HomerMcpServer {
+        let repo = make_repo_with_docs_and_imports();
+        let store = SqliteStore::in_memory().unwrap();
+        let config = HomerConfig::default();
+        let pipeline = HomerPipeline::new(repo.path());
+        pipeline.run(&store, &config).await.unwrap();
+        HomerMcpServer::from_store(store)
+    }
+
+    #[tokio::test]
+    async fn contract_pipeline_to_mcp_uses_canonical_fields() {
+        let server = build_server_from_pipeline().await;
+
+        let result = server
+            .do_graph(GraphParams {
+                top: Some(5),
+                metric: Some("hits".to_string()),
+                scope: None,
+            })
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["metric"], "hits");
+        assert!(json["results"].is_array());
+
+        // Documents edges produced by extractors must resolve with canonical/compat helpers.
+        let doc_edges = server
+            .store
+            .get_edges_by_kind(HyperedgeKind::Documents)
+            .await
+            .unwrap();
+        for edge in &doc_edges {
+            assert!(
+                contracts::find_document_pair(&edge.members).is_some(),
+                "Documents edge must have contract-compatible roles"
+            );
+        }
+
+        let docs = server
+            .store
+            .find_nodes(&NodeFilter {
+                kind: Some(NodeKind::Document),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        for doc in &docs {
+            assert!(
+                doc.metadata
+                    .contains_key(contracts::metadata_keys::DOC_TYPE),
+                "Document nodes should use canonical doc_type metadata key"
+            );
+        }
     }
 }

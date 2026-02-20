@@ -35,6 +35,12 @@ impl Extractor for StructureExtractor {
         "structure"
     }
 
+    async fn has_work(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let structure_sha = store.get_checkpoint("structure_last_sha").await?;
+        let git_sha = store.get_checkpoint("git_last_sha").await?;
+        Ok(git_sha.is_none() || structure_sha != git_sha)
+    }
+
     #[instrument(skip_all, name = "structure_extract")]
     async fn extract(
         &self,
@@ -50,6 +56,9 @@ impl Extractor for StructureExtractor {
             .file_name()
             .map_or_else(|| "root".to_string(), |n| n.to_string_lossy().to_string());
 
+        let mut root_metadata = HashMap::new();
+        root_metadata.insert("is_root".to_string(), serde_json::json!(true));
+
         let root_module_id = store
             .upsert_node(&Node {
                 id: NodeId(0),
@@ -57,7 +66,7 @@ impl Extractor for StructureExtractor {
                 name: root_name,
                 content_hash: None,
                 last_extracted: Utc::now(),
-                metadata: HashMap::new(),
+                metadata: root_metadata,
             })
             .await?;
         stats.nodes_created += 1;
@@ -96,6 +105,10 @@ impl Extractor for StructureExtractor {
 
         // Extract CI config metadata
         self.extract_ci_config(store, root_module_id).await?;
+
+        if let Some(git_sha) = store.get_checkpoint("git_last_sha").await? {
+            store.set_checkpoint("structure_last_sha", &git_sha).await?;
+        }
 
         stats.duration = start.elapsed();
         info!(

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -58,16 +58,16 @@ impl Extractor for GraphExtractor {
         let start = Instant::now();
         let mut stats = ExtractStats::default();
 
-        // Get all source files that have been stored by the structure extractor
-        let file_filter = crate::types::NodeFilter {
-            kind: Some(NodeKind::File),
-            ..Default::default()
-        };
-        let file_nodes = store.find_nodes(&file_filter).await?;
+        // Incremental scope: changed files since graph checkpoint when possible,
+        // otherwise fall back to full file scan.
+        let file_nodes = self.select_file_nodes(store).await?;
         info!(file_count = file_nodes.len(), "Graph extraction starting");
 
         for file_node in &file_nodes {
             let file_path = self.repo_path.join(&file_node.name);
+            if !file_path.exists() {
+                continue;
+            }
 
             // Check if this file has a supported language
             let Some(lang) = self.registry.for_file(&file_path) else {
@@ -134,6 +134,113 @@ impl Extractor for GraphExtractor {
 }
 
 impl GraphExtractor {
+    async fn select_file_nodes(&self, store: &dyn HomerStore) -> crate::error::Result<Vec<Node>> {
+        let file_filter = crate::types::NodeFilter {
+            kind: Some(NodeKind::File),
+            ..Default::default()
+        };
+        let all_file_nodes = store.find_nodes(&file_filter).await?;
+
+        let graph_sha = store.get_checkpoint("graph_last_sha").await?;
+        let git_sha = store.get_checkpoint("git_last_sha").await?;
+        let (Some(from_sha), Some(to_sha)) = (graph_sha, git_sha) else {
+            return Ok(all_file_nodes);
+        };
+        if from_sha == to_sha {
+            return Ok(Vec::new());
+        }
+
+        let changed_files = match self
+            .collect_changed_files_since(store, &from_sha, &to_sha)
+            .await
+        {
+            Ok(Some(files)) => files,
+            Ok(None) => return Ok(all_file_nodes),
+            Err(e) => {
+                debug!(error = %e, "Falling back to full graph scan");
+                return Ok(all_file_nodes);
+            }
+        };
+
+        if changed_files.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        Ok(all_file_nodes
+            .into_iter()
+            .filter(|n| changed_files.contains(&n.name))
+            .collect())
+    }
+
+    async fn collect_changed_files_since(
+        &self,
+        store: &dyn HomerStore,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> crate::error::Result<Option<HashSet<String>>> {
+        let repo = gix::open(&self.repo_path)
+            .map_err(|e| HomerError::Extract(ExtractError::Git(e.to_string())))?;
+        let head = repo
+            .head_commit()
+            .map_err(|e| HomerError::Extract(ExtractError::Git(e.to_string())))?;
+        if head.id().to_string() != to_sha {
+            return Ok(None);
+        }
+        if !Self::is_ancestor(&head, from_sha) {
+            return Ok(None);
+        }
+
+        let mut commit_shas = Vec::new();
+        let walk = head
+            .ancestors()
+            .all()
+            .map_err(|e| HomerError::Extract(ExtractError::Git(e.to_string())))?;
+        for info in walk {
+            let Ok(info) = info else { continue };
+            let sha = info.id().to_string();
+            if sha == from_sha {
+                break;
+            }
+            commit_shas.push(sha);
+        }
+
+        let mut changed_files = HashSet::new();
+        for sha in &commit_shas {
+            let Some(commit_node) = store.get_node_by_name(NodeKind::Commit, sha).await? else {
+                continue;
+            };
+            let edges = store.get_edges_involving(commit_node.id).await?;
+            for edge in &edges {
+                if edge.kind != HyperedgeKind::Modifies {
+                    continue;
+                }
+                for member in &edge.members {
+                    if member.role != "file" {
+                        continue;
+                    }
+                    if let Some(file_node) = store.get_node(member.node_id).await? {
+                        changed_files.insert(file_node.name);
+                    }
+                }
+            }
+        }
+
+        Ok(Some(changed_files))
+    }
+
+    fn is_ancestor(head: &gix::Commit<'_>, candidate_sha: &str) -> bool {
+        let Ok(walk) = head.ancestors().all() else {
+            return false;
+        };
+        for info in walk {
+            let Ok(info) = info else { continue };
+            if info.id().to_string() == candidate_sha {
+                return true;
+            }
+        }
+        false
+    }
+
     async fn process_file(
         &self,
         store: &dyn HomerStore,

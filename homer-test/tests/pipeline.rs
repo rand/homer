@@ -1,4 +1,8 @@
+use homer_core::config::HomerConfig;
+use homer_core::contracts;
+use homer_core::pipeline::HomerPipeline;
 use homer_core::store::HomerStore;
+use homer_core::store::sqlite::SqliteStore;
 use homer_core::types::{AnalysisKind, NodeFilter, NodeKind};
 use homer_test::{TestRepo, run_pipeline_with_store};
 
@@ -519,4 +523,155 @@ async fn auto_snapshot_at_release_tag() {
         snapshots.len(),
         "Re-running should not create duplicate snapshots"
     );
+}
+
+#[tokio::test]
+async fn pipeline_skips_all_extractors_when_no_new_commits() {
+    let repo = TestRepo::minimal_rust();
+    let store = SqliteStore::in_memory().unwrap();
+    let config = HomerConfig::default();
+    let pipeline = HomerPipeline::new(repo.path());
+
+    let first = pipeline.run(&store, &config).await.unwrap();
+    assert!(first.extract_nodes > 0);
+
+    let second = pipeline.run(&store, &config).await.unwrap();
+    assert_eq!(second.extract_nodes, 0, "No extractor should re-run");
+    assert_eq!(second.extract_edges, 0, "No extractor should re-run");
+}
+
+#[tokio::test]
+async fn graph_extractor_scopes_to_changed_files() {
+    let repo = TestRepo::minimal_rust();
+    let store = SqliteStore::in_memory().unwrap();
+    let config = HomerConfig::default();
+    let pipeline = HomerPipeline::new(repo.path());
+
+    pipeline.run(&store, &config).await.unwrap();
+
+    let unchanged_before = store
+        .get_node_by_name(NodeKind::Function, "src/helpers.rs::format_name")
+        .await
+        .unwrap()
+        .expect("helper function exists on first run");
+    let changed_before = store
+        .get_node_by_name(NodeKind::Function, "src/lib.rs::add")
+        .await
+        .unwrap()
+        .expect("lib function exists on first run");
+
+    std::fs::write(
+        repo.path().join("src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b + 1\n}\n\npub fn multiply(a: i32, b: i32) -> i32 {\n    a * b\n}\n",
+    )
+    .unwrap();
+    let output = std::process::Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git add should succeed");
+    let output = std::process::Command::new("git")
+        .args(["commit", "-m", "Modify lib only"])
+        .current_dir(repo.path())
+        .env("GIT_AUTHOR_DATE", "2025-01-16T10:00:00+00:00")
+        .env("GIT_COMMITTER_DATE", "2025-01-16T10:00:00+00:00")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git commit should succeed");
+
+    pipeline.run(&store, &config).await.unwrap();
+
+    let unchanged_after = store
+        .get_node_by_name(NodeKind::Function, "src/helpers.rs::format_name")
+        .await
+        .unwrap()
+        .expect("helper function still exists");
+    let changed_after = store
+        .get_node_by_name(NodeKind::Function, "src/lib.rs::add")
+        .await
+        .unwrap()
+        .expect("lib function still exists");
+
+    assert_eq!(
+        unchanged_before.last_extracted, unchanged_after.last_extracted,
+        "Unchanged file functions should not be re-extracted by graph extractor"
+    );
+    assert!(
+        changed_after.last_extracted >= changed_before.last_extracted,
+        "Changed file functions should be updated"
+    );
+}
+
+#[tokio::test]
+async fn repeated_full_reextract_does_not_grow_duplicate_edges() {
+    let repo = TestRepo::minimal_rust();
+    let store = SqliteStore::in_memory().unwrap();
+    let config = HomerConfig::default();
+    let pipeline = HomerPipeline::new(repo.path());
+
+    pipeline.run(&store, &config).await.unwrap();
+    let baseline_stats = store.stats().await.unwrap();
+
+    // AGENTS.md is written in render phase (after prompt extraction). Removing it
+    // keeps input surface stable across forced full re-extraction.
+    let agents_path = repo.path().join("AGENTS.md");
+    let _ = std::fs::remove_file(agents_path);
+
+    store.clear_checkpoints().await.unwrap();
+    pipeline.run(&store, &config).await.unwrap();
+    let after_stats = store.stats().await.unwrap();
+
+    assert_eq!(
+        after_stats.total_edges, baseline_stats.total_edges,
+        "Forcing full re-extraction should be idempotent for hyperedges"
+    );
+}
+
+#[tokio::test]
+async fn contract_harness_detects_cross_component_drift() {
+    let repo = TestRepo::documented();
+    let (result, store) = run_pipeline_with_store(repo.path()).await;
+    assert!(
+        result.errors.is_empty(),
+        "pipeline should not report contract-related stage failures: {:?}",
+        result.errors
+    );
+
+    let import_edges = store
+        .get_edges_by_kind(homer_core::types::HyperedgeKind::Imports)
+        .await
+        .unwrap();
+    for edge in &import_edges {
+        assert!(
+            contracts::find_import_pair(&edge.members).is_some(),
+            "Imports edge must remain consumable by canonical role resolver"
+        );
+    }
+
+    let doc_edges = store
+        .get_edges_by_kind(homer_core::types::HyperedgeKind::Documents)
+        .await
+        .unwrap();
+    for edge in &doc_edges {
+        assert!(
+            contracts::find_document_pair(&edge.members).is_some(),
+            "Documents edge must remain consumable by canonical role resolver"
+        );
+    }
+
+    let docs = store
+        .find_nodes(&NodeFilter {
+            kind: Some(NodeKind::Document),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    for doc in &docs {
+        assert!(
+            doc.metadata
+                .contains_key(contracts::metadata_keys::DOC_TYPE),
+            "Document metadata should use canonical doc_type key"
+        );
+    }
 }

@@ -108,7 +108,8 @@ homer update --force-semantic
 ### Notes
 
 - The git extractor processes only commits since the last checkpoint
-- Structure and graph extractors re-scan all files but skip unchanged ones via content hashing
+- Structure/document/prompt extractors skip when checkpoints match git HEAD
+- Graph extractor processes files changed since `graph_last_sha`
 - `--force-semantic` clears SemanticSummary, DesignRationale, and InvariantDescription results
 - Exits with code 10 if pipeline completed with non-fatal errors
 
@@ -478,9 +479,7 @@ homer serve [OPTIONS]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--path` | path | `.` | Path to git repository |
-| `--transport` | string | from config | Transport type: `stdio` or `sse` |
-| `--host` | string | from config | Host for SSE transport |
-| `--port` | integer | from config | Port for SSE transport |
+| `--transport` | string | from config | Transport type (`stdio` only) |
 
 ### Examples
 
@@ -494,8 +493,8 @@ homer serve --path /path/to/project
 
 ### Notes
 
-- Currently only `stdio` transport is implemented
-- Falls back to `[mcp]` config section, then defaults (`stdio`, `127.0.0.1:3000`)
+- Only `stdio` transport is supported
+- Falls back to `[mcp]` config section, then defaults to `stdio`
 - See [MCP Integration](mcp-integration.md) for setup guides
 
 ---

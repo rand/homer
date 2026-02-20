@@ -7,6 +7,7 @@ use chrono::Utc;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId, NodeKind,
@@ -540,12 +541,7 @@ fn extract_domain_term(file_path: &str) -> String {
 // ── Helpers ──────────────────────────────────────────────────────
 
 async fn find_root_module(store: &dyn HomerStore) -> crate::error::Result<Option<NodeId>> {
-    let mod_filter = crate::types::NodeFilter {
-        kind: Some(NodeKind::Module),
-        ..Default::default()
-    };
-    let modules = store.find_nodes(&mod_filter).await?;
-    Ok(modules.iter().min_by_key(|m| m.name.len()).map(|m| m.id))
+    contracts::find_root_module_id(store).await
 }
 
 // ── Tests ────────────────────────────────────────────────────────

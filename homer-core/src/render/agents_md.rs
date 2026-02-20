@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts::{self, metadata_keys};
 use crate::store::HomerStore;
 use crate::types::{AnalysisKind, HyperedgeKind, NodeKind};
 
@@ -316,7 +317,8 @@ async fn render_key_documents(
             let refs = doc_ref_counts.get(&d.id).copied().unwrap_or(0);
             let doc_type = d
                 .metadata
-                .get("type")
+                .get(metadata_keys::DOC_TYPE)
+                .or_else(|| d.metadata.get("type"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("document");
             (d.name.as_str(), doc_type, refs)
@@ -508,7 +510,8 @@ async fn render_change_patterns(
         let _ = writeln!(out, "**Files that change together:**");
         let _ = writeln!(out);
         for (a, b, conf) in co_changes.iter().take(5) {
-            let _ = writeln!(out, "- `{a}` + `{b}` (confidence: {conf:.0}%)");
+            let pct = contracts::fraction_to_percent(*conf);
+            let _ = writeln!(out, "- `{a}` + `{b}` (confidence: {pct:.0}%)");
         }
         let _ = writeln!(out);
     }
@@ -725,12 +728,7 @@ async fn render_dependency_count(
 async fn find_convention_root(
     store: &dyn HomerStore,
 ) -> crate::error::Result<Option<crate::types::NodeId>> {
-    let mod_filter = crate::types::NodeFilter {
-        kind: Some(NodeKind::Module),
-        ..Default::default()
-    };
-    let modules = store.find_nodes(&mod_filter).await?;
-    Ok(modules.iter().min_by_key(|m| m.name.len()).map(|m| m.id))
+    contracts::find_root_module_id(store).await
 }
 
 async fn render_naming_conventions(
@@ -1751,12 +1749,12 @@ mod tests {
                 members: vec![
                     HyperedgeMember {
                         node_id: doc_id,
-                        role: "document".to_string(),
+                        role: crate::contracts::roles::DOCUMENT.to_string(),
                         position: 0,
                     },
                     HyperedgeMember {
                         node_id: file_a,
-                        role: "entity".to_string(),
+                        role: crate::contracts::roles::CODE_ENTITY.to_string(),
                         position: 1,
                     },
                 ],

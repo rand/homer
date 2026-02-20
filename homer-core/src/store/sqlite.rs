@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Mutex;
 
@@ -22,6 +22,7 @@ use super::schema;
 #[derive(Debug)]
 pub struct SqliteStore {
     conn: Mutex<Connection>,
+    db_path: Option<PathBuf>,
 }
 
 impl SqliteStore {
@@ -30,6 +31,7 @@ impl SqliteStore {
         let conn = Connection::open(path).map_err(StoreError::Sqlite)?;
         let store = Self {
             conn: Mutex::new(conn),
+            db_path: Some(path.to_path_buf()),
         };
         store.initialize()?;
         Ok(store)
@@ -40,13 +42,14 @@ impl SqliteStore {
         let conn = Connection::open_in_memory().map_err(StoreError::Sqlite)?;
         let store = Self {
             conn: Mutex::new(conn),
+            db_path: None,
         };
         store.initialize()?;
         Ok(store)
     }
 
     fn initialize(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().expect("homer store mutex poisoned");
+        let mut conn = self.conn.lock().expect("homer store mutex poisoned");
 
         // Performance pragmas (skip WAL for in-memory — it's auto)
         conn.execute_batch(
@@ -59,6 +62,10 @@ impl SqliteStore {
         // Try WAL mode — silently ignored for in-memory
         let _ = conn.execute_batch("PRAGMA journal_mode = WAL;");
         let _ = conn.execute_batch("PRAGMA mmap_size = 268435456;");
+
+        // Legacy DBs may have hyperedges without identity_key; add it before
+        // schema index creation to avoid CREATE INDEX failures.
+        Self::ensure_hyperedge_identity_column(&conn).map_err(StoreError::Sqlite)?;
 
         // Create schema
         conn.execute_batch(schema::SCHEMA_SQL)
@@ -73,6 +80,90 @@ impl SqliteStore {
         )
         .map_err(StoreError::Sqlite)?;
 
+        Self::migrate_hyperedge_identity(&mut conn).map_err(StoreError::Sqlite)?;
+
+        Ok(())
+    }
+
+    /// Pre-schema compatibility shim for older stores.
+    fn ensure_hyperedge_identity_column(conn: &Connection) -> rusqlite::Result<()> {
+        let mut has_hyperedges_table = false;
+        let mut has_identity_key = false;
+
+        let mut table_info = conn.prepare("PRAGMA table_info(hyperedges)")?;
+        let rows = table_info.query_map([], |row| row.get::<_, String>(1))?;
+        for row in rows {
+            has_hyperedges_table = true;
+            if row? == "identity_key" {
+                has_identity_key = true;
+            }
+        }
+
+        if has_hyperedges_table && !has_identity_key {
+            conn.execute("ALTER TABLE hyperedges ADD COLUMN identity_key TEXT", [])?;
+        }
+
+        Ok(())
+    }
+
+    /// Ensure hyperedges have deterministic identity keys and deduplicate legacy rows.
+    fn migrate_hyperedge_identity(conn: &mut Connection) -> rusqlite::Result<()> {
+        let mut has_identity_key = false;
+        let mut table_info = conn.prepare("PRAGMA table_info(hyperedges)")?;
+        let rows = table_info.query_map([], |row| row.get::<_, String>(1))?;
+        for row in rows {
+            if row? == "identity_key" {
+                has_identity_key = true;
+                break;
+            }
+        }
+        if !has_identity_key {
+            conn.execute("ALTER TABLE hyperedges ADD COLUMN identity_key TEXT", [])?;
+        }
+
+        let tx = conn.unchecked_transaction()?;
+        {
+            // Build identity keys for all existing edges.
+            let mut edge_stmt = tx.prepare("SELECT id, kind FROM hyperedges ORDER BY id")?;
+            let mut rows = edge_stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let edge_id: i64 = row.get(0)?;
+                let kind_str: String = row.get(1)?;
+                let kind: HyperedgeKind = serde_json::from_str(&format!("\"{kind_str}\""))
+                    .unwrap_or(HyperedgeKind::Modifies);
+                let members = Self::load_members(&tx, edge_id)?;
+                let identity = Self::edge_identity_key(&kind, &members);
+                tx.execute(
+                    "UPDATE hyperedges SET identity_key = ?1 WHERE id = ?2",
+                    params![identity, edge_id],
+                )?;
+            }
+
+            // Collapse duplicate identities, keeping the newest row by id.
+            tx.execute_batch(
+                "DELETE FROM hyperedges
+                 WHERE id IN (
+                    SELECT dup.id
+                    FROM hyperedges dup
+                    JOIN (
+                        SELECT identity_key, MAX(id) AS keep_id
+                        FROM hyperedges
+                        WHERE identity_key IS NOT NULL
+                        GROUP BY identity_key
+                        HAVING COUNT(*) > 1
+                    ) grouped
+                    ON grouped.identity_key = dup.identity_key
+                    WHERE dup.id != grouped.keep_id
+                 );",
+            )?;
+
+            tx.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_hyperedges_identity_key
+                 ON hyperedges(identity_key)",
+                [],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -117,6 +208,24 @@ impl SqliteStore {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(members)
+    }
+
+    /// Deterministic semantic identity for a hyperedge.
+    ///
+    /// Identity is edge kind plus a sorted role/node set. Position is intentionally
+    /// excluded so equivalent writes with permuted insertion order map to one row.
+    fn edge_identity_key(kind: &HyperedgeKind, members: &[HyperedgeMember]) -> String {
+        let mut parts: Vec<(String, i64)> = members
+            .iter()
+            .map(|m| (m.role.clone(), m.node_id.0))
+            .collect();
+        parts.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+        let mut identity = String::from(kind.as_str());
+        for (role, node_id) in parts {
+            let _ = write!(&mut identity, "|{role}:{node_id}");
+        }
+        identity
     }
 
     /// Helper: read a full hyperedge from a row (without members — caller loads separately).
@@ -486,38 +595,68 @@ impl HomerStore for SqliteStore {
     // ── Hyperedge operations ───────────────────────────────────────
 
     async fn upsert_hyperedge(&self, edge: &Hyperedge) -> crate::error::Result<HyperedgeId> {
-        let conn = self.conn.lock().expect("homer store mutex poisoned");
+        let mut conn = self.conn.lock().expect("homer store mutex poisoned");
         let kind_str = edge.kind.as_str();
+        let identity_key = Self::edge_identity_key(&edge.kind, &edge.members);
         let metadata_json =
             serde_json::to_string(&edge.metadata).map_err(StoreError::Serialization)?;
         let last_updated = edge.last_updated.to_rfc3339();
 
-        conn.execute(
-            "INSERT INTO hyperedges (kind, confidence, last_updated, metadata)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![kind_str, edge.confidence, last_updated, metadata_json],
+        let tx = conn.transaction().map_err(StoreError::Sqlite)?;
+
+        tx.execute(
+            "INSERT INTO hyperedges (kind, identity_key, confidence, last_updated, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(identity_key) DO UPDATE SET
+                kind = excluded.kind,
+                confidence = excluded.confidence,
+                last_updated = excluded.last_updated,
+                metadata = excluded.metadata",
+            params![
+                kind_str,
+                &identity_key,
+                edge.confidence,
+                last_updated,
+                metadata_json
+            ],
         )
         .map_err(StoreError::Sqlite)?;
 
-        let edge_id = conn.last_insert_rowid();
-
-        // Insert members
-        let mut stmt = conn
-            .prepare_cached(
-                "INSERT OR REPLACE INTO hyperedge_members (hyperedge_id, node_id, role, position)
-                 VALUES (?1, ?2, ?3, ?4)",
+        let edge_id: i64 = tx
+            .query_row(
+                "SELECT id FROM hyperedges WHERE identity_key = ?1",
+                params![&identity_key],
+                |row| row.get(0),
             )
             .map_err(StoreError::Sqlite)?;
 
-        for member in &edge.members {
-            stmt.execute(params![
-                edge_id,
-                member.node_id.0,
-                member.role,
-                member.position
-            ])
-            .map_err(StoreError::Sqlite)?;
+        // Members may have changed for an existing identity; rewrite membership set.
+        tx.execute(
+            "DELETE FROM hyperedge_members WHERE hyperedge_id = ?1",
+            params![edge_id],
+        )
+        .map_err(StoreError::Sqlite)?;
+
+        {
+            let mut stmt = tx
+                .prepare_cached(
+                    "INSERT OR REPLACE INTO hyperedge_members (hyperedge_id, node_id, role, position)
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .map_err(StoreError::Sqlite)?;
+
+            for member in &edge.members {
+                stmt.execute(params![
+                    edge_id,
+                    member.node_id.0,
+                    member.role,
+                    member.position
+                ])
+                .map_err(StoreError::Sqlite)?;
+            }
         }
+
+        tx.commit().map_err(StoreError::Sqlite)?;
 
         Ok(HyperedgeId(edge_id))
     }
@@ -1108,13 +1247,19 @@ impl HomerStore for SqliteStore {
             .collect::<rusqlite::Result<HashMap<_, _>>>()
             .map_err(StoreError::Sqlite)?;
 
+        let db_size_bytes = self
+            .db_path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map_or(0, |m| m.len());
+
         Ok(StoreStats {
             total_nodes,
             total_edges,
             total_analyses,
             nodes_by_kind,
             edges_by_kind,
-            db_size_bytes: 0, // In-memory doesn't have a meaningful size
+            db_size_bytes,
         })
     }
 }
@@ -1252,6 +1397,133 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(co, vec![target_id]);
+    }
+
+    #[tokio::test]
+    async fn hyperedge_upsert_is_idempotent_for_equivalent_edges() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let source_id = store
+            .upsert_node(&make_test_node(NodeKind::Function, "main"))
+            .await
+            .unwrap();
+        let target_id = store
+            .upsert_node(&make_test_node(NodeKind::Function, "helper"))
+            .await
+            .unwrap();
+
+        let edge = Hyperedge {
+            id: HyperedgeId(0),
+            kind: HyperedgeKind::Calls,
+            members: vec![
+                HyperedgeMember {
+                    node_id: source_id,
+                    role: "caller".to_string(),
+                    position: 0,
+                },
+                HyperedgeMember {
+                    node_id: target_id,
+                    role: "callee".to_string(),
+                    position: 1,
+                },
+            ],
+            confidence: 0.8,
+            last_updated: Utc::now(),
+            metadata: HashMap::new(),
+        };
+
+        let id1 = store.upsert_hyperedge(&edge).await.unwrap();
+        let id2 = store.upsert_hyperedge(&edge).await.unwrap();
+        assert_eq!(id1, id2, "Equivalent upserts should reuse edge identity");
+
+        let stats = store.stats().await.unwrap();
+        assert_eq!(stats.total_edges, 1, "Should not grow duplicate edges");
+    }
+
+    #[tokio::test]
+    async fn opening_legacy_db_backfills_identity_and_deduplicates() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let conn = Connection::open(tmp.path()).unwrap();
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS homer_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+             CREATE TABLE IF NOT EXISTS nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content_hash INTEGER,
+                last_extracted TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}',
+                UNIQUE(kind, name)
+            );
+             CREATE TABLE IF NOT EXISTS hyperedges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                last_updated TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}'
+            );
+             CREATE TABLE IF NOT EXISTS hyperedge_members (
+                hyperedge_id INTEGER NOT NULL REFERENCES hyperedges(id) ON DELETE CASCADE,
+                node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                role TEXT NOT NULL DEFAULT '',
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (hyperedge_id, node_id, role)
+            );",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO nodes (kind, name, content_hash, last_extracted, metadata)
+             VALUES ('Function', 'main', 1, ?1, '{}')",
+            params![Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO nodes (kind, name, content_hash, last_extracted, metadata)
+             VALUES ('Function', 'helper', 1, ?1, '{}')",
+            params![Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO hyperedges (kind, confidence, last_updated, metadata)
+             VALUES ('Calls', 1.0, ?1, '{}')",
+            params![Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+        let edge_a = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO hyperedges (kind, confidence, last_updated, metadata)
+             VALUES ('Calls', 1.0, ?1, '{}')",
+            params![Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+        let edge_b = conn.last_insert_rowid();
+
+        for edge_id in [edge_a, edge_b] {
+            conn.execute(
+                "INSERT INTO hyperedge_members (hyperedge_id, node_id, role, position)
+                 VALUES (?1, 1, 'caller', 0)",
+                params![edge_id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO hyperedge_members (hyperedge_id, node_id, role, position)
+                 VALUES (?1, 2, 'callee', 1)",
+                params![edge_id],
+            )
+            .unwrap();
+        }
+
+        drop(conn);
+
+        let store = SqliteStore::open(tmp.path()).unwrap();
+        let edges = store.get_edges_by_kind(HyperedgeKind::Calls).await.unwrap();
+        assert_eq!(edges.len(), 1, "Legacy duplicates should be collapsed");
     }
 
     #[tokio::test]

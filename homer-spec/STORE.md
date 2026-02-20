@@ -365,11 +365,13 @@ CREATE INDEX idx_nodes_name ON nodes(name);
 CREATE TABLE hyperedges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,           -- HyperedgeKind enum as string
+    identity_key TEXT,            -- Deterministic semantic identity for idempotent upserts
     confidence REAL DEFAULT 1.0,
     last_updated TEXT NOT NULL,   -- ISO 8601 timestamp
     metadata TEXT DEFAULT '{}'    -- JSON object
 );
 CREATE INDEX idx_hyperedges_kind ON hyperedges(kind);
+CREATE UNIQUE INDEX uq_hyperedges_identity_key ON hyperedges(identity_key);
 
 -- Membership in hyperedges (junction table)
 CREATE TABLE hyperedge_members (
@@ -408,8 +410,8 @@ CREATE VIRTUAL TABLE text_search USING fts5(
 
 -- Incrementality checkpoints
 CREATE TABLE checkpoints (
-    kind TEXT PRIMARY KEY,        -- 'git_sha', 'github_pr', 'github_issue', 'graph_snapshot',
-                                 --  'document_scan', 'prompt_claude', 'prompt_cursor', etc.
+    kind TEXT PRIMARY KEY,        -- 'git_last_sha', 'structure_last_sha', 'graph_last_sha',
+                                 --  'document_last_sha', 'prompt_last_sha', etc.
     value TEXT NOT NULL,          -- The checkpoint value
     updated_at TEXT NOT NULL      -- ISO 8601 timestamp
 );
@@ -641,9 +643,10 @@ Each extractor maintains its own checkpoint:
 | Git | `git_last_sha` | SHA of last processed commit |
 | GitHub PRs | `github_last_pr` | Number of last processed PR |
 | GitHub Issues | `github_last_issue` | Number of last processed issue |
-| Graph | `graph_head_sha` | SHA at which current graph was built |
-| Documents | `document_scan` | Timestamp of last document scan |
-| Prompts (per source) | `prompt_{source}` | Timestamp of last processed interaction per source |
+| Structure | `structure_last_sha` | Git SHA used for latest structure extraction |
+| Graph | `graph_last_sha` | Git SHA at which current graph was built |
+| Documents | `document_last_sha` | Git SHA used for latest document extraction |
+| Prompts | `prompt_last_sha` | Git SHA used for latest prompt extraction |
 
 On `homer update`:
 1. Read checkpoint for each extractor

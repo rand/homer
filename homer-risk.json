@@ -1,55 +1,7 @@
 {
   "version": "1.0",
-  "generated_at": "2026-02-19T20:48:42.157682+00:00",
+  "generated_at": "2026-02-20T00:17:06.448453+00:00",
   "risk_areas": [
-    {
-      "path": "homer-cli",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-cli/src",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
     {
       "path": "homer-core",
       "risk_level": "low",
@@ -83,87 +35,7 @@
       ]
     },
     {
-      "path": "homer-core/src/analyze",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/extract",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/llm",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/pipeline.rs",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
       "path": "homer-core/src/render",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/store",
       "risk_level": "low",
       "risk_score": 0.2,
       "reasons": [
@@ -260,294 +132,6 @@
     },
     {
       "path": "homer-test/tests",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/benches",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "AGENTS.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-cli/src/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-cli/src/commands/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/benches/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/analyze/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/extract/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/llm/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/query/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/render/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-core/src/store/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-graphs/src/languages/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-mcp/src/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-risk.json",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-test/src/.context.md",
-      "risk_level": "low",
-      "risk_score": 0.2,
-      "reasons": [
-        {
-          "type": "knowledge_silo",
-          "description": "Only 1 contributor(s) in recent history",
-          "bus_factor": 1
-        }
-      ],
-      "recommendations": [
-        "Request review from the primary contributor",
-        "Consider pair programming to spread knowledge"
-      ]
-    },
-    {
-      "path": "homer-test/tests/.context.md",
       "risk_level": "low",
       "risk_score": 0.2,
       "reasons": [
@@ -1185,6 +769,166 @@
         "Request review from the primary contributor",
         "Consider pair programming to spread knowledge"
       ]
+    },
+    {
+      "path": "docs/cli-reference.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "docs/cookbook.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "docs/extending.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "docs/internals.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "docs/mcp-integration.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "homer-cli/README.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "homer-core/README.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "homer-graphs/README.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "homer-mcp/README.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
+    },
+    {
+      "path": "homer-test/README.md",
+      "risk_level": "low",
+      "risk_score": 0.2,
+      "reasons": [
+        {
+          "type": "knowledge_silo",
+          "description": "Only 1 contributor(s) in recent history",
+          "bus_factor": 1
+        }
+      ],
+      "recommendations": [
+        "Request review from the primary contributor",
+        "Consider pair programming to spread knowledge"
+      ]
     }
   ],
   "safe_areas": [
@@ -1213,7 +957,25 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-cli",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
       "path": "homer-cli/Cargo.toml",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-cli/src",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-cli/src/commands",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Unknown"
@@ -1255,6 +1017,12 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-core/src/analyze",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
       "path": "homer-core/src/analyze/behavioral.rs",
       "risk_level": "none",
       "risk_score": 0.0,
@@ -1283,6 +1051,12 @@
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/extract",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
     },
     {
       "path": "homer-core/src/extract/document.rs",
@@ -1327,10 +1101,22 @@
       "stability_class": "Unknown"
     },
     {
+      "path": "homer-core/src/llm",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
       "path": "homer-core/src/llm/mod.rs",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/pipeline.rs",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Volatile"
     },
     {
       "path": "homer-core/src/query",
@@ -1361,6 +1147,12 @@
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Declining"
+    },
+    {
+      "path": "homer-core/src/store",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
     },
     {
       "path": "homer-core/src/store/incremental.rs",
@@ -1663,6 +1455,12 @@
       "stability_class": "Volatile"
     },
     {
+      "path": "homer-core/benches",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
       "path": "homer-core/benches/centrality_bench.rs",
       "risk_level": "none",
       "risk_score": 0.0,
@@ -1700,6 +1498,108 @@
     },
     {
       "path": ".homer/config.toml",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "AGENTS.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-cli/src/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-cli/src/commands/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/benches/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/analyze/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/extract/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/llm/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/query/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/render/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-core/src/store/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-graphs/src/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-graphs/src/languages/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-mcp/src/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-risk.json",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-test/src/.context.md",
+      "risk_level": "none",
+      "risk_score": 0.0,
+      "stability_class": "Unknown"
+    },
+    {
+      "path": "homer-test/tests/.context.md",
       "risk_level": "none",
       "risk_score": 0.0,
       "stability_class": "Unknown"
@@ -1798,7 +1698,7 @@
       "path": "homer-core/src/render/report.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Volatile"
+      "stability_class": "Declining"
     },
     {
       "path": "homer-core/src/render/skills.rs",
@@ -1816,7 +1716,7 @@
       "path": "homer-cli/src/commands/render.rs",
       "risk_level": "none",
       "risk_score": 0.0,
-      "stability_class": "Declining"
+      "stability_class": "Volatile"
     },
     {
       "path": "homer-cli/src/commands/risk_check.rs",

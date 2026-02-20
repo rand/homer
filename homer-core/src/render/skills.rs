@@ -13,8 +13,9 @@ use std::path::Path;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
+use crate::contracts;
 use crate::store::HomerStore;
-use crate::types::{AnalysisKind, HyperedgeKind, NodeFilter, NodeKind};
+use crate::types::{AnalysisKind, HyperedgeKind};
 
 use super::traits::Renderer;
 
@@ -115,12 +116,7 @@ async fn derive_from_task_patterns(
     store: &dyn HomerStore,
     skills: &mut Vec<DerivedSkill>,
 ) -> crate::error::Result<()> {
-    let mod_filter = NodeFilter {
-        kind: Some(NodeKind::Module),
-        ..Default::default()
-    };
-    let modules = store.find_nodes(&mod_filter).await?;
-    let root_id = modules.iter().min_by_key(|m| m.name.len()).map(|m| m.id);
+    let root_id = contracts::find_root_module_id(store).await?;
 
     let Some(root_id) = root_id else {
         return Ok(());
@@ -393,6 +389,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use crate::types::{
         AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeMember, Node, NodeId,
+        NodeKind,
     };
     use chrono::Utc;
 

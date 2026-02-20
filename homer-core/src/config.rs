@@ -617,20 +617,38 @@ impl Default for LlmSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpSection {
-    /// Transport type: "stdio" or "sse".
-    pub transport: String,
-    /// Host for SSE transport.
-    pub host: String,
-    /// Port for SSE transport.
-    pub port: u16,
+    /// Transport type.
+    pub transport: McpTransport,
+}
+
+/// Supported MCP transport types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransport {
+    /// Standard input/output transport (the only supported transport).
+    #[serde(alias = "sse")]
+    Stdio,
+}
+
+impl McpTransport {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdio => "stdio",
+        }
+    }
+}
+
+impl Default for McpTransport {
+    fn default() -> Self {
+        Self::Stdio
+    }
 }
 
 impl Default for McpSection {
     fn default() -> Self {
         Self {
-            transport: "stdio".to_string(),
-            host: "127.0.0.1".to_string(),
-            port: 3000,
+            transport: McpTransport::Stdio,
         }
     }
 }
@@ -765,23 +783,27 @@ every_n_commits = 50
     #[test]
     fn mcp_section_defaults() {
         let config = HomerConfig::default();
-        assert_eq!(config.mcp.transport, "stdio");
-        assert_eq!(config.mcp.host, "127.0.0.1");
-        assert_eq!(config.mcp.port, 3000);
+        assert_eq!(config.mcp.transport, McpTransport::Stdio);
     }
 
     #[test]
     fn mcp_section_from_toml() {
         let toml_str = r#"
 [mcp]
-transport = "sse"
-host = "0.0.0.0"
-port = 8080
+transport = "stdio"
 "#;
         let config: HomerConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.mcp.transport, "sse");
-        assert_eq!(config.mcp.host, "0.0.0.0");
-        assert_eq!(config.mcp.port, 8080);
+        assert_eq!(config.mcp.transport, McpTransport::Stdio);
+    }
+
+    #[test]
+    fn mcp_section_legacy_sse_alias_maps_to_stdio() {
+        let toml_str = r#"
+[mcp]
+transport = "sse"
+"#;
+        let config: HomerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mcp.transport, McpTransport::Stdio);
     }
 
     #[test]
