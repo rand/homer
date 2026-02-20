@@ -46,7 +46,7 @@ impl SqliteStore {
     }
 
     fn initialize(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
 
         // Performance pragmas (skip WAL for in-memory — it's auto)
         conn.execute_batch(
@@ -272,7 +272,7 @@ impl HomerStore for SqliteStore {
     // ── Node operations ────────────────────────────────────────────
 
     async fn upsert_node(&self, node: &Node) -> crate::error::Result<NodeId> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let kind_str = node.kind.as_str();
         let metadata_json =
             serde_json::to_string(&node.metadata).map_err(StoreError::Serialization)?;
@@ -306,7 +306,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn get_node(&self, id: NodeId) -> crate::error::Result<Option<Node>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.query_row(
             "SELECT * FROM nodes WHERE id = ?1",
             params![id.0],
@@ -322,7 +322,7 @@ impl HomerStore for SqliteStore {
         kind: NodeKind,
         name: &str,
     ) -> crate::error::Result<Option<Node>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.query_row(
             "SELECT * FROM nodes WHERE kind = ?1 AND name = ?2",
             params![kind.as_str(), name],
@@ -334,7 +334,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn find_nodes(&self, filter: &NodeFilter) -> crate::error::Result<Vec<Node>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut sql = String::from("SELECT * FROM nodes WHERE 1=1");
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -369,7 +369,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn mark_node_stale(&self, id: NodeId) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute(
             "UPDATE nodes SET metadata = json_set(metadata, '$.stale', true) WHERE id = ?1",
             params![id.0],
@@ -379,7 +379,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn delete_stale_nodes(&self, older_than: DateTime<Utc>) -> crate::error::Result<u64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let cutoff = older_than.to_rfc3339();
         let count = conn
             .execute(
@@ -393,7 +393,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn upsert_nodes_batch(&self, nodes: &[Node]) -> crate::error::Result<Vec<NodeId>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let tx = conn.unchecked_transaction().map_err(StoreError::Sqlite)?;
 
         let mut ids = Vec::with_capacity(nodes.len());
@@ -432,7 +432,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn resolve_canonical(&self, node_id: NodeId) -> crate::error::Result<NodeId> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         // Follow Aliases edges: the "old" role points to "new" role.
         // Walk the chain until no more aliases found (max 10 hops to prevent cycles).
         let mut current = node_id;
@@ -457,7 +457,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn alias_chain(&self, node_id: NodeId) -> crate::error::Result<Vec<NodeId>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut chain = vec![node_id];
         let mut current = node_id;
         for _ in 0..10 {
@@ -486,7 +486,7 @@ impl HomerStore for SqliteStore {
     // ── Hyperedge operations ───────────────────────────────────────
 
     async fn upsert_hyperedge(&self, edge: &Hyperedge) -> crate::error::Result<HyperedgeId> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let kind_str = edge.kind.as_str();
         let metadata_json =
             serde_json::to_string(&edge.metadata).map_err(StoreError::Serialization)?;
@@ -523,7 +523,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn get_edges_involving(&self, node_id: NodeId) -> crate::error::Result<Vec<Hyperedge>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT e.* FROM hyperedges e
@@ -548,7 +548,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn get_edges_by_kind(&self, kind: HyperedgeKind) -> crate::error::Result<Vec<Hyperedge>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
             .prepare("SELECT * FROM hyperedges WHERE kind = ?1")
             .map_err(StoreError::Sqlite)?;
@@ -572,7 +572,7 @@ impl HomerStore for SqliteStore {
         node_id: NodeId,
         edge_kind: HyperedgeKind,
     ) -> crate::error::Result<Vec<NodeId>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT m2.node_id FROM hyperedge_members m1
@@ -596,7 +596,7 @@ impl HomerStore for SqliteStore {
     // ── Analysis results ───────────────────────────────────────────
 
     async fn store_analysis(&self, result: &AnalysisResult) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let data_json = serde_json::to_string(&result.data).map_err(StoreError::Serialization)?;
         let computed_at = result.computed_at.to_rfc3339();
 
@@ -625,7 +625,7 @@ impl HomerStore for SqliteStore {
         node_id: NodeId,
         kind: AnalysisKind,
     ) -> crate::error::Result<Option<AnalysisResult>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.query_row(
             "SELECT * FROM analysis_results WHERE node_id = ?1 AND kind = ?2",
             params![node_id.0, kind.as_str()],
@@ -652,7 +652,7 @@ impl HomerStore for SqliteStore {
         &self,
         kind: AnalysisKind,
     ) -> crate::error::Result<Vec<AnalysisResult>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
             .prepare("SELECT * FROM analysis_results WHERE kind = ?1")
             .map_err(StoreError::Sqlite)?;
@@ -681,7 +681,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn invalidate_analyses(&self, node_id: NodeId) -> crate::error::Result<u64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let count = conn
             .execute(
                 "DELETE FROM analysis_results WHERE node_id = ?1",
@@ -699,7 +699,7 @@ impl HomerStore for SqliteStore {
         if kinds.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let placeholders: Vec<String> = (0..kinds.len()).map(|i| format!("?{}", i + 2)).collect();
         let sql = format!(
             "DELETE FROM analysis_results WHERE node_id = ?1 AND kind IN ({})",
@@ -719,7 +719,7 @@ impl HomerStore for SqliteStore {
         if kinds.is_empty() {
             return Ok(0);
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let placeholders: Vec<String> = (0..kinds.len()).map(|i| format!("?{}", i + 1)).collect();
         let sql = format!(
             "DELETE FROM analysis_results WHERE kind IN ({})",
@@ -743,7 +743,7 @@ impl HomerStore for SqliteStore {
         if keep_kinds.is_empty() {
             return self.invalidate_analyses(node_id).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let placeholders: Vec<String> = (0..keep_kinds.len())
             .map(|i| format!("?{}", i + 2))
             .collect();
@@ -769,7 +769,7 @@ impl HomerStore for SqliteStore {
         content_type: &str,
         content: &str,
     ) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute(
             "INSERT INTO text_search (node_id, content_type, content) VALUES (?1, ?2, ?3)",
             params![node_id.0.to_string(), content_type, content],
@@ -783,7 +783,7 @@ impl HomerStore for SqliteStore {
         query: &str,
         scope: SearchScope,
     ) -> crate::error::Result<Vec<SearchHit>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let limit = scope.limit.unwrap_or(20);
 
         let mut stmt = conn
@@ -815,7 +815,7 @@ impl HomerStore for SqliteStore {
     // ── Checkpoints ────────────────────────────────────────────────
 
     async fn get_checkpoint(&self, kind: &str) -> crate::error::Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.query_row(
             "SELECT value FROM checkpoints WHERE kind = ?1",
             params![kind],
@@ -827,7 +827,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn set_checkpoint(&self, kind: &str, value: &str) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO checkpoints (kind, value, updated_at)
@@ -840,14 +840,14 @@ impl HomerStore for SqliteStore {
     }
 
     async fn clear_checkpoints(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute("DELETE FROM checkpoints", [])
             .map_err(StoreError::Sqlite)?;
         Ok(())
     }
 
     async fn clear_analyses(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute("DELETE FROM analysis_results", [])
             .map_err(StoreError::Sqlite)?;
         Ok(())
@@ -857,7 +857,7 @@ impl HomerStore for SqliteStore {
         if kinds.is_empty() {
             return Ok(());
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let placeholders: Vec<&str> = kinds.iter().map(|_| "?").collect();
         let sql = format!(
             "DELETE FROM analysis_results WHERE kind IN ({})",
@@ -877,7 +877,7 @@ impl HomerStore for SqliteStore {
     // ── Graph snapshots ────────────────────────────────────────────
 
     async fn create_snapshot(&self, label: &str) -> crate::error::Result<SnapshotId> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let now = Utc::now().to_rfc3339();
 
         let node_count: i64 = conn
@@ -912,7 +912,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn list_snapshots(&self) -> crate::error::Result<Vec<SnapshotInfo>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
             .prepare(
                 "SELECT id, label, snapshot_at, node_count, edge_count
@@ -951,7 +951,7 @@ impl HomerStore for SqliteStore {
     }
 
     async fn delete_snapshot(&self, label: &str) -> crate::error::Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         // CASCADE will clean up snapshot_nodes and snapshot_edges
         let deleted = conn
             .execute(
@@ -967,7 +967,7 @@ impl HomerStore for SqliteStore {
         from: SnapshotId,
         to: SnapshotId,
     ) -> crate::error::Result<GraphDiff> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
 
         // Nodes added: in `to` but not in `from`
         let added_nodes = conn
@@ -1049,20 +1049,20 @@ impl HomerStore for SqliteStore {
     // ── Transactions ──────────────────────────────────────────────
 
     async fn begin_transaction(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute_batch("BEGIN IMMEDIATE")
             .map_err(StoreError::Sqlite)?;
         Ok(())
     }
 
     async fn commit_transaction(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute_batch("COMMIT").map_err(StoreError::Sqlite)?;
         Ok(())
     }
 
     async fn rollback_transaction(&self) -> crate::error::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
         conn.execute_batch("ROLLBACK").map_err(StoreError::Sqlite)?;
         Ok(())
     }
@@ -1070,7 +1070,7 @@ impl HomerStore for SqliteStore {
     // ── Metrics ────────────────────────────────────────────────────
 
     async fn stats(&self) -> crate::error::Result<StoreStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("homer store mutex poisoned");
 
         let total_nodes: u64 = conn
             .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))
