@@ -129,8 +129,10 @@ fn print_results(args: &RiskCheckArgs, violations: &[serde_json::Value]) {
             "violations": violations.len(),
             "results": violations,
         });
-        // unwrap is safe: we constructed this JSON ourselves
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).expect("self-constructed JSON is serializable")
+        );
     } else if violations.is_empty() {
         println!(
             "Risk check PASS — no files exceed threshold {:.1}",

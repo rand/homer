@@ -64,13 +64,14 @@ impl ProgressReporter for IndicatifReporter {
                 ProgressStyle::with_template(
                     "{spinner:.green} {msg} [{bar:30.cyan/blue}] {pos}/{len} ({eta})",
                 )
-                .unwrap()
+                .expect("valid progress template")
                 .progress_chars("=> "),
             );
         } else {
             self.bar.set_length(0);
             self.bar.set_style(
-                ProgressStyle::with_template("{spinner:.green} {msg} {pos} items").unwrap(),
+                ProgressStyle::with_template("{spinner:.green} {msg} {pos} items")
+                    .expect("valid progress template"),
             );
         }
         self.bar.set_message(task.to_string());
