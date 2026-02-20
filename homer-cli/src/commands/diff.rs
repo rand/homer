@@ -477,7 +477,9 @@ fn print_json(
         "ref1": ref1,
         "ref2": ref2,
     });
-    let obj = json.as_object_mut().unwrap();
+    let Some(obj) = json.as_object_mut() else {
+        anyhow::bail!("internal error: expected JSON object in diff output");
+    };
 
     if filter.show_topology {
         let t = &impact.topology;

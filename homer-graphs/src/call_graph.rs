@@ -118,7 +118,7 @@ pub fn compute_enclosing_functions(
         // Find the smallest enclosing function by span containment
         let mut best: Option<(ScopeNodeId, usize)> = None;
         for func in &functions {
-            let func_span = func.span.unwrap(); // filtered above
+            let Some(func_span) = func.span else { continue; };
             if span_contains(func_span, ref_span) {
                 let size = span_size(func_span);
                 if best.is_none_or(|(_, s)| size < s) {
