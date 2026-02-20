@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -163,32 +163,32 @@ fn print_ranking_json(
 
 fn print_ranking_dot(entries: &[(String, f64, String)], metric: &str) {
     let mut out = String::new();
-    writeln!(out, "digraph {metric} {{").unwrap();
-    writeln!(out, "  rankdir=LR;").unwrap();
-    writeln!(out, "  node [shape=box];").unwrap();
+    let _ = writeln!(out, "digraph {metric} {{");
+    let _ = writeln!(out, "  rankdir=LR;");
+    let _ = writeln!(out, "  node [shape=box];");
 
     for (name, val, _cls) in entries {
         let label = name.rsplit("::").next().unwrap_or(name);
         let safe_id = name.replace(['/', '.', ':', '-'], "_");
-        writeln!(out, "  {safe_id} [label=\"{label}\\n{val:.4}\"];").unwrap();
+        let _ = writeln!(out, "  {safe_id} [label=\"{label}\\n{val:.4}\"];");
     }
 
-    writeln!(out, "}}").unwrap();
+    let _ = writeln!(out, "}}");
     print!("{out}");
 }
 
 fn print_ranking_mermaid(entries: &[(String, f64, String)], metric: &str) {
     let mut out = String::new();
-    writeln!(out, "graph LR").unwrap();
-    writeln!(out, "  subgraph {metric}").unwrap();
+    let _ = writeln!(out, "graph LR");
+    let _ = writeln!(out, "  subgraph {metric}");
 
     for (name, val, _cls) in entries {
         let label = name.rsplit("::").next().unwrap_or(name);
         let safe_id = name.replace(['/', '.', ':', '-'], "_");
-        writeln!(out, "    {safe_id}[\"{label}<br/>{val:.4}\"]").unwrap();
+        let _ = writeln!(out, "    {safe_id}[\"{label}<br/>{val:.4}\"]");
     }
 
-    writeln!(out, "  end").unwrap();
+    let _ = writeln!(out, "  end");
     print!("{out}");
 }
 

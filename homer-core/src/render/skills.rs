@@ -7,7 +7,7 @@
 #![allow(clippy::cast_precision_loss)]
 
 use std::collections::HashMap;
-use std::fmt::Write;
+use std::fmt::Write as _;
 use std::path::Path;
 
 use tracing::{info, instrument};
@@ -286,53 +286,52 @@ fn render_skill(skill: &DerivedSkill) -> String {
     let mut out = String::with_capacity(1024);
 
     // Frontmatter
-    writeln!(out, "---").unwrap();
-    writeln!(out, "description: \"{}\"", skill.description).unwrap();
-    writeln!(out, "---").unwrap();
-    writeln!(out).unwrap();
+    let _ = writeln!(out, "---");
+    let _ = writeln!(out, "description: \"{}\"", skill.description);
+    let _ = writeln!(out, "---");
+    let _ = writeln!(out);
 
     // Title
-    writeln!(out, "# {}", skill.name).unwrap();
-    writeln!(out).unwrap();
+    let _ = writeln!(out, "# {}", skill.name);
+    let _ = writeln!(out);
 
     let source_label = match skill.source {
         SkillSource::TaskPattern => "agent interaction patterns",
         SkillSource::CoChange => "co-change analysis",
     };
-    writeln!(
+    let _ = writeln!(
         out,
         "Based on analysis of {} occurrences from {source_label}:",
         skill.frequency
-    )
-    .unwrap();
-    writeln!(out).unwrap();
+    );
+    let _ = writeln!(out);
 
     // Files
-    writeln!(out, "## Files to modify").unwrap();
-    writeln!(out).unwrap();
+    let _ = writeln!(out, "## Files to modify");
+    let _ = writeln!(out);
     for (i, file) in skill.files.iter().enumerate() {
-        writeln!(out, "{}. `{file}`", i + 1).unwrap();
+        let _ = writeln!(out, "{}. `{file}`", i + 1);
     }
-    writeln!(out).unwrap();
+    let _ = writeln!(out);
 
     // Patterns
     if !skill.patterns.is_empty() {
-        writeln!(out, "## Patterns to follow").unwrap();
-        writeln!(out).unwrap();
+        let _ = writeln!(out, "## Patterns to follow");
+        let _ = writeln!(out);
         for pattern in &skill.patterns {
-            writeln!(out, "- {pattern}").unwrap();
+            let _ = writeln!(out, "- {pattern}");
         }
-        writeln!(out).unwrap();
+        let _ = writeln!(out);
     }
 
     // Pitfalls
     if !skill.pitfalls.is_empty() {
-        writeln!(out, "## Common pitfalls").unwrap();
-        writeln!(out).unwrap();
+        let _ = writeln!(out, "## Common pitfalls");
+        let _ = writeln!(out);
         for pitfall in &skill.pitfalls {
-            writeln!(out, "- {pitfall}").unwrap();
+            let _ = writeln!(out, "- {pitfall}");
         }
-        writeln!(out).unwrap();
+        let _ = writeln!(out);
     }
 
     out
