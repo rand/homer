@@ -36,29 +36,35 @@ typed_id!(SnapshotId);
 /// Every entity Homer tracks is a node in the hypergraph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NodeKind {
-    // Code entities
+    /// A source file tracked by the repository.
     File,
+    /// A function or method definition.
     Function,
+    /// A type definition (struct, class, enum, interface, etc.).
     Type,
+    /// A logical module or directory grouping.
     Module,
-
-    // Git/forge entities
+    /// A git commit.
     Commit,
+    /// A pull request or merge request.
     PullRequest,
+    /// An issue or bug report.
     Issue,
+    /// A code contributor (author or reviewer).
     Contributor,
+    /// A tagged release or version.
     Release,
-
-    // Derived entities
+    /// An abstract concept derived from analysis.
     Concept,
+    /// An external package dependency.
     ExternalDep,
-
-    // Documentation entities
+    /// A documentation file (README, ADR, guide, etc.).
     Document,
-
-    // Agent interaction entities
+    /// An AI agent prompt or interaction.
     Prompt,
+    /// A rule defined for AI agents (e.g., in CLAUDE.md).
     AgentRule,
+    /// A recorded AI agent session.
     AgentSession,
 }
 
@@ -90,6 +96,7 @@ impl std::fmt::Display for NodeKind {
     }
 }
 
+/// A node in the Homer hypergraph — the fundamental unit of repository data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -109,30 +116,41 @@ pub struct Node {
 /// A hyperedge connects one or more nodes with a typed relationship.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HyperedgeKind {
-    // Extraction-derived edges
+    /// Commit → File: a commit modifies one or more files.
     Modifies,
+    /// File → File: one file imports symbols from another.
     Imports,
+    /// Function → Function: one function calls another.
     Calls,
+    /// Type → Type: one type inherits from or implements another.
     Inherits,
+    /// Symbol reference → definition resolution.
     Resolves,
+    /// Contributor → Commit: authorship attribution.
     Authored,
+    /// Contributor → `PullRequest`: code review participation.
     Reviewed,
+    /// Commit → Commit: a merge commit includes other commits.
     Includes,
+    /// File → Module: file membership in a directory/module.
     BelongsTo,
+    /// Module → `ExternalDep`: a module depends on an external package.
     DependsOn,
+    /// Name → Name: two names refer to the same entity (re-exports).
     Aliases,
-
-    // Document-derived edges
+    /// Document → Entity: a document describes an entity.
     Documents,
-
-    // Prompt-derived edges
+    /// `AgentSession` → File: files referenced in an agent prompt.
     PromptReferences,
+    /// `AgentSession` → File: files modified during an agent session.
     PromptModifiedFiles,
+    /// `AgentSession` → `AgentSession`: sessions covering related work.
     RelatedPrompts,
-
-    // Analysis-derived edges
+    /// File → File: files that frequently change together (analysis-derived).
     CoChanges,
+    /// Node → Community: membership in a detected community cluster.
     ClusterMembers,
+    /// Community → Node: a community encompasses a set of nodes.
     Encompasses,
 }
 
@@ -181,8 +199,10 @@ pub struct Hyperedge {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
+/// A node's participation in a hyperedge, including its role and position.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HyperedgeMember {
+    /// The node participating in this relationship.
     pub node_id: NodeId,
     /// Role within this edge (e.g., "caller"/"callee", "author"/"commit").
     pub role: String,
@@ -194,43 +214,55 @@ pub struct HyperedgeMember {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisKind {
-    // Behavioral
+    /// How often a file changes (commit count, percentile).
     ChangeFrequency,
+    /// Rate of code churn (lines added/deleted over time).
     ChurnVelocity,
+    /// Bus factor and contributor distribution for a file.
     ContributorConcentration,
+    /// Documentation coverage percentage for entities.
     DocumentationCoverage,
+    /// How recently documentation was updated relative to code.
     DocumentationFreshness,
+    /// Files most frequently referenced in agent prompts.
     PromptHotspot,
+    /// Files where agents most frequently self-correct.
     CorrectionHotspot,
-
-    // Centrality
+    /// `PageRank` centrality score from the call/import graph.
     PageRank,
+    /// Betweenness centrality — how often a node bridges paths.
     BetweennessCentrality,
+    /// HITS authority and hub scores.
     HITSScore,
+    /// Weighted composite of all centrality and behavioral signals.
     CompositeSalience,
-
-    // Community
+    /// Which community cluster a node belongs to (Louvain).
     CommunityAssignment,
-
-    // Temporal
+    /// How a node's centrality is changing across snapshots.
     CentralityTrend,
+    /// Whether community boundaries are shifting over time.
     ArchitecturalDrift,
+    /// Stability classification combining churn and centrality.
     StabilityClassification,
-
-    // Convention
+    /// Dominant naming convention (`snake_case`, `camelCase`, etc.).
     NamingPattern,
+    /// Testing framework and patterns detected in the repo.
     TestingPattern,
+    /// Error handling patterns (Result, exceptions, error codes).
     ErrorHandlingPattern,
+    /// Documentation style and coverage conventions.
     DocumentationStylePattern,
+    /// Validation of agent rule files against actual codebase behavior.
     AgentRuleValidation,
-
-    // Task Pattern
+    /// Common task patterns derived from agent session analysis.
     TaskPattern,
+    /// Domain-specific vocabulary extracted from code and prompts.
     DomainVocabulary,
-
-    // Semantic (LLM)
+    /// LLM-generated natural language summary of an entity.
     SemanticSummary,
+    /// LLM-generated design rationale for an architectural choice.
     DesignRationale,
+    /// LLM-generated invariant description for a type or function.
     InvariantDescription,
 }
 
@@ -266,10 +298,14 @@ impl AnalysisKind {
     }
 }
 
+/// A stored analysis result — the output of an analyzer for a specific node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
+    /// Unique identifier for this result.
     pub id: AnalysisResultId,
+    /// The node this analysis was computed for.
     pub node_id: NodeId,
+    /// Which analyzer produced this result.
     pub kind: AnalysisKind,
     /// Structured result data (JSON).
     pub data: serde_json::Value,
@@ -342,40 +378,57 @@ impl<T> Default for BatchResult<T> {
 
 // ── Store query types ──────────────────────────────────────────────
 
-/// Filter for finding nodes.
+/// Filter for finding nodes in the store.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeFilter {
+    /// Only return nodes of this kind.
     pub kind: Option<NodeKind>,
+    /// Only return nodes whose name starts with this prefix.
     pub name_prefix: Option<String>,
+    /// Only return nodes whose name contains this substring.
     pub name_contains: Option<String>,
+    /// Maximum number of results to return.
     pub limit: Option<u32>,
 }
 
 /// Scope for full-text search queries.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchScope {
+    /// Only search content of these types (e.g., "code", "doc").
     pub content_types: Option<Vec<String>>,
+    /// Only search nodes of these kinds.
     pub node_kinds: Option<Vec<NodeKind>>,
+    /// Maximum number of results to return.
     pub limit: Option<u32>,
 }
 
 /// A single full-text search hit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
+    /// The node that matched the search query.
     pub node_id: NodeId,
+    /// What type of content matched (e.g., "code", "doc").
     pub content_type: String,
+    /// Excerpt of the matching content.
     pub snippet: String,
+    /// Relevance score (higher is more relevant).
     pub rank: f64,
 }
 
 /// Summary statistics for the store.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StoreStats {
+    /// Total number of nodes in the hypergraph.
     pub total_nodes: u64,
+    /// Total number of hyperedges.
     pub total_edges: u64,
+    /// Total number of stored analysis results.
     pub total_analyses: u64,
+    /// Node count broken down by `NodeKind`.
     pub nodes_by_kind: HashMap<String, u64>,
+    /// Edge count broken down by `HyperedgeKind`.
     pub edges_by_kind: HashMap<String, u64>,
+    /// Database file size in bytes.
     pub db_size_bytes: u64,
 }
 
@@ -477,19 +530,28 @@ pub fn extract_directed_pair(members: &[HyperedgeMember]) -> (NodeId, NodeId) {
 /// Metadata about a stored snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotInfo {
+    /// Unique identifier for this snapshot.
     pub id: SnapshotId,
+    /// Human-readable label (e.g., "v1.0.0" or "auto-50").
     pub label: String,
+    /// When this snapshot was taken.
     pub snapshot_at: DateTime<Utc>,
+    /// Total number of nodes at snapshot time.
     pub node_count: u64,
+    /// Total number of edges at snapshot time.
     pub edge_count: u64,
 }
 
 /// Graph diff between two snapshots.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GraphDiff {
+    /// Nodes present in the newer snapshot but not the older.
     pub added_nodes: Vec<NodeId>,
+    /// Nodes present in the older snapshot but not the newer.
     pub removed_nodes: Vec<NodeId>,
+    /// Edges present in the newer snapshot but not the older.
     pub added_edges: Vec<HyperedgeId>,
+    /// Edges present in the older snapshot but not the newer.
     pub removed_edges: Vec<HyperedgeId>,
 }
 
@@ -520,26 +582,41 @@ pub struct DiffHunk {
     pub new_lines: u32,
 }
 
+/// Status of a file in a git diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DiffStatus {
+    /// File was newly added.
     Added,
+    /// File content was modified.
     Modified,
+    /// File was deleted.
     Deleted,
+    /// File was renamed (possibly with modifications).
     Renamed,
+    /// File was copied.
     Copied,
 }
 
 /// Document type classification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DocumentType {
+    /// README file (project overview).
     Readme,
+    /// Contributing guidelines.
     Contributing,
+    /// Architecture documentation.
     Architecture,
+    /// Architecture Decision Record.
     Adr,
+    /// Release changelog or history.
     Changelog,
+    /// API reference documentation.
     ApiDoc,
+    /// How-to guide or tutorial.
     Guide,
+    /// Operational runbook or playbook.
     Runbook,
+    /// Unclassified documentation.
     Other,
 }
 
