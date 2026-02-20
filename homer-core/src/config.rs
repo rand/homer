@@ -4,10 +4,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AnalysisDepth {
+    /// Minimal analysis: 500 commits, no GitHub/GitLab, no LLM.
     Shallow,
+    /// Default: 2000 commits, 200 PRs, 500 issues, 50 LLM batch.
     #[default]
     Standard,
+    /// Extended: all commits, 500 PRs, 1000 issues, 200 LLM batch.
     Deep,
+    /// Exhaustive: all commits, all PRs/issues, max LLM batch.
     Full,
 }
 
@@ -82,9 +86,11 @@ impl HomerConfig {
     }
 }
 
+/// Top-level `[homer]` section: version and database path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HomerSection {
+    /// Homer config schema version.
     pub version: String,
     /// Custom database path (overrides default `.homer/homer.db`).
     pub db_path: Option<String>,
@@ -99,11 +105,16 @@ impl Default for HomerSection {
     }
 }
 
+/// Settings for the analysis pipeline phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisSection {
+    /// Controls which features are enabled and extraction limits.
     pub depth: AnalysisDepth,
+    /// Minimum composite salience score (0.0–1.0) for LLM enrichment.
     pub llm_salience_threshold: f64,
+    /// Maximum number of nodes sent to the LLM per pipeline run.
     pub max_llm_batch_size: u32,
+    /// Policy for invalidating stale analysis results.
     #[serde(default)]
     pub invalidation: InvalidationPolicy,
 }
@@ -144,17 +155,24 @@ impl Default for InvalidationPolicy {
     }
 }
 
+/// Settings for the extraction pipeline phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractionSection {
+    /// Maximum git commits to process (0 = unlimited).
     pub max_commits: u32,
+    /// File-structure extraction settings (include/exclude globs).
     #[serde(default)]
     pub structure: StructureExtractionConfig,
+    /// Document extraction settings (READMEs, changelogs, doc comments).
     #[serde(default)]
     pub documents: DocumentExtractionConfig,
+    /// AI prompt/session extraction settings.
     #[serde(default)]
     pub prompts: PromptExtractionConfig,
+    /// GitHub API extraction settings (PRs, issues, reviews).
     #[serde(default)]
     pub github: GitHubExtractionConfig,
+    /// GitLab API extraction settings (MRs, issues, reviews).
     #[serde(default)]
     pub gitlab: GitLabExtractionConfig,
 }
@@ -172,9 +190,12 @@ impl Default for ExtractionSection {
     }
 }
 
+/// Glob patterns controlling which source files are extracted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructureExtractionConfig {
+    /// Glob patterns for files to include (e.g. `"**/*.rs"`).
     pub include_patterns: Vec<String>,
+    /// Glob patterns for files to exclude (e.g. `"**/target/**"`).
     pub exclude_patterns: Vec<String>,
 }
 
@@ -202,11 +223,16 @@ impl Default for StructureExtractionConfig {
     }
 }
 
+/// Controls extraction of documentation files and doc comments.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentExtractionConfig {
+    /// Whether document extraction is enabled at all.
     pub enabled: bool,
+    /// Whether to extract inline doc comments from source files.
     pub include_doc_comments: bool,
+    /// Glob patterns for documentation files to include.
     pub include_patterns: Vec<String>,
+    /// Glob patterns for documentation files to exclude.
     pub exclude_patterns: Vec<String>,
 }
 
@@ -229,13 +255,19 @@ impl Default for DocumentExtractionConfig {
     }
 }
 
+/// Controls extraction of AI prompt and agent session data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct PromptExtractionConfig {
+    /// Whether prompt extraction is enabled (default: false).
     pub enabled: bool,
+    /// Source identifiers to extract from (e.g. `"claude-code"`).
     pub sources: Vec<String>,
+    /// Whether to redact potentially sensitive content.
     pub redact_sensitive: bool,
+    /// Whether to store full prompt text (vs. summaries only).
     pub store_full_text: bool,
+    /// Whether to hash session IDs for privacy.
     pub hash_session_ids: bool,
 }
 
@@ -303,10 +335,13 @@ impl Default for GitLabExtractionConfig {
     }
 }
 
+/// Settings for tree-sitter graph extraction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GraphSection {
+    /// Language selection: `"auto"` or an explicit list.
     pub languages: LanguageConfig,
+    /// Automatic graph snapshot creation policy.
     #[serde(default)]
     pub snapshots: SnapshotsConfig,
 }
@@ -389,19 +424,27 @@ impl<'de> Deserialize<'de> for LanguageConfig {
     }
 }
 
+/// Settings for output renderers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderersSection {
+    /// Renderer names to run (e.g. `["agents-md", "module-ctx"]`).
     pub enabled: Vec<String>,
+    /// Config for the `agents-md` renderer.
     #[serde(default, rename = "agents-md")]
     pub agents_md: AgentsMdConfig,
+    /// Config for the `module-ctx` renderer.
     #[serde(default, rename = "module-ctx")]
     pub module_ctx: ModuleContextConfig,
+    /// Config for the `skills` renderer.
     #[serde(default)]
     pub skills: SkillsConfig,
+    /// Config for the `topos-spec` renderer.
     #[serde(default, rename = "topos-spec")]
     pub topos_spec: ToposSpecConfig,
+    /// Config for the `report` renderer.
     #[serde(default)]
     pub report: ReportConfig,
+    /// Config for the `risk-map` renderer.
     #[serde(default, rename = "risk-map")]
     pub risk_map: RiskMapConfig,
 }
@@ -537,9 +580,12 @@ impl Default for RiskMapConfig {
     }
 }
 
+/// LLM provider configuration for semantic analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmSection {
+    /// Provider name (e.g. `"anthropic"`, `"openai"`).
     pub provider: String,
+    /// Model identifier (e.g. `"claude-sonnet-4-20250514"`).
     pub model: String,
     /// Environment variable holding the API key.
     pub api_key_env: String,
