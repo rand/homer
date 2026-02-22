@@ -198,7 +198,11 @@ impl DocumentExtractor {
 
         // Index document content for FTS
         let preview = if content.len() > 2000 {
-            &content[..2000]
+            let mut end = 2000;
+            while !content.is_char_boundary(end) {
+                end -= 1;
+            }
+            &content[..end]
         } else {
             &content
         };
@@ -576,5 +580,31 @@ mod tests {
         // Should find the reference (deduplicated)
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target_path, "src/main.rs");
+    }
+
+    #[test]
+    fn preview_truncation_respects_utf8_boundaries() {
+        // U+2500 (box-drawing ─) is 3 bytes: E2 94 80
+        // Place a multi-byte char so it straddles byte 2000
+        let mut content = "a".repeat(1999); // 1999 ASCII bytes
+        content.push('\u{2500}'); // bytes 1999..2002
+        content.push_str("end");
+        assert!(content.len() > 2000);
+
+        // Simulate the preview truncation logic
+        let preview = if content.len() > 2000 {
+            let mut end = 2000;
+            while !content.is_char_boundary(end) {
+                end -= 1;
+            }
+            &content[..end]
+        } else {
+            &content
+        };
+
+        // Must be valid UTF-8 (it's a &str, so this is guaranteed if we didn't panic)
+        // and must not include the partial character
+        assert_eq!(preview.len(), 1999);
+        assert_eq!(preview, "a".repeat(1999).as_str());
     }
 }
