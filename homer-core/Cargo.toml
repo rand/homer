@@ -47,5 +47,13 @@ harness = false
 name = "centrality_bench"
 harness = false
 
+[[bench]]
+name = "community_bench"
+harness = false
+
+[[bench]]
+name = "scope_graph_bench"
+harness = false
+
 [lints]
 workspace = true
