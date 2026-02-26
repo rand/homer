@@ -4,7 +4,7 @@ Step-by-step guides for adding languages, analyzers, renderers, and extractors t
 
 ## Adding a Language
 
-Homer's graph extraction engine supports 6 languages. Each language implements the `LanguageSupport` trait in `homer-graphs/src/languages/`. To add a new one:
+Homer's graph extraction engine supports 11 languages (Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, PHP). Each language implements the `LanguageSupport` trait in `homer-graphs/src/languages/`. To add a new one:
 
 ### 1. Add the tree-sitter grammar
 

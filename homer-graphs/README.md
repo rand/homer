@@ -1,6 +1,6 @@
 # homer-graphs
 
-Tree-sitter-based source code extraction engine for Homer. Parses 6 languages to build scope graphs, call graphs, and import graphs.
+Tree-sitter-based source code extraction engine for Homer. Parses 11 languages to build scope graphs, call graphs, and import graphs.
 
 ## Supported Languages
 

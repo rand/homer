@@ -946,11 +946,7 @@ mod tests {
             (arb_node_id(), arb_node_id(), 0.1..=1.0f64)
         }
 
-        fn make_hyperedge(
-            src: NodeId,
-            dst: NodeId,
-            confidence: f64,
-        ) -> Hyperedge {
+        fn make_hyperedge(src: NodeId, dst: NodeId, confidence: f64) -> Hyperedge {
             use chrono::Utc;
             Hyperedge {
                 id: HyperedgeId(0),

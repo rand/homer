@@ -518,14 +518,10 @@ async fn compute_stability(
 /// `Function` nodes, so we project them to file level using `BelongsTo`
 /// containment relationships. This produces a single connected graph
 /// suitable for community detection.
-async fn build_file_level_graph(
-    store: &dyn HomerStore,
-) -> crate::error::Result<InMemoryGraph> {
+async fn build_file_level_graph(store: &dyn HomerStore) -> crate::error::Result<InMemoryGraph> {
     // Step 1: Build child → parent mapping from BelongsTo edges.
     // This maps Function/Type node IDs to their containing File node IDs.
-    let belongs_to = store
-        .get_edges_by_kind(HyperedgeKind::BelongsTo)
-        .await?;
+    let belongs_to = store.get_edges_by_kind(HyperedgeKind::BelongsTo).await?;
     let mut child_to_parent: HashMap<NodeId, NodeId> = HashMap::new();
     for edge in &belongs_to {
         let container = edge.members.iter().find(|m| m.role == "container");
@@ -536,29 +532,24 @@ async fn build_file_level_graph(
     }
 
     // Step 2: Build graph from import edges (already file-level)
-    let import_edges = store
-        .get_edges_by_kind(HyperedgeKind::Imports)
-        .await?;
-    let call_edges = store
-        .get_edges_by_kind(HyperedgeKind::Calls)
-        .await?;
+    let import_edges = store.get_edges_by_kind(HyperedgeKind::Imports).await?;
+    let call_edges = store.get_edges_by_kind(HyperedgeKind::Calls).await?;
 
     let mut graph = DiGraph::<NodeId, f64>::new();
     let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::new();
     let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::new();
 
-    let ensure_node =
-        |id: NodeId,
-         g: &mut DiGraph<NodeId, f64>,
-         n2i: &mut HashMap<NodeId, NodeIndex>,
-         i2n: &mut HashMap<NodeIndex, NodeId>|
-         -> NodeIndex {
-            *n2i.entry(id).or_insert_with(|| {
-                let idx = g.add_node(id);
-                i2n.insert(idx, id);
-                idx
-            })
-        };
+    let ensure_node = |id: NodeId,
+                       g: &mut DiGraph<NodeId, f64>,
+                       n2i: &mut HashMap<NodeId, NodeIndex>,
+                       i2n: &mut HashMap<NodeIndex, NodeId>|
+     -> NodeIndex {
+        *n2i.entry(id).or_insert_with(|| {
+            let idx = g.add_node(id);
+            i2n.insert(idx, id);
+            idx
+        })
+    };
 
     // Add import edges directly (file → file)
     for edge in &import_edges {
@@ -578,18 +569,8 @@ async fn build_file_level_graph(
         let src_file = resolve_to_file(src_func, &child_to_parent);
         let dst_file = resolve_to_file(dst_func, &child_to_parent);
         if src_file != dst_file {
-            let src = ensure_node(
-                src_file,
-                &mut graph,
-                &mut node_to_index,
-                &mut index_to_node,
-            );
-            let tgt = ensure_node(
-                dst_file,
-                &mut graph,
-                &mut node_to_index,
-                &mut index_to_node,
-            );
+            let src = ensure_node(src_file, &mut graph, &mut node_to_index, &mut index_to_node);
+            let tgt = ensure_node(dst_file, &mut graph, &mut node_to_index, &mut index_to_node);
             graph.add_edge(src, tgt, edge.confidence);
         }
     }
@@ -614,10 +595,7 @@ async fn build_file_level_graph(
 /// In Homer's model, `BelongsTo` maps `Function`→`File` and `Type`→`File`
 /// directly (one level). `File`→`Module` mappings also exist but we
 /// stop at file level since community detection groups files.
-fn resolve_to_file(
-    node_id: NodeId,
-    child_to_file: &HashMap<NodeId, NodeId>,
-) -> NodeId {
+fn resolve_to_file(node_id: NodeId, child_to_file: &HashMap<NodeId, NodeId>) -> NodeId {
     child_to_file.get(&node_id).copied().unwrap_or(node_id)
 }
 
@@ -1161,9 +1139,7 @@ mod tests {
         use proptest::prelude::*;
 
         /// Build an `InMemoryGraph` from a list of directed edges.
-        fn graph_from_edges(
-            edges: &[(i64, i64, f64)],
-        ) -> InMemoryGraph {
+        fn graph_from_edges(edges: &[(i64, i64, f64)]) -> InMemoryGraph {
             use petgraph::graph::DiGraph;
             let mut graph = DiGraph::<NodeId, f64>::new();
             let mut n2i = HashMap::new();
