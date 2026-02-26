@@ -358,8 +358,8 @@ async fn analyze_testing(
 
 fn is_source_file(name: &str) -> bool {
     let ext_list = [
-        ".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java",
-        ".rb", ".swift", ".kt", ".kts", ".cs", ".php",
+        ".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rb", ".swift", ".kt", ".kts",
+        ".cs", ".php",
     ];
     ext_list.iter().any(|ext| name.ends_with(ext))
 }
@@ -1095,8 +1095,7 @@ mod tests {
 
     #[test]
     fn detect_csharp_error_patterns() {
-        let source =
-            "try {\n  Foo();\n} catch (Exception ex) {\n  throw new InvalidOperationException();\n}";
+        let source = "try {\n  Foo();\n} catch (Exception ex) {\n  throw new InvalidOperationException();\n}";
         let patterns = detect_error_patterns(source, "csharp");
         assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
         assert!(patterns.iter().any(|(p, _)| p == "throw"));
@@ -1113,8 +1112,7 @@ mod tests {
 
     #[test]
     fn detect_java_error_patterns() {
-        let source =
-            "try {\n  foo();\n} catch (Exception e) {\n  throw new RuntimeException();\n}";
+        let source = "try {\n  foo();\n} catch (Exception e) {\n  throw new RuntimeException();\n}";
         let patterns = detect_error_patterns(source, "java");
         assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
         assert!(patterns.iter().any(|(p, _)| p == "throw"));
