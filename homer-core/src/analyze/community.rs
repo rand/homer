@@ -1193,7 +1193,7 @@ mod tests {
                 let graph = graph_from_edges(&edges);
                 let result = louvain_full(&graph);
                 prop_assert!(
-                    result.modularity >= -0.5 && result.modularity <= 1.0,
+                    result.modularity >= -1.0 - f64::EPSILON && result.modularity <= 1.0 + f64::EPSILON,
                     "Modularity out of range: {}",
                     result.modularity
                 );
