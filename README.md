@@ -69,7 +69,7 @@ Homer combines four disciplines:
 1. **Behavioral analysis** — Mining git history for change frequency, churn velocity, co-change patterns, contributor concentration (bus factor)
 2. **Structural graph analysis** — Call graphs, import graphs, centrality metrics (PageRank, betweenness, HITS), community detection (Louvain)
 3. **Composite salience** — Combining behavioral and structural signals into a single score that identifies the most important code, including stable high-centrality nodes that behavioral analysis alone would miss
-4. **Tree-sitter extraction** — Scope-graph-based parsing of function definitions, call sites, imports, and doc comments for Rust, Python, TypeScript, JavaScript, Go, and Java
+4. **Tree-sitter extraction** — Scope-graph-based parsing of function definitions, call sites, imports, and doc comments for Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, and PHP
 
 The pipeline runs in four stages: **Extract** (git history, file structure, call/import graphs, documents, GitHub/GitLab PRs, prompts) -> **Auto Snapshots** (release-triggered and commit-count-triggered graph snapshots) -> **Analyze** (behavioral, centrality, community, temporal, convention, task pattern, semantic) -> **Render** (AGENTS.md, context maps, risk map, skills, topos-spec, report).
 
@@ -105,13 +105,18 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 | JavaScript | Precise (scope graph) |
 | Go | Precise (scope graph) |
 | Java | Precise (scope graph) |
+| Ruby | Precise (scope graph) |
+| Swift | Precise (scope graph) |
+| Kotlin | Precise (scope graph) |
+| C# | Precise (scope graph) |
+| PHP | Precise (scope graph) |
 
 ## Architecture
 
 Cargo workspace with 5 crates:
 
 - **homer-core** — Pipeline orchestration, extractors, analyzers, renderers, SQLite store
-- **homer-graphs** — Tree-sitter heuristic extraction engine (11 languages)
+- **homer-graphs** — Tree-sitter scope graph extraction engine (11 languages)
 - **homer-cli** — `homer` binary (clap-based CLI)
 - **homer-mcp** — MCP server for AI agent integration
 - **homer-test** — Integration test fixtures and helpers

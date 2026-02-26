@@ -33,7 +33,7 @@ Currently supports `stdio` transport only. The server communicates over stdin/st
 
 ## Tests
 
-7 unit tests covering tool logic with in-memory store.
+9 unit tests covering tool logic with in-memory store.
 
 ## Documentation
 

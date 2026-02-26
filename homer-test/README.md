@@ -4,7 +4,7 @@ Integration tests and fixture utilities for Homer.
 
 ## Tests
 
-`tests/pipeline.rs` contains 14 integration tests covering:
+`tests/pipeline.rs` contains 18 integration tests covering:
 
 - End-to-end pipeline execution (extract → analyze → render)
 - Auto snapshot creation (release-triggered and commit-count-triggered)
@@ -12,6 +12,7 @@ Integration tests and fixture utilities for Homer.
 - Empty directory handling
 - Snapshot idempotency
 - Pipeline fault tolerance (git errors don't abort other extractors)
+- Multi-language detection and extraction (all 11 languages)
 
 ## Test Utilities
 

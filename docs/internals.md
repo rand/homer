@@ -232,11 +232,11 @@ Each tool method (`do_query`, `do_graph`, etc.) is separated from the MCP dispat
 
 - **Unit tests**: `#[cfg(test)]` modules in each source file
 - **Property tests**: `proptest` for serde round-trips (types, store operations)
-- **Integration tests**: `homer-test/tests/pipeline.rs` — 14 tests covering end-to-end pipeline, auto snapshots, empty repos
+- **Integration tests**: `homer-test/tests/pipeline.rs` — 18 tests covering end-to-end pipeline, auto snapshots, empty repos, multi-language extraction
 - **MCP tests**: In-memory store tests for each MCP tool
 - **Benchmarks**: Criterion benchmarks in `homer-core/benches/` (store, parse, centrality)
 
-Total: 357 tests (223 core + 102 graphs + 7 MCP + 11 CLI + 14 integration).
+Total: 457 tests (246 core + 173 graphs + 9 MCP + 11 CLI + 18 integration).
 
 ## Next Steps
 

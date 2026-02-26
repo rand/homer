@@ -12,6 +12,11 @@ Tree-sitter-based source code extraction engine for Homer. Parses 11 languages t
 | JavaScript | `languages/javascript.rs` | Precise | Shares ECMAScript scope walker |
 | Go | `languages/go.rs` | Precise | Package imports |
 | Java | `languages/java.rs` | Precise | Package/class imports |
+| Ruby | `languages/ruby.rs` | Precise | `def`/`class`/`module` scope gates, `require` imports |
+| Swift | `languages/swift.rs` | Precise | Structs, classes, protocols, access control |
+| Kotlin | `languages/kotlin.rs` | Precise | Classes, objects, companion objects, KDoc |
+| C# | `languages/csharp.rs` | Precise | Namespaces (block + file-scoped), XML docs |
+| PHP | `languages/php.rs` | Precise | Namespaces, traits, PHPDoc |
 
 All languages use `ResolutionTier::Precise` via scope graph construction.
 
@@ -38,6 +43,11 @@ languages/
   javascript.rs   — JavaScript support
   go.rs           — Go support
   java.rs         — Java support
+  ruby.rs         — Ruby support
+  swift.rs        — Swift support
+  kotlin.rs       — Kotlin support
+  csharp.rs       — C# support
+  php.rs          — PHP support
   fallback.rs     — Fallback for unsupported languages
   ecma_scope.rs   — Shared ECMAScript scope graph walker (TS + JS)
 ```
@@ -48,4 +58,4 @@ See [docs/extending.md](../docs/extending.md) for a step-by-step guide.
 
 ## Tests
 
-102 unit tests covering extraction, scope resolution, and cross-language consistency.
+173 unit tests covering extraction, scope resolution, and cross-language consistency.

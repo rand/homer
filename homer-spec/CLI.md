@@ -433,7 +433,7 @@ include_comments = true            # Fetch MR/issue comments
 include_reviews = true             # Fetch MR approvals
 
 [extraction.structure]
-include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.go", "**/*.java"]
+include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.go", "**/*.java", "**/*.rb", "**/*.swift", "**/*.kt", "**/*.kts", "**/*.cs", "**/*.php"]
 exclude_patterns = ["**/node_modules/**", "**/vendor/**", "**/target/**", "**/.git/**", "**/dist/**"]
 
 [extraction.documents]

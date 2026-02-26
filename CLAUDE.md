@@ -16,18 +16,18 @@ cargo fmt --all -- --check       # Format check
 Cargo workspace with 5 crates:
 
 - **homer-core** — Pipeline, extractors, analyzers, renderers, SQLite store
-- **homer-graphs** — Tree-sitter heuristic extraction (11 languages)
-- **homer-cli** — `homer` binary (clap subcommands: init, update, status)
-- **homer-mcp** — MCP server (Phase 3)
+- **homer-graphs** — Tree-sitter scope graph extraction (11 languages)
+- **homer-cli** — `homer` binary (clap subcommands: init, update, status, query, graph, diff, render, snapshot, risk-check, serve)
+- **homer-mcp** — MCP server (rmcp, 5 tools)
 - **homer-test** — Integration test fixtures and helpers
 
 ## Pipeline Flow
 
-Extract → Analyze → Render
+Extract → Auto Snapshots → Analyze → Render
 
-1. **Extractors** (git, structure, graph, document) populate the hypergraph store
-2. **Analyzers** (behavioral) compute derived metrics
-3. **Renderers** (AGENTS.md) produce output artifacts
+1. **Extractors** (git, structure, graph, document, github, gitlab, prompt) populate the hypergraph store
+2. **Analyzers** (behavioral, centrality, community, temporal, convention, task pattern, semantic) compute derived metrics in topological order
+3. **Renderers** (agents-md, module-ctx, risk-map, skills, topos-spec, report) produce output artifacts
 
 ## Key Conventions
 

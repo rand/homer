@@ -279,7 +279,7 @@ Not all files are relevant for code analysis. Homer filters by configuration:
 
 ```toml
 [extraction.structure]
-include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.go", "**/*.java"]
+include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.go", "**/*.java", "**/*.rb", "**/*.swift", "**/*.kt", "**/*.kts", "**/*.cs", "**/*.php"]
 exclude_patterns = [
     "**/node_modules/**",
     "**/vendor/**", 

@@ -82,10 +82,10 @@ This projection is what enables centrality analysis. The accuracy of the call gr
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResolutionTier {
     /// Full scope graph rules — precise cross-file resolution
-    /// Languages: Python, JavaScript, TypeScript, Java, Rust, Go
+    /// Languages: Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, PHP
     Precise,
-    /// Tree-sitter heuristic — within-file + import-based guesses  
-    /// Languages: C, C++, Ruby, PHP, Swift, Kotlin, and others with tree-sitter grammars
+    /// Tree-sitter heuristic — within-file + import-based guesses
+    /// Languages: C, C++, and others with tree-sitter grammars
     Heuristic,
     /// Package manifest only — module-level dependencies
     /// Languages: any with a recognized package manifest
@@ -156,6 +156,11 @@ impl LanguageRegistry {
         reg.register(Arc::new(languages::JavaSupport::new()));
         reg.register(Arc::new(languages::RustSupport::new()));
         reg.register(Arc::new(languages::GoSupport::new()));
+        reg.register(Arc::new(languages::RubySupport::new()));
+        reg.register(Arc::new(languages::SwiftSupport::new()));
+        reg.register(Arc::new(languages::KotlinSupport::new()));
+        reg.register(Arc::new(languages::CSharpSupport::new()));
+        reg.register(Arc::new(languages::PhpSupport::new()));
         reg.register(Arc::new(languages::FallbackSupport::new()));
         reg
     }
@@ -181,6 +186,16 @@ impl LanguageRegistry {
 - Interface satisfaction is implicit (no `implements` keyword) — detect via structural matching
 - Method sets and embedding
 - `init()` function semantics
+
+**Ruby** (Precise): Ruby's `def`/`class`/`module` keywords create clear scope gates. `require` and `require_relative` map to file-level imports. All module/class-level definitions are public by default.
+
+**Swift** (Precise): Clean syntax with structs, classes, enums, and protocols. Access control (`private`/`fileprivate`) determines export visibility. `init` declarations treated as functions.
+
+**Kotlin** (Precise): Similar to Java with Kotlin-specific additions — `object` declarations (singletons), companion objects, and KDoc (`/** */`). Visibility modifiers (`private`/`internal`) gate exports.
+
+**C#** (Precise): Namespace scoping (both block-scoped and file-scoped) plus class/struct/interface/enum/record model. XML documentation comments (`///`). `public`/`internal` members exported.
+
+**PHP** (Precise): Namespace definitions, class/interface/trait system, and PHPDoc (`/** */`). Tree parsed with `LANGUAGE_PHP` for full PHP files. Class members respect `public`/`private`/`protected` visibility.
 
 **C/C++** (Heuristic): Too complex for full scope graph rules (macros, headers, include paths, templates, ADL). Heuristic extraction can still identify function definitions, call sites, and `#include` relationships. Confidence scores will be lower.
 

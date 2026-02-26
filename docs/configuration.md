@@ -34,6 +34,8 @@ max_commits = 2000
 include_patterns = [
     "**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx",
     "**/*.js", "**/*.jsx", "**/*.go", "**/*.java",
+    "**/*.rb", "**/*.swift", "**/*.kt", "**/*.kts",
+    "**/*.cs", "**/*.php",
 ]
 exclude_patterns = [
     "**/node_modules/**", "**/vendor/**", "**/target/**",
@@ -257,7 +259,7 @@ Set to `"auto"` to detect languages from file extensions, or provide an explicit
 languages = ["rust", "python", "typescript"]
 ```
 
-Supported language identifiers: `rust`, `python`, `typescript`, `javascript`, `go`, `java`.
+Supported language identifiers: `rust`, `python`, `typescript`, `javascript`, `go`, `java`, `ruby`, `swift`, `kotlin`, `csharp`, `php`.
 
 ### `[graph.snapshots]`
 
