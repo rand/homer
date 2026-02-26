@@ -1,4 +1,4 @@
-//! Tree-sitter based graph extraction for 6 languages.
+//! Tree-sitter based graph extraction for 11 languages.
 //!
 //! Produces [`FileGraph`] (precise tier) and [`HeuristicGraph`] (heuristic tier)
 //! representations of source files, including definitions, references, calls,
@@ -194,6 +194,16 @@ pub enum DocStyle {
     Javadoc,
     /// Go `//` comment blocks preceding declarations.
     Godoc,
+    /// Swift `///` triple-slash documentation comments.
+    SwiftDoc,
+    /// Kotlin `/** */` with `@param`/`@return` tags.
+    KDoc,
+    /// PHP `/** */` with `@param`/`@return` tags.
+    PhpDoc,
+    /// C# `///` XML documentation comments.
+    XmlDoc,
+    /// Ruby `#` comments with `@param`/`@return` YARD tags.
+    Yard,
     /// Unrecognized or custom documentation style.
     Other(String),
 }

@@ -1,11 +1,16 @@
+pub mod csharp;
 mod ecma_scope;
 pub mod fallback;
 pub mod go;
 mod helpers;
 pub mod java;
 pub mod javascript;
+pub mod kotlin;
+pub mod php;
 pub mod python;
+pub mod ruby;
 pub mod rust;
+pub mod swift;
 pub mod typescript;
 
 use std::collections::HashMap;
@@ -115,6 +120,11 @@ impl LanguageRegistry {
         reg.register(Arc::new(javascript::JavaScriptSupport));
         reg.register(Arc::new(go::GoSupport));
         reg.register(Arc::new(java::JavaSupport));
+        reg.register(Arc::new(kotlin::KotlinSupport));
+        reg.register(Arc::new(ruby::RubySupport));
+        reg.register(Arc::new(swift::SwiftSupport));
+        reg.register(Arc::new(csharp::CSharpSupport));
+        reg.register(Arc::new(php::PhpSupport));
         reg.register(Arc::new(fallback::FallbackSupport));
         reg
     }

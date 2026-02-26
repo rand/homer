@@ -137,7 +137,42 @@ impl TestRepo {
             "import express from 'express';\n\nconst app = express();\n\nfunction greet(name: string): string {\n    return `Hello, ${name}!`;\n}\n\napp.get('/', (req, res) => {\n    res.send(greet('world'));\n});\n\nexport { greet };\n",
         ).unwrap();
 
-        std::fs::write(root.join("README.md"), "# Multi-Language Project\n\n## Components\n\n- [Rust service](rust-svc/src/main.rs)\n- [Python library](py-lib/main.py)\n- [TypeScript app](ts-app/src/index.ts)\n").unwrap();
+        // Ruby
+        std::fs::create_dir_all(root.join("ruby-gem/lib")).unwrap();
+        std::fs::write(
+            root.join("ruby-gem/lib/greeter.rb"),
+            "require 'json'\n\nmodule Greeter\n  class Hello\n    def greet(name)\n      puts \"Hello, #{name}!\"\n    end\n  end\nend\n",
+        ).unwrap();
+
+        // Swift
+        std::fs::create_dir_all(root.join("swift-pkg/Sources")).unwrap();
+        std::fs::write(
+            root.join("swift-pkg/Sources/main.swift"),
+            "import Foundation\n\nstruct Greeter {\n    func greet(name: String) -> String {\n        return \"Hello, \\(name)!\"\n    }\n}\n\nfunc run() {\n    let g = Greeter()\n    print(g.greet(name: \"world\"))\n}\n",
+        ).unwrap();
+
+        // Kotlin
+        std::fs::create_dir_all(root.join("kotlin-app/src/main")).unwrap();
+        std::fs::write(
+            root.join("kotlin-app/src/main/App.kt"),
+            "package com.example\n\nclass App {\n    fun greet(name: String): String {\n        return \"Hello, $name!\"\n    }\n}\n\nfun main() {\n    val app = App()\n    println(app.greet(\"world\"))\n}\n",
+        ).unwrap();
+
+        // C#
+        std::fs::create_dir_all(root.join("dotnet-svc")).unwrap();
+        std::fs::write(
+            root.join("dotnet-svc/Program.cs"),
+            "using System;\n\nnamespace DotnetSvc\n{\n    public class Program\n    {\n        public static void Main(string[] args)\n        {\n            Console.WriteLine(Greet(\"world\"));\n        }\n\n        public static string Greet(string name)\n        {\n            return $\"Hello, {name}!\";\n        }\n    }\n}\n",
+        ).unwrap();
+
+        // PHP
+        std::fs::create_dir_all(root.join("php-api/src")).unwrap();
+        std::fs::write(
+            root.join("php-api/src/Handler.php"),
+            "<?php\nnamespace App\\Http;\n\nclass Handler\n{\n    public function handle($request)\n    {\n        return response('OK');\n    }\n}\n\nfunction helper() { return 42; }\n",
+        ).unwrap();
+
+        std::fs::write(root.join("README.md"), "# Multi-Language Project\n\n## Components\n\n- [Rust service](rust-svc/src/main.rs)\n- [Python library](py-lib/main.py)\n- [TypeScript app](ts-app/src/index.ts)\n- [Ruby gem](ruby-gem/lib/greeter.rb)\n- [Swift package](swift-pkg/Sources/main.swift)\n- [Kotlin app](kotlin-app/src/main/App.kt)\n- [C# service](dotnet-svc/Program.cs)\n- [PHP API](php-api/src/Handler.php)\n").unwrap();
 
         git(root, &["add", "."]);
         git(root, &["commit", "-m", "Initial multi-lang project"]);
