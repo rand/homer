@@ -1153,4 +1153,130 @@ mod tests {
             assert!(c >= 0.0, "Contribution should be non-negative, got {c}");
         }
     }
+
+    // ── Property-based tests for Louvain ─────────────────────────
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Build an `InMemoryGraph` from a list of directed edges.
+        fn graph_from_edges(
+            edges: &[(i64, i64, f64)],
+        ) -> InMemoryGraph {
+            use petgraph::graph::DiGraph;
+            let mut graph = DiGraph::<NodeId, f64>::new();
+            let mut n2i = HashMap::new();
+            let mut i2n = HashMap::new();
+            for &(s, t, w) in edges {
+                for id in [NodeId(s), NodeId(t)] {
+                    n2i.entry(id).or_insert_with(|| {
+                        let idx = graph.add_node(id);
+                        i2n.insert(idx, id);
+                        idx
+                    });
+                }
+                let si = n2i[&NodeId(s)];
+                let ti = n2i[&NodeId(t)];
+                graph.add_edge(si, ti, w);
+            }
+            InMemoryGraph {
+                graph,
+                node_to_index: n2i,
+                index_to_node: i2n,
+            }
+        }
+
+        /// Strategy: small random graph with 3-20 nodes and edges.
+        fn arb_graph() -> impl Strategy<Value = Vec<(i64, i64, f64)>> {
+            let node_range = 0..20i64;
+            let edge = (node_range.clone(), node_range, 0.1..=1.0f64);
+            proptest::collection::vec(edge, 1..30)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(80))]
+
+            /// Every node in the graph receives a community assignment.
+            #[test]
+            fn every_node_assigned(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                prop_assert_eq!(
+                    result.communities.len(),
+                    graph.node_count(),
+                    "Not all nodes assigned: {} communities for {} nodes",
+                    result.communities.len(),
+                    graph.node_count()
+                );
+            }
+
+            /// Modularity is always in the valid range [-0.5, 1.0].
+            #[test]
+            fn modularity_bounded(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                prop_assert!(
+                    result.modularity >= -0.5 && result.modularity <= 1.0,
+                    "Modularity out of range: {}",
+                    result.modularity
+                );
+            }
+
+            /// At least one Louvain level is always performed.
+            #[test]
+            fn at_least_one_level(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                prop_assert!(result.levels >= 1);
+            }
+
+            /// Community IDs are contiguous starting from 0.
+            #[test]
+            fn community_ids_contiguous(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                let mut ids: Vec<u32> = result.communities.values().copied().collect();
+                ids.sort_unstable();
+                ids.dedup();
+                for (i, &id) in ids.iter().enumerate() {
+                    prop_assert_eq!(id, i as u32);
+                }
+            }
+
+            /// Modularity contributions sum to approximately the modularity score.
+            #[test]
+            fn contributions_sum_to_modularity(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                let contribs = modularity_contributions(&result.communities, &graph);
+                let sum: f64 = contribs.values().sum();
+                // Allow floating point tolerance
+                let diff = (sum - result.modularity).abs();
+                prop_assert!(
+                    diff < 0.01,
+                    "Contribution sum {:.6} differs from modularity {:.6} by {:.6}",
+                    sum, result.modularity, diff
+                );
+            }
+        }
+
+        /// Empty graph → empty communities with zero modularity.
+        #[test]
+        fn empty_graph_empty_result() {
+            let graph = graph_from_edges(&[]);
+            let result = louvain_full(&graph);
+            assert!(result.communities.is_empty());
+            assert!(result.modularity.abs() < f64::EPSILON);
+            assert_eq!(result.levels, 0);
+        }
+
+        /// Single node with self-loop → one community.
+        #[test]
+        fn single_node_one_community() {
+            let graph = graph_from_edges(&[(0, 0, 1.0)]);
+            let result = louvain_full(&graph);
+            assert_eq!(result.communities.len(), 1);
+        }
+    }
 }
