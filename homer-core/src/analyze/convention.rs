@@ -357,7 +357,10 @@ async fn analyze_testing(
 }
 
 fn is_source_file(name: &str) -> bool {
-    let ext_list = [".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java"];
+    let ext_list = [
+        ".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java",
+        ".rb", ".swift", ".kt", ".kts", ".cs", ".php",
+    ];
     ext_list.iter().any(|ext| name.ends_with(ext))
 }
 
@@ -396,6 +399,52 @@ fn detect_test_framework(repo_path: &Path) -> Option<String> {
     // Check for Go test
     if repo_path.join("go.mod").exists() {
         return Some("go test".to_string());
+    }
+
+    // Ruby: Gemfile with test gems
+    if let Ok(content) = std::fs::read_to_string(repo_path.join("Gemfile")) {
+        if content.contains("rspec") {
+            return Some("rspec".to_string());
+        }
+        if content.contains("minitest") {
+            return Some("minitest".to_string());
+        }
+    }
+
+    // Swift: Package.swift with test targets
+    if repo_path.join("Package.swift").exists() {
+        return Some("swift test".to_string());
+    }
+
+    // Kotlin: build.gradle.kts or build.gradle
+    if let Ok(content) = std::fs::read_to_string(repo_path.join("build.gradle.kts"))
+        .or_else(|_| std::fs::read_to_string(repo_path.join("build.gradle")))
+    {
+        if content.contains("junit") || content.contains("kotest") {
+            return Some("junit".to_string());
+        }
+    }
+
+    // C#: *.csproj in root
+    let csproj_exists = std::fs::read_dir(repo_path)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "csproj"))
+        })
+        .unwrap_or(false);
+    if csproj_exists {
+        return Some("dotnet test".to_string());
+    }
+
+    // PHP: composer.json with test framework
+    if let Ok(content) = std::fs::read_to_string(repo_path.join("composer.json")) {
+        if content.contains("phpunit") {
+            return Some("phpunit".to_string());
+        }
+        if content.contains("pest") {
+            return Some("pest".to_string());
+        }
     }
 
     None
@@ -519,7 +568,7 @@ fn detect_error_patterns(source: &str, lang: &str) -> Vec<(String, u32)> {
                 results.push(("raise".to_string(), raises));
             }
         }
-        "typescript" | "javascript" => {
+        "typescript" | "javascript" | "java" | "kotlin" | "csharp" | "php" => {
             let try_catch = count_pattern(source, "catch ");
             if try_catch > 0 {
                 results.push(("try/catch".to_string(), try_catch));
@@ -533,6 +582,30 @@ fn detect_error_patterns(source: &str, lang: &str) -> Vec<(String, u32)> {
             let if_err = count_pattern(source, "if err != nil");
             if if_err > 0 {
                 results.push(("if err != nil".to_string(), if_err));
+            }
+        }
+        "ruby" => {
+            let rescue = count_pattern(source, "rescue ");
+            if rescue > 0 {
+                results.push(("rescue".to_string(), rescue));
+            }
+            let raise = count_pattern(source, "raise ");
+            if raise > 0 {
+                results.push(("raise".to_string(), raise));
+            }
+        }
+        "swift" => {
+            let do_catch = count_pattern(source, "catch ");
+            if do_catch > 0 {
+                results.push(("do/catch".to_string(), do_catch));
+            }
+            let throw_kw = count_pattern(source, "throw ");
+            if throw_kw > 0 {
+                results.push(("throw".to_string(), throw_kw));
+            }
+            let try_kw = count_pattern(source, "try ");
+            if try_kw > 0 {
+                results.push(("try".to_string(), try_kw));
             }
         }
         _ => {}
@@ -983,6 +1056,68 @@ mod tests {
         assert!(is_source_file("utils.py"));
         assert!(!is_source_file("README.md"));
         assert!(!is_source_file("Cargo.toml"));
+    }
+
+    #[test]
+    fn source_file_detection_new_languages() {
+        assert!(is_source_file("app.rb"));
+        assert!(is_source_file("main.swift"));
+        assert!(is_source_file("App.kt"));
+        assert!(is_source_file("Main.kts"));
+        assert!(is_source_file("Program.cs"));
+        assert!(is_source_file("handler.php"));
+    }
+
+    #[test]
+    fn detect_ruby_error_patterns() {
+        let source = "begin\n  foo()\nrescue StandardError => e\n  raise RuntimeError\nend";
+        let patterns = detect_error_patterns(source, "ruby");
+        assert!(patterns.iter().any(|(p, _)| p == "rescue"));
+        assert!(patterns.iter().any(|(p, _)| p == "raise"));
+    }
+
+    #[test]
+    fn detect_swift_error_patterns() {
+        let source = "do {\n  try foo()\n} catch {\n  throw MyError.bad\n}";
+        let patterns = detect_error_patterns(source, "swift");
+        assert!(patterns.iter().any(|(p, _)| p == "do/catch"));
+        assert!(patterns.iter().any(|(p, _)| p == "throw"));
+        assert!(patterns.iter().any(|(p, _)| p == "try"));
+    }
+
+    #[test]
+    fn detect_kotlin_error_patterns() {
+        let source = "try {\n  foo()\n} catch (e: Exception) {\n  throw RuntimeException()\n}";
+        let patterns = detect_error_patterns(source, "kotlin");
+        assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
+        assert!(patterns.iter().any(|(p, _)| p == "throw"));
+    }
+
+    #[test]
+    fn detect_csharp_error_patterns() {
+        let source =
+            "try {\n  Foo();\n} catch (Exception ex) {\n  throw new InvalidOperationException();\n}";
+        let patterns = detect_error_patterns(source, "csharp");
+        assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
+        assert!(patterns.iter().any(|(p, _)| p == "throw"));
+    }
+
+    #[test]
+    fn detect_php_error_patterns() {
+        let source =
+            "try {\n  foo();\n} catch (\\Exception $e) {\n  throw new \\RuntimeException();\n}";
+        let patterns = detect_error_patterns(source, "php");
+        assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
+        assert!(patterns.iter().any(|(p, _)| p == "throw"));
+    }
+
+    #[test]
+    fn detect_java_error_patterns() {
+        let source =
+            "try {\n  foo();\n} catch (Exception e) {\n  throw new RuntimeException();\n}";
+        let patterns = detect_error_patterns(source, "java");
+        assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
+        assert!(patterns.iter().any(|(p, _)| p == "throw"));
     }
 
     #[tokio::test]
