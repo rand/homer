@@ -919,5 +919,173 @@ mod tests {
                 prop_assert_eq!(back, node_id);
             }
         }
+
+        // ── extract_directed_pair property tests ─────────────────────
+
+        fn arb_node_id() -> impl Strategy<Value = NodeId> {
+            (1..=10_000i64).prop_map(NodeId)
+        }
+
+        fn arb_role_pair() -> impl Strategy<Value = (String, String)> {
+            prop_oneof![
+                Just(("caller".into(), "callee".into())),
+                Just(("source".into(), "target".into())),
+                Just(("importer".into(), "imported".into())),
+            ]
+        }
+
+        fn arb_member(id: NodeId, role: String) -> HyperedgeMember {
+            HyperedgeMember {
+                node_id: id,
+                role,
+                position: 0,
+            }
+        }
+
+        fn arb_edge_pair() -> impl Strategy<Value = (NodeId, NodeId, f64)> {
+            (arb_node_id(), arb_node_id(), 0.1..=1.0f64)
+        }
+
+        fn make_hyperedge(src: NodeId, dst: NodeId, confidence: f64) -> Hyperedge {
+            use chrono::Utc;
+            Hyperedge {
+                id: HyperedgeId(0),
+                kind: HyperedgeKind::Calls,
+                members: vec![
+                    HyperedgeMember {
+                        node_id: src,
+                        role: "caller".into(),
+                        position: 0,
+                    },
+                    HyperedgeMember {
+                        node_id: dst,
+                        role: "callee".into(),
+                        position: 1,
+                    },
+                ],
+                confidence,
+                last_updated: Utc::now(),
+                metadata: HashMap::new(),
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(80))]
+
+            // ── extract_directed_pair ────────────────────────────────
+
+            #[test]
+            fn extract_pair_returns_input_ids(
+                src_id in arb_node_id(),
+                dst_id in arb_node_id(),
+                roles in arb_role_pair(),
+            ) {
+                let members = vec![
+                    arb_member(src_id, roles.0),
+                    arb_member(dst_id, roles.1),
+                ];
+                let (s, t) = extract_directed_pair(&members);
+                prop_assert!(s == src_id || s == dst_id);
+                prop_assert!(t == src_id || t == dst_id);
+            }
+
+            #[test]
+            fn extract_pair_role_ordering(
+                src_id in arb_node_id(),
+                dst_id in arb_node_id(),
+                roles in arb_role_pair(),
+            ) {
+                let fwd = vec![
+                    arb_member(src_id, roles.0.clone()),
+                    arb_member(dst_id, roles.1.clone()),
+                ];
+                let (s1, t1) = extract_directed_pair(&fwd);
+                let rev = vec![
+                    arb_member(dst_id, roles.1),
+                    arb_member(src_id, roles.0),
+                ];
+                let (s2, t2) = extract_directed_pair(&rev);
+                prop_assert_eq!(s1, s2);
+                prop_assert_eq!(t1, t2);
+            }
+
+            #[test]
+            fn extract_pair_single_member(id in arb_node_id()) {
+                let members = vec![arb_member(id, "member".into())];
+                let (s, t) = extract_directed_pair(&members);
+                prop_assert_eq!(s, id);
+                prop_assert_eq!(t, id);
+            }
+
+            // ── InMemoryGraph invariants ─────────────────────────────
+
+            #[test]
+            fn graph_mapping_is_bijective(
+                edges in proptest::collection::vec(arb_edge_pair(), 1..20),
+            ) {
+                let hyperedges: Vec<_> = edges
+                    .iter()
+                    .map(|&(s, d, c)| make_hyperedge(s, d, c))
+                    .collect();
+                let graph = InMemoryGraph::from_edges(&hyperedges);
+                prop_assert_eq!(
+                    graph.node_to_index.len(),
+                    graph.index_to_node.len()
+                );
+                prop_assert_eq!(
+                    graph.node_to_index.len(),
+                    graph.graph.node_count()
+                );
+                for (&node_id, &idx) in &graph.node_to_index {
+                    prop_assert_eq!(
+                        graph.index_to_node.get(&idx).copied(),
+                        Some(node_id)
+                    );
+                }
+            }
+
+            #[test]
+            fn graph_edge_count_matches(
+                edges in proptest::collection::vec(arb_edge_pair(), 1..15),
+            ) {
+                let hyperedges: Vec<_> = edges
+                    .iter()
+                    .map(|&(s, d, c)| make_hyperedge(s, d, c))
+                    .collect();
+                let graph = InMemoryGraph::from_edges(&hyperedges);
+                prop_assert_eq!(
+                    graph.graph.edge_count(),
+                    hyperedges.len()
+                );
+            }
+
+            #[test]
+            fn graph_deterministic(
+                edges in proptest::collection::vec(arb_edge_pair(), 1..10),
+            ) {
+                let hyperedges: Vec<_> = edges
+                    .iter()
+                    .map(|&(s, d, c)| make_hyperedge(s, d, c))
+                    .collect();
+                let g1 = InMemoryGraph::from_edges(&hyperedges);
+                let g2 = InMemoryGraph::from_edges(&hyperedges);
+                prop_assert_eq!(g1.node_count(), g2.node_count());
+                prop_assert_eq!(g1.graph.edge_count(), g2.graph.edge_count());
+            }
+        }
+
+        #[test]
+        fn extract_pair_empty_returns_zero() {
+            let (s, t) = extract_directed_pair(&[]);
+            assert_eq!(s, NodeId(0));
+            assert_eq!(t, NodeId(0));
+        }
+
+        #[test]
+        fn graph_from_empty_is_empty() {
+            let graph = InMemoryGraph::from_edges(&[]);
+            assert_eq!(graph.node_count(), 0);
+            assert_eq!(graph.graph.edge_count(), 0);
+        }
     }
 }

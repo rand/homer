@@ -85,6 +85,7 @@ impl Renderer for AgentsMdRenderer {
 
 // ── Build & Test Commands ─────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 async fn render_build_commands(
     out: &mut String,
     store: &dyn HomerStore,
@@ -101,22 +102,42 @@ async fn render_build_commands(
 
     let mut found_commands = false;
 
+    // Collect and deduplicate CI commands across all modules
+    let mut ci_sources: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
     for module in &modules {
         if let Some(ci) = module.metadata.get("ci_commands") {
             if let Some(obj) = ci.as_object() {
                 for (source, commands) in obj {
                     if let Some(cmds) = commands.as_array() {
-                        let _ = writeln!(out, "**{source}:**");
+                        let entry = ci_sources.entry(source.clone()).or_default();
                         for cmd in cmds {
                             if let Some(s) = cmd.as_str() {
-                                let _ = writeln!(out, "- `{s}`");
+                                let trimmed = s.trim();
+                                // Filter out bare YAML artifacts and too-short entries
+                                if trimmed.len() > 2
+                                    && !trimmed.starts_with('|')
+                                    && !entry.contains(&trimmed.to_string())
+                                {
+                                    entry.push(trimmed.to_string());
+                                }
                             }
                         }
-                        let _ = writeln!(out);
-                        found_commands = true;
                     }
                 }
             }
+        }
+    }
+
+    for (source, cmds) in &ci_sources {
+        if !cmds.is_empty() {
+            let _ = writeln!(out, "**{source}:**");
+            for cmd in cmds {
+                let _ = writeln!(out, "- `{cmd}`");
+            }
+            let _ = writeln!(out);
+            found_commands = true;
         }
     }
 

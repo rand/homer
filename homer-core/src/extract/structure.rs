@@ -685,6 +685,8 @@ fn detect_language(path: &Path) -> Option<String> {
         "rb" => "ruby",
         "swift" => "swift",
         "kt" | "kts" => "kotlin",
+        "cs" => "csharp",
+        "php" => "php",
         "zig" => "zig",
         _ => return None,
     };

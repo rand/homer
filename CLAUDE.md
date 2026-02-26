@@ -16,7 +16,7 @@ cargo fmt --all -- --check       # Format check
 Cargo workspace with 5 crates:
 
 - **homer-core** — Pipeline, extractors, analyzers, renderers, SQLite store
-- **homer-graphs** — Tree-sitter heuristic extraction (6 languages)
+- **homer-graphs** — Tree-sitter heuristic extraction (11 languages)
 - **homer-cli** — `homer` binary (clap subcommands: init, update, status)
 - **homer-mcp** — MCP server (Phase 3)
 - **homer-test** — Integration test fixtures and helpers

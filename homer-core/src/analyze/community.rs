@@ -16,13 +16,17 @@ use chrono::Utc;
 use petgraph::graph::NodeIndex;
 use tracing::{info, instrument};
 
+use petgraph::graph::DiGraph;
+
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
-use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind};
+use crate::types::{
+    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, InMemoryGraph, NodeId,
+    extract_directed_pair,
+};
 
 use super::AnalyzeStats;
 use super::traits::Analyzer;
-use crate::types::InMemoryGraph;
 
 /// Adjacency list: node index → list of (neighbor, weight).
 type AdjList = HashMap<usize, Vec<(usize, f64)>>;
@@ -506,6 +510,95 @@ async fn compute_stability(
     Ok(count)
 }
 
+// ── File-level graph projection ────────────────────────────────────
+
+/// Build a file-level graph from import and call edges.
+///
+/// Import edges already connect `File` nodes directly. Call edges connect
+/// `Function` nodes, so we project them to file level using `BelongsTo`
+/// containment relationships. This produces a single connected graph
+/// suitable for community detection.
+async fn build_file_level_graph(store: &dyn HomerStore) -> crate::error::Result<InMemoryGraph> {
+    // Step 1: Build child → parent mapping from BelongsTo edges.
+    // This maps Function/Type node IDs to their containing File node IDs.
+    let belongs_to = store.get_edges_by_kind(HyperedgeKind::BelongsTo).await?;
+    let mut child_to_parent: HashMap<NodeId, NodeId> = HashMap::new();
+    for edge in &belongs_to {
+        let container = edge.members.iter().find(|m| m.role == "container");
+        let member = edge.members.iter().find(|m| m.role == "member");
+        if let (Some(c), Some(m)) = (container, member) {
+            child_to_parent.insert(m.node_id, c.node_id);
+        }
+    }
+
+    // Step 2: Build graph from import edges (already file-level)
+    let import_edges = store.get_edges_by_kind(HyperedgeKind::Imports).await?;
+    let call_edges = store.get_edges_by_kind(HyperedgeKind::Calls).await?;
+
+    let mut graph = DiGraph::<NodeId, f64>::new();
+    let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::new();
+    let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::new();
+
+    let ensure_node = |id: NodeId,
+                       g: &mut DiGraph<NodeId, f64>,
+                       n2i: &mut HashMap<NodeId, NodeIndex>,
+                       i2n: &mut HashMap<NodeIndex, NodeId>|
+     -> NodeIndex {
+        *n2i.entry(id).or_insert_with(|| {
+            let idx = g.add_node(id);
+            i2n.insert(idx, id);
+            idx
+        })
+    };
+
+    // Add import edges directly (file → file)
+    for edge in &import_edges {
+        let (source, target) = extract_directed_pair(&edge.members);
+        if source != target {
+            let src = ensure_node(source, &mut graph, &mut node_to_index, &mut index_to_node);
+            let tgt = ensure_node(target, &mut graph, &mut node_to_index, &mut index_to_node);
+            graph.add_edge(src, tgt, edge.confidence);
+        }
+    }
+
+    // Project call edges from function-level to file-level.
+    // For each call, resolve caller/callee to their parent files.
+    // Skip within-file calls (self-loops after projection).
+    for edge in &call_edges {
+        let (src_func, dst_func) = extract_directed_pair(&edge.members);
+        let src_file = resolve_to_file(src_func, &child_to_parent);
+        let dst_file = resolve_to_file(dst_func, &child_to_parent);
+        if src_file != dst_file {
+            let src = ensure_node(src_file, &mut graph, &mut node_to_index, &mut index_to_node);
+            let tgt = ensure_node(dst_file, &mut graph, &mut node_to_index, &mut index_to_node);
+            graph.add_edge(src, tgt, edge.confidence);
+        }
+    }
+
+    info!(
+        import_edges = import_edges.len(),
+        call_edges = call_edges.len(),
+        file_nodes = graph.node_count(),
+        file_edges = graph.edge_count(),
+        "Built file-level graph from imports + projected calls"
+    );
+
+    Ok(InMemoryGraph {
+        graph,
+        node_to_index,
+        index_to_node,
+    })
+}
+
+/// Resolve a function/type node to its containing file.
+///
+/// In Homer's model, `BelongsTo` maps `Function`→`File` and `Type`→`File`
+/// directly (one level). `File`→`Module` mappings also exist but we
+/// stop at file level since community detection groups files.
+fn resolve_to_file(node_id: NodeId, child_to_file: &HashMap<NodeId, NodeId>) -> NodeId {
+    child_to_file.get(&node_id).copied().unwrap_or(node_id)
+}
+
 // ── Analyzer ───────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -537,33 +630,40 @@ impl Analyzer for CommunityAnalyzer {
         let start = Instant::now();
         let mut stats = AnalyzeStats::default();
 
-        // Load import graph for community detection
-        let import_graph =
-            InMemoryGraph::from_edges(&store.get_edges_by_kind(HyperedgeKind::Imports).await?);
+        // Build a file-level graph by combining:
+        // 1. Import edges (already file-to-file)
+        // 2. Call edges (function-to-function) projected up to file level
+        //    via BelongsTo relationships (function→file containment)
+        //
+        // This produces a single connected graph of files for community
+        // detection, rather than two disjoint subgraphs.
+        let combined_graph = build_file_level_graph(store).await?;
 
-        if import_graph.node_count() == 0 {
-            info!("No import graph data, skipping community detection");
+        if combined_graph.node_count() == 0 {
+            info!("No graph data, skipping community detection");
             stats.duration = start.elapsed();
             return Ok(stats);
         }
 
+        let edge_count = combined_graph.graph.edge_count();
+
         info!(
-            nodes = import_graph.node_count(),
-            edges = import_graph.edge_count(),
-            "Running Louvain community detection"
+            nodes = combined_graph.node_count(),
+            edges = edge_count,
+            "Running Louvain community detection on file-level graph"
         );
 
         // ── Community Detection (multi-level Louvain) ────────────────
-        let louvain = louvain_full(&import_graph);
+        let louvain = louvain_full(&combined_graph);
         let communities = &louvain.communities;
 
         // Compute per-node modularity contribution
-        let contributions = modularity_contributions(communities, &import_graph);
+        let contributions = modularity_contributions(communities, &combined_graph);
 
         // Build community → names map for directory alignment
         let mut community_names: HashMap<u32, Vec<String>> = HashMap::new();
         for (node_idx, &comm) in communities {
-            if let Some(&node_id) = import_graph.index_to_node.get(node_idx) {
+            if let Some(&node_id) = combined_graph.index_to_node.get(node_idx) {
                 if let Ok(Some(node)) = store.get_node(node_id).await {
                     community_names
                         .entry(comm)
@@ -580,7 +680,7 @@ impl Analyzer for CommunityAnalyzer {
         let mut comm_count = 0u64;
 
         for (&node_idx, &comm) in communities {
-            if let Some(&node_id) = import_graph.index_to_node.get(&node_idx) {
+            if let Some(&node_id) = combined_graph.index_to_node.get(&node_idx) {
                 let node_name = store
                     .get_node(node_id)
                     .await?
@@ -1029,6 +1129,130 @@ mod tests {
         // All in same community with dense edges → positive contributions
         for &c in contribs.values() {
             assert!(c >= 0.0, "Contribution should be non-negative, got {c}");
+        }
+    }
+
+    // ── Property-based tests for Louvain ─────────────────────────
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Build an `InMemoryGraph` from a list of directed edges.
+        fn graph_from_edges(edges: &[(i64, i64, f64)]) -> InMemoryGraph {
+            use petgraph::graph::DiGraph;
+            let mut graph = DiGraph::<NodeId, f64>::new();
+            let mut n2i = HashMap::new();
+            let mut i2n = HashMap::new();
+            for &(s, t, w) in edges {
+                for id in [NodeId(s), NodeId(t)] {
+                    n2i.entry(id).or_insert_with(|| {
+                        let idx = graph.add_node(id);
+                        i2n.insert(idx, id);
+                        idx
+                    });
+                }
+                let si = n2i[&NodeId(s)];
+                let ti = n2i[&NodeId(t)];
+                graph.add_edge(si, ti, w);
+            }
+            InMemoryGraph {
+                graph,
+                node_to_index: n2i,
+                index_to_node: i2n,
+            }
+        }
+
+        /// Strategy: small random graph with 3-20 nodes and edges.
+        fn arb_graph() -> impl Strategy<Value = Vec<(i64, i64, f64)>> {
+            let node_range = 0..20i64;
+            let edge = (node_range.clone(), node_range, 0.1..=1.0f64);
+            proptest::collection::vec(edge, 1..30)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(80))]
+
+            /// Every node in the graph receives a community assignment.
+            #[test]
+            fn every_node_assigned(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                prop_assert_eq!(
+                    result.communities.len(),
+                    graph.node_count(),
+                    "Not all nodes assigned: {} communities for {} nodes",
+                    result.communities.len(),
+                    graph.node_count()
+                );
+            }
+
+            /// Modularity is always in the valid range [-0.5, 1.0].
+            #[test]
+            fn modularity_bounded(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                prop_assert!(
+                    result.modularity >= -1.0 - f64::EPSILON && result.modularity <= 1.0 + f64::EPSILON,
+                    "Modularity out of range: {}",
+                    result.modularity
+                );
+            }
+
+            /// At least one Louvain level is always performed.
+            #[test]
+            fn at_least_one_level(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                prop_assert!(result.levels >= 1);
+            }
+
+            /// Community IDs are contiguous starting from 0.
+            #[test]
+            fn community_ids_contiguous(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                let mut ids: Vec<u32> = result.communities.values().copied().collect();
+                ids.sort_unstable();
+                ids.dedup();
+                for (i, &id) in ids.iter().enumerate() {
+                    prop_assert_eq!(id, i as u32);
+                }
+            }
+
+            /// Modularity contributions sum to approximately the modularity score.
+            #[test]
+            fn contributions_sum_to_modularity(edges in arb_graph()) {
+                let graph = graph_from_edges(&edges);
+                let result = louvain_full(&graph);
+                let contribs = modularity_contributions(&result.communities, &graph);
+                let sum: f64 = contribs.values().sum();
+                // Allow floating point tolerance
+                let diff = (sum - result.modularity).abs();
+                prop_assert!(
+                    diff < 0.01,
+                    "Contribution sum {:.6} differs from modularity {:.6} by {:.6}",
+                    sum, result.modularity, diff
+                );
+            }
+        }
+
+        /// Empty graph → empty communities with zero modularity.
+        #[test]
+        fn empty_graph_empty_result() {
+            let graph = graph_from_edges(&[]);
+            let result = louvain_full(&graph);
+            assert!(result.communities.is_empty());
+            assert!(result.modularity.abs() < f64::EPSILON);
+            assert_eq!(result.levels, 0);
+        }
+
+        /// Single node with self-loop → one community.
+        #[test]
+        fn single_node_one_community() {
+            let graph = graph_from_edges(&[(0, 0, 1.0)]);
+            let result = louvain_full(&graph);
+            assert_eq!(result.communities.len(), 1);
         }
     }
 }

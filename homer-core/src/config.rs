@@ -211,6 +211,12 @@ impl Default for StructureExtractionConfig {
                 "**/*.jsx".into(),
                 "**/*.go".into(),
                 "**/*.java".into(),
+                "**/*.rb".into(),
+                "**/*.swift".into(),
+                "**/*.kt".into(),
+                "**/*.kts".into(),
+                "**/*.cs".into(),
+                "**/*.php".into(),
             ],
             exclude_patterns: vec![
                 "**/node_modules/**".into(),

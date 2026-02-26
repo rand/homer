@@ -283,6 +283,11 @@ async fn multi_lang_detects_all_languages() {
         languages.contains(&"typescript"),
         "Should detect TypeScript files"
     );
+    assert!(languages.contains(&"ruby"), "Should detect Ruby files");
+    assert!(languages.contains(&"swift"), "Should detect Swift files");
+    assert!(languages.contains(&"kotlin"), "Should detect Kotlin files");
+    assert!(languages.contains(&"csharp"), "Should detect C# files");
+    assert!(languages.contains(&"php"), "Should detect PHP files");
 }
 
 #[tokio::test]
@@ -313,6 +318,36 @@ async fn multi_lang_extracts_functions_across_languages() {
     assert!(
         fn_names.iter().any(|n| n.contains("greet")),
         "Should find TypeScript greet, got: {fn_names:?}"
+    );
+
+    // Ruby functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("greet")),
+        "Should find Ruby greet, got: {fn_names:?}"
+    );
+
+    // Swift functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("run")),
+        "Should find Swift run, got: {fn_names:?}"
+    );
+
+    // Kotlin functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("greet")),
+        "Should find Kotlin greet, got: {fn_names:?}"
+    );
+
+    // C# functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("Greet")),
+        "Should find C# Greet, got: {fn_names:?}"
+    );
+
+    // PHP functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("handle")),
+        "Should find PHP handle, got: {fn_names:?}"
     );
 }
 
