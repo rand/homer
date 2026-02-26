@@ -561,6 +561,8 @@ fn render_change_profile(out: &mut String, dir: &str, data: &ModuleData) {
 
     let mut total_changes = 0u64;
     let mut min_bf = u64::MAX;
+    let mut stability_counts: std::collections::BTreeMap<&str, usize> =
+        std::collections::BTreeMap::new();
 
     for file_name in files {
         if let Some(&fid) = data.file_ids.get(file_name) {
@@ -571,8 +573,29 @@ fn render_change_profile(out: &mut String, dir: &str, data: &ModuleData) {
                 min_bf = min_bf.min(bf);
             }
             if let Some(stab) = data.stability.get(&fid) {
-                let _ = writeln!(out, "- **Stability**: {stab}");
+                *stability_counts.entry(stab.as_str()).or_default() += 1;
             }
+        }
+    }
+
+    if !stability_counts.is_empty() {
+        // Show the dominant stability classification
+        let dominant = stability_counts
+            .iter()
+            .max_by_key(|(_, count)| **count)
+            .map_or("Unknown", |(name, _)| *name);
+        if stability_counts.len() == 1 {
+            let _ = writeln!(out, "- **Stability**: {dominant}");
+        } else {
+            let summary: Vec<_> = stability_counts
+                .iter()
+                .map(|(name, count)| format!("{name} ({count})"))
+                .collect();
+            let _ = writeln!(
+                out,
+                "- **Stability**: {dominant} (dominant); {}",
+                summary.join(", ")
+            );
         }
     }
 

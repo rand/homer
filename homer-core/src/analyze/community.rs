@@ -16,13 +16,17 @@ use chrono::Utc;
 use petgraph::graph::NodeIndex;
 use tracing::{info, instrument};
 
+use petgraph::graph::DiGraph;
+
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
-use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind};
+use crate::types::{
+    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, InMemoryGraph, NodeId,
+    extract_directed_pair,
+};
 
 use super::AnalyzeStats;
 use super::traits::Analyzer;
-use crate::types::InMemoryGraph;
 
 /// Adjacency list: node index → list of (neighbor, weight).
 type AdjList = HashMap<usize, Vec<(usize, f64)>>;
@@ -506,6 +510,117 @@ async fn compute_stability(
     Ok(count)
 }
 
+// ── File-level graph projection ────────────────────────────────────
+
+/// Build a file-level graph from import and call edges.
+///
+/// Import edges already connect `File` nodes directly. Call edges connect
+/// `Function` nodes, so we project them to file level using `BelongsTo`
+/// containment relationships. This produces a single connected graph
+/// suitable for community detection.
+async fn build_file_level_graph(
+    store: &dyn HomerStore,
+) -> crate::error::Result<InMemoryGraph> {
+    // Step 1: Build child → parent mapping from BelongsTo edges.
+    // This maps Function/Type node IDs to their containing File node IDs.
+    let belongs_to = store
+        .get_edges_by_kind(HyperedgeKind::BelongsTo)
+        .await?;
+    let mut child_to_parent: HashMap<NodeId, NodeId> = HashMap::new();
+    for edge in &belongs_to {
+        let container = edge.members.iter().find(|m| m.role == "container");
+        let member = edge.members.iter().find(|m| m.role == "member");
+        if let (Some(c), Some(m)) = (container, member) {
+            child_to_parent.insert(m.node_id, c.node_id);
+        }
+    }
+
+    // Step 2: Build graph from import edges (already file-level)
+    let import_edges = store
+        .get_edges_by_kind(HyperedgeKind::Imports)
+        .await?;
+    let call_edges = store
+        .get_edges_by_kind(HyperedgeKind::Calls)
+        .await?;
+
+    let mut graph = DiGraph::<NodeId, f64>::new();
+    let mut node_to_index: HashMap<NodeId, NodeIndex> = HashMap::new();
+    let mut index_to_node: HashMap<NodeIndex, NodeId> = HashMap::new();
+
+    let ensure_node =
+        |id: NodeId,
+         g: &mut DiGraph<NodeId, f64>,
+         n2i: &mut HashMap<NodeId, NodeIndex>,
+         i2n: &mut HashMap<NodeIndex, NodeId>|
+         -> NodeIndex {
+            *n2i.entry(id).or_insert_with(|| {
+                let idx = g.add_node(id);
+                i2n.insert(idx, id);
+                idx
+            })
+        };
+
+    // Add import edges directly (file → file)
+    for edge in &import_edges {
+        let (source, target) = extract_directed_pair(&edge.members);
+        if source != target {
+            let src = ensure_node(source, &mut graph, &mut node_to_index, &mut index_to_node);
+            let tgt = ensure_node(target, &mut graph, &mut node_to_index, &mut index_to_node);
+            graph.add_edge(src, tgt, edge.confidence);
+        }
+    }
+
+    // Project call edges from function-level to file-level.
+    // For each call, resolve caller/callee to their parent files.
+    // Skip within-file calls (self-loops after projection).
+    for edge in &call_edges {
+        let (src_func, dst_func) = extract_directed_pair(&edge.members);
+        let src_file = resolve_to_file(src_func, &child_to_parent);
+        let dst_file = resolve_to_file(dst_func, &child_to_parent);
+        if src_file != dst_file {
+            let src = ensure_node(
+                src_file,
+                &mut graph,
+                &mut node_to_index,
+                &mut index_to_node,
+            );
+            let tgt = ensure_node(
+                dst_file,
+                &mut graph,
+                &mut node_to_index,
+                &mut index_to_node,
+            );
+            graph.add_edge(src, tgt, edge.confidence);
+        }
+    }
+
+    info!(
+        import_edges = import_edges.len(),
+        call_edges = call_edges.len(),
+        file_nodes = graph.node_count(),
+        file_edges = graph.edge_count(),
+        "Built file-level graph from imports + projected calls"
+    );
+
+    Ok(InMemoryGraph {
+        graph,
+        node_to_index,
+        index_to_node,
+    })
+}
+
+/// Resolve a function/type node to its containing file.
+///
+/// In Homer's model, `BelongsTo` maps `Function`→`File` and `Type`→`File`
+/// directly (one level). `File`→`Module` mappings also exist but we
+/// stop at file level since community detection groups files.
+fn resolve_to_file(
+    node_id: NodeId,
+    child_to_file: &HashMap<NodeId, NodeId>,
+) -> NodeId {
+    child_to_file.get(&node_id).copied().unwrap_or(node_id)
+}
+
 // ── Analyzer ───────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -537,33 +652,40 @@ impl Analyzer for CommunityAnalyzer {
         let start = Instant::now();
         let mut stats = AnalyzeStats::default();
 
-        // Load import graph for community detection
-        let import_graph =
-            InMemoryGraph::from_edges(&store.get_edges_by_kind(HyperedgeKind::Imports).await?);
+        // Build a file-level graph by combining:
+        // 1. Import edges (already file-to-file)
+        // 2. Call edges (function-to-function) projected up to file level
+        //    via BelongsTo relationships (function→file containment)
+        //
+        // This produces a single connected graph of files for community
+        // detection, rather than two disjoint subgraphs.
+        let combined_graph = build_file_level_graph(store).await?;
 
-        if import_graph.node_count() == 0 {
-            info!("No import graph data, skipping community detection");
+        if combined_graph.node_count() == 0 {
+            info!("No graph data, skipping community detection");
             stats.duration = start.elapsed();
             return Ok(stats);
         }
 
+        let edge_count = combined_graph.graph.edge_count();
+
         info!(
-            nodes = import_graph.node_count(),
-            edges = import_graph.edge_count(),
-            "Running Louvain community detection"
+            nodes = combined_graph.node_count(),
+            edges = edge_count,
+            "Running Louvain community detection on file-level graph"
         );
 
         // ── Community Detection (multi-level Louvain) ────────────────
-        let louvain = louvain_full(&import_graph);
+        let louvain = louvain_full(&combined_graph);
         let communities = &louvain.communities;
 
         // Compute per-node modularity contribution
-        let contributions = modularity_contributions(communities, &import_graph);
+        let contributions = modularity_contributions(communities, &combined_graph);
 
         // Build community → names map for directory alignment
         let mut community_names: HashMap<u32, Vec<String>> = HashMap::new();
         for (node_idx, &comm) in communities {
-            if let Some(&node_id) = import_graph.index_to_node.get(node_idx) {
+            if let Some(&node_id) = combined_graph.index_to_node.get(node_idx) {
                 if let Ok(Some(node)) = store.get_node(node_id).await {
                     community_names
                         .entry(comm)
@@ -580,7 +702,7 @@ impl Analyzer for CommunityAnalyzer {
         let mut comm_count = 0u64;
 
         for (&node_idx, &comm) in communities {
-            if let Some(&node_id) = import_graph.index_to_node.get(&node_idx) {
+            if let Some(&node_id) = combined_graph.index_to_node.get(&node_idx) {
                 let node_name = store
                     .get_node(node_id)
                     .await?
