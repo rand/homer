@@ -422,6 +422,14 @@ async fn render_all_module_contexts(
     Ok(count)
 }
 
+/// Common boilerplate method names that add no signal to module context.
+fn is_boilerplate_name(name: &str) -> bool {
+    matches!(
+        name,
+        "new" | "default" | "from" | "into" | "clone" | "fmt" | "eq" | "hash" | "drop"
+    )
+}
+
 fn render_single_module(dir: &str, data: &ModuleData) -> String {
     let mut out = String::with_capacity(2048);
 
@@ -458,14 +466,19 @@ fn render_purpose(out: &mut String, dir: &str, data: &ModuleData) {
         }
     }
 
-    // Fallback: derive purpose from entity names
+    // Fallback: derive purpose from entity names (skip boilerplate and zero-salience)
     if let Some(ents) = data.dir_entities.get(dir) {
-        if !ents.is_empty() {
-            let top_names: Vec<_> = ents
-                .iter()
-                .take(5)
-                .map(|(n, _)| n.rsplit("::").next().unwrap_or(n))
-                .collect();
+        let top_names: Vec<_> = ents
+            .iter()
+            .filter(|(n, sal)| {
+                let short = n.rsplit("::").next().unwrap_or(n);
+                let is_zero = sal.as_ref().is_some_and(|(s, _)| *s <= 0.0);
+                !is_zero && !is_boilerplate_name(short)
+            })
+            .take(5)
+            .map(|(n, _)| n.rsplit("::").next().unwrap_or(n))
+            .collect();
+        if !top_names.is_empty() {
             let _ = writeln!(out, "## Purpose");
             let _ = writeln!(out);
             let _ = writeln!(out, "Module containing: {}", top_names.join(", "));
@@ -491,12 +504,26 @@ fn render_key_entities(out: &mut String, dir: &str, data: &ModuleData) {
             .then_with(|| a.0.cmp(&b.0))
     });
 
+    let filtered: Vec<_> = sorted
+        .iter()
+        .filter(|(name, sal)| {
+            let short = name.rsplit("::").next().unwrap_or(name);
+            let is_zero = sal.as_ref().is_some_and(|(s, _)| *s <= 0.0);
+            !is_zero && !is_boilerplate_name(short)
+        })
+        .take(20)
+        .collect();
+
+    if filtered.is_empty() {
+        return;
+    }
+
     let _ = writeln!(out, "## Key Entities");
     let _ = writeln!(out);
     let _ = writeln!(out, "| Name | Salience | Classification |");
     let _ = writeln!(out, "|------|----------|----------------|");
 
-    for (name, salience) in sorted.iter().take(20) {
+    for (name, salience) in filtered {
         let (score_str, cls_str) = match salience {
             Some((val, cls)) => (format!("{val:.2}"), cls.as_str()),
             None => ("\u{2014}".to_string(), "\u{2014}"),
