@@ -224,32 +224,33 @@ impl SqliteStore {
             return Ok(edges);
         }
 
-        // Build comma-separated list of edge IDs for IN clause
         let ids: Vec<i64> = edges.iter().map(|e| e.id.0).collect();
-        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!(
-            "SELECT hyperedge_id, node_id, role, position FROM hyperedge_members
-             WHERE hyperedge_id IN ({placeholders}) ORDER BY hyperedge_id, position"
-        );
-
-        // Dynamic SQL (placeholder count varies) — use uncached prepare
-        let mut stmt = conn.prepare(&sql)?;
-
         let mut members_map: HashMap<i64, Vec<HyperedgeMember>> = HashMap::new();
-        let params: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
 
-        let mut rows = stmt.query(params.as_slice())?;
-        while let Some(row) = rows.next()? {
-            let edge_id: i64 = row.get(0)?;
-            let member = HyperedgeMember {
-                node_id: NodeId(row.get(1)?),
-                role: row.get(2)?,
-                position: row.get(3)?,
-            };
-            members_map.entry(edge_id).or_default().push(member);
+        // Chunk IDs to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER (default 999)
+        for chunk in ids.chunks(500) {
+            let placeholders: String = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT hyperedge_id, node_id, role, position FROM hyperedge_members
+                 WHERE hyperedge_id IN ({placeholders}) ORDER BY hyperedge_id, position"
+            );
+
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
+
+            let mut rows = stmt.query(params.as_slice())?;
+            while let Some(row) = rows.next()? {
+                let edge_id: i64 = row.get(0)?;
+                let member = HyperedgeMember {
+                    node_id: NodeId(row.get(1)?),
+                    role: row.get(2)?,
+                    position: row.get(3)?,
+                };
+                members_map.entry(edge_id).or_default().push(member);
+            }
         }
 
         let result = edges
