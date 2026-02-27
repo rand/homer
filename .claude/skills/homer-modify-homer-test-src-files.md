@@ -4,16 +4,16 @@ description: "When modifying files in `homer-test/src` — these 8 files change 
 
 # Modify homer-test/src files
 
-Based on analysis of 4 occurrences from co-change analysis:
+Based on analysis of 3 occurrences from co-change analysis:
 
 ## Files to modify
 
-1. `homer-core`
-2. `homer-mcp`
-3. `homer-graphs/src/languages/.context.md`
-4. `homer-core/src/store/.context.md`
-5. `homer-cli/src/commands/.context.md`
-6. `homer-test/src/.context.md`
-7. `homer-cli/src/.context.md`
-8. `homer-core/src/query/.context.md`
+1. `Cargo.lock`
+2. `homer-cli/Cargo.toml`
+3. `homer-core/src/analyze/traits.rs`
+4. `homer-test/src/lib.rs`
+5. `homer-core/src/render/traits.rs`
+6. `Cargo.toml`
+7. `homer-core/Cargo.toml`
+8. `homer-cli`
 

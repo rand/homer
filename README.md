@@ -116,7 +116,7 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 Cargo workspace with 5 crates:
 
 - **homer-core** — Pipeline orchestration, extractors, analyzers, renderers, SQLite store
-- **homer-graphs** — Tree-sitter scope graph extraction engine (11 languages)
+- **homer-graphs** — Tree-sitter scope graph extraction engine (13 languages)
 - **homer-cli** — `homer` binary (clap-based CLI)
 - **homer-mcp** — MCP server for AI agent integration
 - **homer-test** — Integration test fixtures and helpers

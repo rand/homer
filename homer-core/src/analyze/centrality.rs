@@ -1528,4 +1528,78 @@ mod tests {
             "percentile 95 should normalize to 0.95, got {change_freq}"
         );
     }
+
+    // ── Property-based tests ──────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        #[test]
+        fn classify_salience_always_valid(
+            centrality in 0.0_f64..=1.0,
+            churn in 0.0_f64..=1.0,
+            bus_factor_risk in 0.0_f64..=1.0,
+        ) {
+            let class = classify_salience(centrality, churn, bus_factor_risk);
+            let valid = ["HotCritical", "CriticalSilo", "FoundationalStable", "ActiveLocalized", "Background"];
+            prop_assert!(valid.contains(&class), "Unexpected class: {class}");
+        }
+
+        #[test]
+        fn betweenness_scores_bounded(
+            edges in proptest::collection::vec((0_u32..20, 0_u32..20), 0..50),
+        ) {
+            let mut graph = DiGraph::<NodeId, f64>::new();
+            let mut node_map = std::collections::HashMap::new();
+            for &(src, tgt) in &edges {
+                let src_idx = *node_map.entry(src).or_insert_with(|| graph.add_node(NodeId(src.into())));
+                let tgt_idx = *node_map.entry(tgt).or_insert_with(|| graph.add_node(NodeId(tgt.into())));
+                if src != tgt {
+                    graph.add_edge(src_idx, tgt_idx, 1.0);
+                }
+            }
+            let scores = brandes_betweenness(&graph, graph.node_count());
+            for &s in &scores {
+                prop_assert!((0.0..=1.0).contains(&s), "Betweenness out of [0,1]: {s}");
+            }
+        }
+
+        #[test]
+        fn hits_scores_bounded(
+            edges in proptest::collection::vec((0_u32..15, 0_u32..15), 0..40),
+        ) {
+            let mut graph = DiGraph::<NodeId, f64>::new();
+            let mut node_map = std::collections::HashMap::new();
+            for &(src, tgt) in &edges {
+                let src_idx = *node_map.entry(src).or_insert_with(|| graph.add_node(NodeId(src.into())));
+                let tgt_idx = *node_map.entry(tgt).or_insert_with(|| graph.add_node(NodeId(tgt.into())));
+                if src != tgt {
+                    graph.add_edge(src_idx, tgt_idx, 1.0);
+                }
+            }
+            let (hubs, auths) = hits_power_iteration(&graph, 100);
+            for &h in &hubs {
+                prop_assert!((0.0..=1.0).contains(&h), "Hub score out of [0,1]: {h}");
+            }
+            for &a in &auths {
+                prop_assert!((0.0..=1.0).contains(&a), "Authority score out of [0,1]: {a}");
+            }
+        }
+
+        #[test]
+        fn betweenness_empty_graph_yields_empty(_dummy in Just(())) {
+            let graph = DiGraph::<NodeId, f64>::new();
+            let scores = brandes_betweenness(&graph, 0);
+            prop_assert!(scores.is_empty());
+        }
+
+        #[test]
+        fn hits_empty_graph_yields_empty(_dummy in Just(())) {
+            let (hubs, auths) = hits_power_iteration(&DiGraph::new(), 100);
+            prop_assert!(hubs.is_empty());
+            prop_assert!(auths.is_empty());
+        }
+    }
 }

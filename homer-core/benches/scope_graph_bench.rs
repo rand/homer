@@ -280,7 +280,7 @@ fn bench_parse_all_languages(c: &mut Criterion) {
     group.finish();
 }
 
-// ── Source generators for all 11 languages ─────────────────────────
+// ── Source generators for all 13 languages ─────────────────────────
 
 fn generate_python_source(n: usize) -> String {
     use std::fmt::Write;

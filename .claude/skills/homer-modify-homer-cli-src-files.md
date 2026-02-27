@@ -8,12 +8,12 @@ Based on analysis of 3 occurrences from co-change analysis:
 
 ## Files to modify
 
-1. `homer-cli/src`
-2. `homer-test/tests`
-3. `homer-cli/src/commands/query.rs`
-4. `homer-core/src`
-5. `homer-core`
-6. `homer-test`
-7. `homer-cli`
-8. `homer-cli/src/commands`
+1. `homer-core/src/store/.context.md`
+2. `spec/homer-spec.tps`
+3. `homer-cli/src/.context.md`
+4. `homer-cli/src/commands/.context.md`
+5. `homer-cli/src`
+6. `homer-graphs/src/.context.md`
+7. `homer-cli/src/commands`
+8. `homer-core/benches/.context.md`
 

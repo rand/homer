@@ -1,4 +1,4 @@
-//! Tree-sitter based graph extraction for 11 languages.
+//! Tree-sitter based graph extraction for 13 languages.
 //!
 //! Produces [`FileGraph`] (precise tier) and [`HeuristicGraph`] (heuristic tier)
 //! representations of source files, including definitions, references, calls,
@@ -204,6 +204,10 @@ pub enum DocStyle {
     XmlDoc,
     /// Ruby `#` comments with `@param`/`@return` YARD tags.
     Yard,
+    /// Zig `///` triple-slash documentation comments.
+    ZigDoc,
+    /// Lean 4 `/-- ... -/` documentation comments.
+    LeanDoc,
     /// Unrecognized or custom documentation style.
     Other(String),
 }

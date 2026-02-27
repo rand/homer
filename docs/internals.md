@@ -8,7 +8,7 @@ Homer is a Cargo workspace with 5 crates:
 
 ```
 homer-core/     Pipeline orchestration, store, extractors, analyzers, renderers, LLM client
-homer-graphs/   Tree-sitter extraction, scope graphs, language support (11 languages)
+homer-graphs/   Tree-sitter extraction, scope graphs, language support (13 languages)
 homer-cli/      The `homer` binary (clap-based CLI, 10 commands)
 homer-mcp/      MCP server (rmcp, 5 tools)
 homer-test/     Integration tests and fixture repos
@@ -130,7 +130,7 @@ pub trait LanguageSupport: Send + Sync {
 
 ### Scope Graph Construction
 
-All 11 languages use `ResolutionTier::Precise` via scope graph construction. A scope graph maps every definition and reference to a scope, enabling accurate cross-file resolution:
+All 13 languages use `ResolutionTier::Precise` via scope graph construction. A scope graph maps every definition and reference to a scope, enabling accurate cross-file resolution:
 
 1. **Parse** the file with tree-sitter
 2. **Walk** the AST, creating scope nodes for modules, functions, blocks

@@ -172,7 +172,21 @@ impl TestRepo {
             "<?php\nnamespace App\\Http;\n\nclass Handler\n{\n    public function handle($request)\n    {\n        return response('OK');\n    }\n}\n\nfunction helper() { return 42; }\n",
         ).unwrap();
 
-        std::fs::write(root.join("README.md"), "# Multi-Language Project\n\n## Components\n\n- [Rust service](rust-svc/src/main.rs)\n- [Python library](py-lib/main.py)\n- [TypeScript app](ts-app/src/index.ts)\n- [Ruby gem](ruby-gem/lib/greeter.rb)\n- [Swift package](swift-pkg/Sources/main.swift)\n- [Kotlin app](kotlin-app/src/main/App.kt)\n- [C# service](dotnet-svc/Program.cs)\n- [PHP API](php-api/src/Handler.php)\n").unwrap();
+        // Zig
+        std::fs::create_dir_all(root.join("zig-svc/src")).unwrap();
+        std::fs::write(
+            root.join("zig-svc/src/main.zig"),
+            "const std = @import(\"std\");\n\npub fn main() void {\n    greet(\"world\");\n}\n\nfn greet(name: []const u8) void {\n    std.debug.print(\"Hello, {s}!\\n\", .{name});\n}\n\ntest \"greet test\" {\n    greet(\"test\");\n}\n",
+        ).unwrap();
+
+        // Lean 4
+        std::fs::create_dir_all(root.join("lean-lib")).unwrap();
+        std::fs::write(
+            root.join("lean-lib/Main.lean"),
+            "import Init\n\nnamespace MathLib\n\ndef double (n : Nat) : Nat := n * 2\n\ntheorem double_zero : double 0 = 0 := rfl\n\nend MathLib\n",
+        ).unwrap();
+
+        std::fs::write(root.join("README.md"), "# Multi-Language Project\n\n## Components\n\n- [Rust service](rust-svc/src/main.rs)\n- [Python library](py-lib/main.py)\n- [TypeScript app](ts-app/src/index.ts)\n- [Ruby gem](ruby-gem/lib/greeter.rb)\n- [Swift package](swift-pkg/Sources/main.swift)\n- [Kotlin app](kotlin-app/src/main/App.kt)\n- [C# service](dotnet-svc/Program.cs)\n- [PHP API](php-api/src/Handler.php)\n- [Zig service](zig-svc/src/main.zig)\n- [Lean library](lean-lib/Main.lean)\n").unwrap();
 
         git(root, &["add", "."]);
         git(root, &["commit", "-m", "Initial multi-lang project"]);
