@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -25,6 +26,10 @@ pub struct RiskCheckArgs {
     /// Output format: text or json
     #[arg(long, default_value = "text")]
     pub format: String,
+
+    /// Base ref to diff against HEAD (e.g. main, origin/main) — scope to changed files only
+    #[arg(long)]
+    pub diff: Option<String>,
 }
 
 pub async fn run(args: RiskCheckArgs) -> anyhow::Result<()> {
@@ -50,7 +55,13 @@ pub async fn run(args: RiskCheckArgs) -> anyhow::Result<()> {
     let db = SqliteStore::open(&db_path)
         .with_context(|| format!("Cannot open database: {}", db_path.display()))?;
 
-    let violations = find_violations(&db, &args).await?;
+    let diff_paths = if let Some(ref base_ref) = args.diff {
+        Some(git_diff_file_list(&repo_path, base_ref)?)
+    } else {
+        None
+    };
+
+    let violations = find_violations(&db, &args, diff_paths.as_deref()).await?;
     print_results(&args, &violations);
 
     if violations.is_empty() {
@@ -67,6 +78,7 @@ pub async fn run(args: RiskCheckArgs) -> anyhow::Result<()> {
 async fn find_violations(
     db: &SqliteStore,
     args: &RiskCheckArgs,
+    diff_paths: Option<&[String]>,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let node_filter = NodeFilter {
         kind: Some(NodeKind::File),
@@ -79,9 +91,18 @@ async fn find_violations(
         .await
         .context("Failed to query files")?;
 
+    // When --diff is provided, only check files in the diff set
+    let diff_set: Option<HashSet<&str>> =
+        diff_paths.map(|paths| paths.iter().map(String::as_str).collect());
+
     let mut violations = Vec::new();
 
     for file in &files {
+        if let Some(ref set) = diff_set {
+            if !set.contains(file.name.as_str()) {
+                continue;
+            }
+        }
         let salience_val = db
             .get_analysis(file.id, AnalysisKind::CompositeSalience)
             .await
@@ -158,6 +179,27 @@ fn print_results(args: &RiskCheckArgs, violations: &[serde_json::Value]) {
     }
 }
 
+/// Get the list of changed file paths between `base_ref` and HEAD.
+fn git_diff_file_list(repo_path: &std::path::Path, base_ref: &str) -> anyhow::Result<Vec<String>> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--name-only", &format!("{base_ref}...HEAD")])
+        .current_dir(repo_path)
+        .output()
+        .context("Failed to run git diff")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git diff failed: {stderr}");
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
+}
+
 /// Compute a 0.0-1.0 risk score from component metrics.
 fn compute_risk_score(salience: f64, bus_factor: u64, change_freq: u64) -> f64 {
     let mut val = 0.0;
@@ -201,5 +243,72 @@ mod tests {
     #[test]
     fn risk_score_capped_at_one() {
         assert!((compute_risk_score(1.0, 1, 100) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn diff_filter_restricts_checked_files() {
+        use homer_core::types::{AnalysisResult, AnalysisResultId, Node, NodeId};
+        use std::collections::HashMap;
+
+        let store = SqliteStore::in_memory().unwrap();
+
+        // Create two files: one in the diff set, one not
+        let file_a = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/risky.rs".to_string(),
+                content_hash: None,
+                last_extracted: chrono::Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let file_b = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/safe.rs".to_string(),
+                content_hash: None,
+                last_extracted: chrono::Utc::now(),
+                metadata: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        // Give both files high salience
+        for nid in [file_a, file_b] {
+            store
+                .store_analysis(&AnalysisResult {
+                    id: AnalysisResultId(0),
+                    node_id: nid,
+                    kind: AnalysisKind::CompositeSalience,
+                    data: serde_json::json!({"score": 0.9}),
+                    input_hash: 0,
+                    computed_at: chrono::Utc::now(),
+                })
+                .await
+                .unwrap();
+        }
+
+        // Without diff: both should be checked
+        let args_no_diff = RiskCheckArgs {
+            path: ".".into(),
+            threshold: 0.1,
+            filter: None,
+            format: "text".into(),
+            diff: None,
+        };
+        let all = find_violations(&store, &args_no_diff, None).await.unwrap();
+        assert_eq!(all.len(), 2, "Without diff, both files checked");
+
+        // With diff: only src/risky.rs
+        let diff_paths = vec!["src/risky.rs".to_string()];
+        let filtered = find_violations(&store, &args_no_diff, Some(&diff_paths))
+            .await
+            .unwrap();
+        assert_eq!(filtered.len(), 1, "With diff, only diff files checked");
+        assert_eq!(filtered[0]["file"], "src/risky.rs");
     }
 }
