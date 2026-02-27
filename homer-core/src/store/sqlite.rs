@@ -2283,5 +2283,118 @@ mod proptests {
                 Ok(())
             })?;
         }
+
+        /// Hyperedge upsert is idempotent: same kind+members → same HyperedgeId (ADR 0002).
+        #[test]
+        fn edge_upsert_idempotent(
+            kind in arb_edge_kind(),
+            confidence_a in 0.0..=1.0_f64,
+            confidence_b in 0.0..=1.0_f64,
+            role_a in "[a-z]{1,10}",
+            role_b in "[a-z]{1,10}",
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+
+                let id_a = store.upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::File,
+                    name: "a.rs".to_string(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                }).await.unwrap();
+
+                let id_b = store.upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::File,
+                    name: "b.rs".to_string(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                }).await.unwrap();
+
+                let members = vec![
+                    HyperedgeMember { node_id: id_a, role: role_a, position: 0 },
+                    HyperedgeMember { node_id: id_b, role: role_b, position: 1 },
+                ];
+
+                let edge1 = Hyperedge {
+                    id: HyperedgeId(0),
+                    kind: kind.clone(),
+                    members: members.clone(),
+                    confidence: confidence_a,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                };
+
+                let edge2 = Hyperedge {
+                    id: HyperedgeId(0),
+                    kind,
+                    members,
+                    confidence: confidence_b,
+                    last_updated: Utc::now(),
+                    metadata: HashMap::new(),
+                };
+
+                let eid1 = store.upsert_hyperedge(&edge1).await.unwrap();
+                let eid2 = store.upsert_hyperedge(&edge2).await.unwrap();
+                prop_assert_eq!(eid1, eid2, "Same identity_key should yield same HyperedgeId");
+                Ok(())
+            })?;
+        }
+
+        /// Analysis results for the same node+kind are upserted (last write wins).
+        #[test]
+        fn analysis_upsert_idempotent(
+            kind in arb_analysis_kind(),
+            score_a in 0.0..=1.0_f64,
+            score_b in 0.0..=1.0_f64,
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let store = SqliteStore::in_memory().unwrap();
+
+                let node_id = store.upsert_node(&Node {
+                    id: NodeId(0),
+                    kind: NodeKind::File,
+                    name: "test.rs".to_string(),
+                    content_hash: None,
+                    last_extracted: Utc::now(),
+                    metadata: HashMap::new(),
+                }).await.unwrap();
+
+                let result_a = AnalysisResult {
+                    id: AnalysisResultId(0),
+                    node_id,
+                    kind,
+                    data: serde_json::json!({"score": score_a}),
+                    input_hash: 100,
+                    computed_at: Utc::now(),
+                };
+
+                let result_b = AnalysisResult {
+                    id: AnalysisResultId(0),
+                    node_id,
+                    kind,
+                    data: serde_json::json!({"score": score_b}),
+                    input_hash: 200,
+                    computed_at: Utc::now(),
+                };
+
+                store.store_analysis(&result_a).await.unwrap();
+                store.store_analysis(&result_b).await.unwrap();
+
+                // Should have exactly one result (upserted, not duplicated)
+                let results = store.get_analyses_by_kind(kind).await.unwrap();
+                prop_assert_eq!(results.len(), 1, "Should have exactly one result after upsert");
+
+                // The last write should win
+                let stored = &results[0];
+                prop_assert_eq!(stored.input_hash, 200, "Last write should win");
+                Ok(())
+            })?;
+        }
     }
 }
