@@ -227,9 +227,13 @@ impl Default for StructureExtractionConfig {
                 "**/.git/**".into(),
                 "**/dist/**".into(),
                 "**/.venv/**".into(),
+                "**/venv/**".into(),
+                "**/site-packages/**".into(),
+                "**/__pycache__/**".into(),
                 "**/zig-cache/**".into(),
                 "**/zig-out/**".into(),
                 "**/.lake/**".into(),
+                "**/.build/**".into(),
             ],
         }
     }
@@ -266,6 +270,8 @@ impl Default for DocumentExtractionConfig {
                 "**/node_modules/**".into(),
                 "**/vendor/**".into(),
                 "**/.venv/**".into(),
+                "**/venv/**".into(),
+                "**/site-packages/**".into(),
             ],
         }
     }
