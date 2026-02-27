@@ -13,6 +13,7 @@ use crate::contracts::analysis_keys;
 use crate::llm::cache::{compute_input_hash, get_cached, has_quality_doc_comment, store_cached};
 use crate::llm::{AnalysisProvenance, CostTracker, LlmProvider, ProvenanceConfidence};
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{AnalysisKind, NodeKind};
 
 use super::AnalyzeStats;
@@ -53,6 +54,14 @@ impl Analyzer for SemanticAnalyzer {
             AnalysisKind::PageRank,
             AnalysisKind::BetweennessCentrality,
         ]
+    }
+
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let salience_count = store
+            .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+            .await?
+            .len();
+        incremental::needs_extraction(store, "analyze:semantic", &salience_count.to_string()).await
     }
 
     #[instrument(skip_all, name = "semantic_analyze")]
@@ -124,6 +133,15 @@ impl Analyzer for SemanticAnalyzer {
             .await;
             stats.results_stored += rationale_count;
         }
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let salience_count = store
+            .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+            .await?
+            .len();
+        store
+            .set_checkpoint("analyze:semantic", &salience_count.to_string())
+            .await?;
 
         stats.duration = start.elapsed();
         info!(

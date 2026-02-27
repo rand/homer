@@ -17,6 +17,7 @@ use tracing::{info, instrument};
 use crate::config::HomerConfig;
 use crate::contracts;
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, NodeFilter, NodeKind};
 
 use super::AnalyzeStats;
@@ -49,6 +50,15 @@ impl Analyzer for ConventionAnalyzer {
             AnalysisKind::DocumentationStylePattern,
             AnalysisKind::AgentRuleValidation,
         ]
+    }
+
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let file_filter = NodeFilter {
+            kind: Some(NodeKind::File),
+            ..Default::default()
+        };
+        let file_count = store.find_nodes(&file_filter).await?.len();
+        incremental::needs_extraction(store, "analyze:convention", &file_count.to_string()).await
     }
 
     #[instrument(skip_all, name = "convention_analyze")]
@@ -103,6 +113,16 @@ impl Analyzer for ConventionAnalyzer {
         )
         .await?;
         stats.results_stored += 1;
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let file_filter = NodeFilter {
+            kind: Some(NodeKind::File),
+            ..Default::default()
+        };
+        let file_count = store.find_nodes(&file_filter).await?.len();
+        store
+            .set_checkpoint("analyze:convention", &file_count.to_string())
+            .await?;
 
         stats.duration = start.elapsed();
         info!(

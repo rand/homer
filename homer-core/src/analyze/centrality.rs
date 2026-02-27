@@ -18,6 +18,7 @@ use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, InMemoryGraph, NodeFilter,
     NodeId, NodeKind,
@@ -79,6 +80,19 @@ impl Analyzer for CentralityAnalyzer {
             AnalysisKind::ChangeFrequency,
             AnalysisKind::ContributorConcentration,
         ]
+    }
+
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let file_filter = NodeFilter {
+            kind: Some(NodeKind::File),
+            ..Default::default()
+        };
+        let file_count = store.find_nodes(&file_filter).await?.len();
+        let import_edge_count = store.get_edges_by_kind(HyperedgeKind::Imports).await?.len();
+        let call_edge_count = store.get_edges_by_kind(HyperedgeKind::Calls).await?.len();
+        let edge_count = import_edge_count + call_edge_count;
+        let state = format!("{file_count}:{edge_count}");
+        incremental::needs_extraction(store, "analyze:centrality", &state).await
     }
 
     #[instrument(skip_all, name = "centrality_analyze")]
@@ -155,6 +169,19 @@ impl Analyzer for CentralityAnalyzer {
         )
         .await?;
         stats.results_stored += salience_count;
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let file_filter = NodeFilter {
+            kind: Some(NodeKind::File),
+            ..Default::default()
+        };
+        let file_count = store.find_nodes(&file_filter).await?.len();
+        let import_edge_count = store.get_edges_by_kind(HyperedgeKind::Imports).await?.len();
+        let call_edge_count = store.get_edges_by_kind(HyperedgeKind::Calls).await?.len();
+        let edge_count = import_edge_count + call_edge_count;
+        store
+            .set_checkpoint("analyze:centrality", &format!("{file_count}:{edge_count}"))
+            .await?;
 
         stats.duration = start.elapsed();
         info!(

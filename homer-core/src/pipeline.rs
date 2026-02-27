@@ -866,6 +866,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn second_run_skips_unchanged_analysis() {
+        let tmp = tempfile::tempdir().unwrap();
+        create_test_project(tmp.path());
+
+        let store = SqliteStore::in_memory().unwrap();
+        let config = HomerConfig::default();
+        let pipeline = HomerPipeline::new(tmp.path());
+
+        // First run: should produce analysis results
+        let result1 = pipeline.run(&store, &config).await.unwrap();
+        assert!(
+            result1.analysis_results > 0,
+            "First run should produce analyses"
+        );
+
+        // Second run: analyzers should skip (needs_rerun returns false)
+        let result2 = pipeline.run(&store, &config).await.unwrap();
+        assert_eq!(
+            result2.analysis_results, 0,
+            "Second run should skip all analyses (no changes)"
+        );
+    }
+
+    #[tokio::test]
+    async fn analysis_reruns_after_checkpoint_cleared() {
+        let tmp = tempfile::tempdir().unwrap();
+        create_test_project(tmp.path());
+
+        let store = SqliteStore::in_memory().unwrap();
+        let config = HomerConfig::default();
+        let pipeline = HomerPipeline::new(tmp.path());
+
+        // First run
+        let result1 = pipeline.run(&store, &config).await.unwrap();
+        assert!(result1.analysis_results > 0);
+
+        // Second run should skip
+        let result2 = pipeline.run(&store, &config).await.unwrap();
+        assert_eq!(result2.analysis_results, 0);
+
+        // Clear analysis checkpoints to force rerun
+        store.clear_checkpoints().await.unwrap();
+
+        // Third run should rerun analysis
+        let result3 = pipeline.run(&store, &config).await.unwrap();
+        assert!(
+            result3.analysis_results > 0,
+            "Should rerun after checkpoint clear"
+        );
+    }
+
+    #[tokio::test]
     async fn auto_snapshots_disabled_when_zero() {
         let store = SqliteStore::in_memory().unwrap();
         let mut config = HomerConfig::default();

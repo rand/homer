@@ -9,8 +9,9 @@ use tracing::{info, instrument};
 use crate::config::HomerConfig;
 use crate::contracts;
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{
-    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId, NodeKind,
+    AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeFilter, NodeId, NodeKind,
 };
 
 use super::AnalyzeStats;
@@ -32,6 +33,16 @@ impl Analyzer for TaskPatternAnalyzer {
             AnalysisKind::PromptHotspot,
             AnalysisKind::DomainVocabulary,
         ]
+    }
+
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let filter = NodeFilter {
+            kind: Some(NodeKind::AgentSession),
+            ..Default::default()
+        };
+        let session_count = store.find_nodes(&filter).await?.len();
+        incremental::needs_extraction(store, "analyze:task_pattern", &session_count.to_string())
+            .await
     }
 
     #[instrument(skip_all, name = "task_pattern_analyze")]
@@ -74,6 +85,16 @@ impl Analyzer for TaskPatternAnalyzer {
         // 4. Compute DomainVocabulary on root module.
         let vocab_count = compute_domain_vocabulary(store, &prompt_data).await?;
         stats.results_stored += vocab_count;
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let filter = NodeFilter {
+            kind: Some(NodeKind::AgentSession),
+            ..Default::default()
+        };
+        let session_count = store.find_nodes(&filter).await?.len();
+        store
+            .set_checkpoint("analyze:task_pattern", &session_count.to_string())
+            .await?;
 
         stats.duration = start.elapsed();
         info!(

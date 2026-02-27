@@ -17,6 +17,7 @@ use tracing::{info, instrument};
 use crate::config::HomerConfig;
 use crate::contracts;
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, NodeId};
 
 use super::AnalyzeStats;
@@ -48,6 +49,14 @@ impl Analyzer for TemporalAnalyzer {
         ]
     }
 
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let community_count = store
+            .get_analyses_by_kind(AnalysisKind::CommunityAssignment)
+            .await?
+            .len();
+        incremental::needs_extraction(store, "analyze:temporal", &community_count.to_string()).await
+    }
+
     #[instrument(skip_all, name = "temporal_analyze")]
     async fn analyze(
         &self,
@@ -69,6 +78,15 @@ impl Analyzer for TemporalAnalyzer {
         // Enhance stability classification with Declining class
         let stability_count = enhance_stability(store, now).await?;
         stats.results_stored += stability_count;
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let community_count = store
+            .get_analyses_by_kind(AnalysisKind::CommunityAssignment)
+            .await?
+            .len();
+        store
+            .set_checkpoint("analyze:temporal", &community_count.to_string())
+            .await?;
 
         stats.duration = start.elapsed();
         info!(

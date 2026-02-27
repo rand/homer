@@ -15,9 +15,10 @@ use tracing::{info, instrument};
 use crate::config::HomerConfig;
 use crate::contracts;
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, Hyperedge, HyperedgeId, HyperedgeKind,
-    HyperedgeMember, NodeId, NodeKind,
+    HyperedgeMember, NodeFilter, NodeId, NodeKind,
 };
 
 use super::AnalyzeStats;
@@ -40,6 +41,15 @@ impl Analyzer for BehavioralAnalyzer {
             AnalysisKind::DocumentationCoverage,
             AnalysisKind::DocumentationFreshness,
         ]
+    }
+
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let filter = NodeFilter {
+            kind: Some(NodeKind::Commit),
+            ..Default::default()
+        };
+        let commit_count = store.find_nodes(&filter).await?.len();
+        incremental::needs_extraction(store, "analyze:behavioral", &commit_count.to_string()).await
     }
 
     #[instrument(skip_all, name = "behavioral_analyze")]
@@ -82,6 +92,16 @@ impl Analyzer for BehavioralAnalyzer {
 
         // Compute documentation freshness (stale docs on changed files)
         compute_doc_freshness(store, &commit_data, &mut stats).await?;
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let filter = NodeFilter {
+            kind: Some(NodeKind::Commit),
+            ..Default::default()
+        };
+        let commit_count = store.find_nodes(&filter).await?.len();
+        store
+            .set_checkpoint("analyze:behavioral", &commit_count.to_string())
+            .await?;
 
         stats.duration = start.elapsed();
         info!(

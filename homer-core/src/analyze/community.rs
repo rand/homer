@@ -20,6 +20,7 @@ use petgraph::graph::DiGraph;
 
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
+use crate::store::incremental;
 use crate::types::{
     AnalysisKind, AnalysisResult, AnalysisResultId, HyperedgeKind, InMemoryGraph, NodeId,
     extract_directed_pair,
@@ -616,6 +617,14 @@ impl Analyzer for CommunityAnalyzer {
         &[AnalysisKind::CompositeSalience]
     }
 
+    async fn needs_rerun(&self, store: &dyn HomerStore) -> crate::error::Result<bool> {
+        let salience_count = store
+            .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+            .await?
+            .len();
+        incremental::needs_extraction(store, "analyze:community", &salience_count.to_string()).await
+    }
+
     #[instrument(skip_all, name = "community_analyze")]
     async fn analyze(
         &self,
@@ -715,6 +724,15 @@ impl Analyzer for CommunityAnalyzer {
         // ── Stability Classification ────────────────────────────────
         let stability_count = compute_stability(store, now).await?;
         stats.results_stored += stability_count;
+
+        // Set checkpoint so we can skip rerun if nothing changed.
+        let salience_count = store
+            .get_analyses_by_kind(AnalysisKind::CompositeSalience)
+            .await?
+            .len();
+        store
+            .set_checkpoint("analyze:community", &salience_count.to_string())
+            .await?;
 
         stats.duration = start.elapsed();
         info!(
