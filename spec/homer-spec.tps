@@ -1,3 +1,4 @@
+# <!-- homer:generated at=2026-02-27T21:47:53Z commit=f54ad32 -->
 spec homer
 
 # Principles
@@ -24,24 +25,24 @@ files:
   - homer-core/src/extract/forge_common.rs
   - homer-core/src/query/mod.rs
 
-## Area 2: status
+## Area 2: github
 files:
+  - homer-core/src/extract/github.rs
   - homer-cli/src/commands/status.rs
   - homer-core/src/config.rs
   - homer-core/src/render/traits.rs
-  - homer-core/src/analyze/community.rs
 
-## Area 3: centrality
+## Area 3: risk_map
 files:
-  - homer-core/src/analyze/centrality.rs
   - homer-core/src/render/risk_map.rs
+  - homer-core/src/extract/prompt.rs
   - homer-core/src/store/sqlite.rs
   - homer-cli/src/commands/update.rs
 
 ## Area 4: types
 files:
   - homer-core/src/types.rs
-  - homer-core/src/store/incremental.rs
+  - homer-core/src/render/skills.rs
   - homer-core/src/store/traits.rs
   - homer-cli/src/main.rs
 
@@ -51,11 +52,10 @@ files:
 
 ## Area 6: src
 files:
-  - homer-core/src/llm/providers.rs
-  - homer-core/src/extract/github.rs
   - homer-core/src/extract/git.rs
   - homer-core/src/extract/graph.rs
   - homer-core/src/extract/structure.rs
+  - homer-core/src/extract/gitlab.rs
   - homer-core/src/error.rs
 
 ## Area 7: src
@@ -65,41 +65,36 @@ files:
 
 ## Area 8: src
 files:
+  - homer-core/src/llm/providers.rs
   - homer-core/src/progress.rs
-  - homer-core/src/extract/gitlab.rs
   - homer-core/src/pipeline.rs
 
 ## Area 9: src
 files:
-  - homer-core/src/llm/mod.rs
-  - homer-core/src/llm/cache.rs
-  - homer-core/src/analyze/semantic.rs
+  - homer-core/src/analyze/task_pattern.rs
+  - homer-core/src/store/incremental.rs
+  - homer-core/src/analyze/centrality.rs
+  - homer-core/src/analyze/community.rs
 
 ## Area 10: src
 files:
-  - homer-core/src/analyze/task_pattern.rs
+  - homer-core/src/llm/mod.rs
   - homer-core/src/analyze/mod.rs
+  - homer-core/src/llm/cache.rs
+  - homer-core/src/analyze/semantic.rs
+
+## Area 11: src
+files:
   - homer-core/src/analyze/temporal.rs
+  - homer-core/src/render/report.rs
   - homer-core/src/render/module_context.rs
   - homer-core/src/contracts.rs
 
-## Area 11: prompt
-files:
-  - homer-core/src/extract/prompt.rs
-
-## Area 12: report
-files:
-  - homer-core/src/render/report.rs
-
-## Area 13: skills
-files:
-  - homer-core/src/render/skills.rs
-
-## Area 14: topos_spec
+## Area 12: topos_spec
 files:
   - homer-core/src/render/topos_spec.rs
 
-## Area 15: src
+## Area 13: src
 files:
   - homer-graphs/src/languages/java.rs
   - homer-graphs/src/scope_graph.rs
@@ -111,15 +106,15 @@ files:
   - homer-graphs/src/languages/helpers.rs
   - homer-graphs/src/call_graph.rs
   - homer-graphs/src/languages/javascript.rs
-  # ... and 6 more
+  # ... and 8 more
 
-## Area 16: lib
+## Area 14: lib
 files:
   - homer-mcp/src/lib.rs
   - homer-spec/ARCHITECTURE.md
   - homer-graphs/src/languages/mod.rs
 
-## Area 17: ANALYZERS
+## Area 15: ANALYZERS
 files:
   - homer-spec/ANALYZERS.md
   - homer-spec/EXTRACTORS.md
