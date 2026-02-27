@@ -821,4 +821,269 @@ mod tests {
         assert!(def_files.contains(&PathBuf::from("mod_a.rs")));
         assert!(def_files.contains(&PathBuf::from("mod_b.rs")));
     }
+
+    // ── Property-based tests ──────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    /// Build a minimal scope graph file: root → scope → definitions + references.
+    #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
+    fn make_proptest_file(
+        path: &str,
+        symbols: &[String],
+        ref_symbols: &[String],
+        exported: bool,
+    ) -> FileScopeGraph {
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        let mut id = 0u32;
+
+        // Root scope
+        let root_id = ScopeNodeId(id);
+        nodes.push(ScopeNode {
+            id: root_id,
+            kind: ScopeNodeKind::Root,
+            file_path: PathBuf::from(path),
+            span: None,
+            symbol_kind: None,
+        });
+        id += 1;
+
+        // Inner scope
+        let scope_id = ScopeNodeId(id);
+        nodes.push(ScopeNode {
+            id: scope_id,
+            kind: ScopeNodeKind::Scope,
+            file_path: PathBuf::from(path),
+            span: None,
+            symbol_kind: None,
+        });
+        id += 1;
+        edges.push(ScopeEdge {
+            id: ScopeEdgeId(edges.len() as u32),
+            source: scope_id,
+            target: root_id,
+            precedence: 0,
+        });
+
+        // Export scope (if exported)
+        let export_id = if exported {
+            let eid = ScopeNodeId(id);
+            nodes.push(ScopeNode {
+                id: eid,
+                kind: ScopeNodeKind::ExportScope,
+                file_path: PathBuf::from(path),
+                span: None,
+                symbol_kind: None,
+            });
+            id += 1;
+            edges.push(ScopeEdge {
+                id: ScopeEdgeId(edges.len() as u32),
+                source: root_id,
+                target: eid,
+                precedence: 0,
+            });
+            Some(eid)
+        } else {
+            None
+        };
+
+        // Definitions (PopSymbol nodes in inner scope)
+        for sym in symbols {
+            let def_id = ScopeNodeId(id);
+            nodes.push(ScopeNode {
+                id: def_id,
+                kind: ScopeNodeKind::PopSymbol {
+                    symbol: sym.clone(),
+                },
+                file_path: PathBuf::from(path),
+                span: None,
+                symbol_kind: Some(SymbolKind::Function),
+            });
+            id += 1;
+            edges.push(ScopeEdge {
+                id: ScopeEdgeId(edges.len() as u32),
+                source: scope_id,
+                target: def_id,
+                precedence: 0,
+            });
+
+            // Export the definition
+            if let Some(eid) = export_id {
+                let export_pop = ScopeNodeId(id);
+                nodes.push(ScopeNode {
+                    id: export_pop,
+                    kind: ScopeNodeKind::PopSymbol {
+                        symbol: sym.clone(),
+                    },
+                    file_path: PathBuf::from(path),
+                    span: None,
+                    symbol_kind: Some(SymbolKind::Function),
+                });
+                id += 1;
+                edges.push(ScopeEdge {
+                    id: ScopeEdgeId(edges.len() as u32),
+                    source: eid,
+                    target: export_pop,
+                    precedence: 0,
+                });
+            }
+        }
+
+        // References (PushSymbol nodes in inner scope)
+        for sym in ref_symbols {
+            let ref_id = ScopeNodeId(id);
+            nodes.push(ScopeNode {
+                id: ref_id,
+                kind: ScopeNodeKind::PushSymbol {
+                    symbol: sym.clone(),
+                },
+                file_path: PathBuf::from(path),
+                span: None,
+                symbol_kind: None,
+            });
+            id += 1;
+            edges.push(ScopeEdge {
+                id: ScopeEdgeId(edges.len() as u32),
+                source: ref_id,
+                target: scope_id,
+                precedence: 0,
+            });
+        }
+
+        make_file_graph(path, nodes, edges)
+    }
+
+    fn symbol_strategy() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9_]{0,7}".prop_filter("non-empty", |s| !s.is_empty())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+        #[test]
+        fn resolved_symbols_always_match(
+            defs in proptest::collection::vec(symbol_strategy(), 1..5),
+            refs in proptest::collection::vec(symbol_strategy(), 1..5),
+        ) {
+            // Build a single-file scope graph with defs and refs
+            let fg = make_proptest_file("test.rs", &defs, &refs, false);
+            let mut sg = ScopeGraph::new();
+            sg.add_file_graph(&fg);
+            let resolved = sg.resolve_all();
+
+            // Every resolved reference must have matching symbol between push and pop
+            for r in &resolved {
+                let push = sg.get_node(r.reference_node).unwrap();
+                let pop = sg.get_node(r.definition_node).unwrap();
+                if let (
+                    ScopeNodeKind::PushSymbol { symbol: ref_sym },
+                    ScopeNodeKind::PopSymbol { symbol: def_sym },
+                ) = (&push.kind, &pop.kind)
+                {
+                    prop_assert_eq!(ref_sym, def_sym, "Resolved symbol mismatch");
+                    prop_assert_eq!(&r.symbol, ref_sym, "Reported symbol doesn't match push node");
+                }
+            }
+        }
+
+        #[test]
+        fn resolution_is_deterministic(
+            defs in proptest::collection::vec(symbol_strategy(), 1..4),
+            refs in proptest::collection::vec(symbol_strategy(), 1..4),
+        ) {
+            let fg = make_proptest_file("det.rs", &defs, &refs, false);
+
+            let mut sg1 = ScopeGraph::new();
+            sg1.add_file_graph(&fg);
+            let r1 = sg1.resolve_all();
+
+            let mut sg2 = ScopeGraph::new();
+            sg2.add_file_graph(&fg);
+            let r2 = sg2.resolve_all();
+
+            prop_assert_eq!(r1.len(), r2.len(), "Resolution count should be deterministic");
+            for (a, b) in r1.iter().zip(r2.iter()) {
+                prop_assert_eq!(&a.symbol, &b.symbol);
+            }
+        }
+
+        #[test]
+        fn remove_file_leaves_no_orphan_nodes(
+            defs in proptest::collection::vec(symbol_strategy(), 1..4),
+        ) {
+            let fg = make_proptest_file("remove_me.rs", &defs, &[], true);
+            let mut sg = ScopeGraph::new();
+            sg.add_file_graph(&fg);
+
+            prop_assert!(sg.node_count() > 0, "Should have nodes before removal");
+
+            sg.remove_file(Path::new("remove_me.rs"));
+
+            // After removal, no nodes should reference this file
+            for id in 0..1000u32 {
+                if let Some(node) = sg.get_node(ScopeNodeId(id)) {
+                    prop_assert_ne!(
+                        &node.file_path,
+                        &PathBuf::from("remove_me.rs"),
+                        "Found orphan node after removal"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn cross_file_resolution_only_via_exports(
+            shared_sym in symbol_strategy(),
+        ) {
+            // File A defines `shared_sym` but does NOT export it
+            let fg_a = make_proptest_file("a.rs", std::slice::from_ref(&shared_sym), &[], false);
+
+            // File B references `shared_sym` via import scope
+            let import_nodes = vec![
+                ScopeNode {
+                    id: ScopeNodeId(0),
+                    kind: ScopeNodeKind::Root,
+                    file_path: PathBuf::from("b.rs"),
+                    span: None,
+                    symbol_kind: None,
+                },
+                ScopeNode {
+                    id: ScopeNodeId(1),
+                    kind: ScopeNodeKind::PushSymbol { symbol: shared_sym.clone() },
+                    file_path: PathBuf::from("b.rs"),
+                    span: None,
+                    symbol_kind: None,
+                },
+                ScopeNode {
+                    id: ScopeNodeId(2),
+                    kind: ScopeNodeKind::ImportScope,
+                    file_path: PathBuf::from("b.rs"),
+                    span: None,
+                    symbol_kind: None,
+                },
+            ];
+            let import_edges = vec![ScopeEdge {
+                id: ScopeEdgeId(0),
+                source: ScopeNodeId(1),
+                target: ScopeNodeId(2),
+                precedence: 0,
+            }];
+            let fg_b = make_file_graph("b.rs", import_nodes, import_edges);
+
+            let mut sg = ScopeGraph::new();
+            sg.add_file_graph(&fg_a);
+            sg.add_file_graph(&fg_b);
+
+            let resolved = sg.resolve_all();
+            // Without exports, cross-file resolution should find nothing
+            let cross_file: Vec<_> = resolved
+                .iter()
+                .filter(|r| r.reference_file != r.definition_file)
+                .collect();
+            prop_assert!(cross_file.is_empty(),
+                "Non-exported defs should not resolve cross-file, got {} resolutions",
+                cross_file.len());
+        }
+    }
 }

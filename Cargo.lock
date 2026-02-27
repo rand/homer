@@ -1697,6 +1697,7 @@ name = "homer-graphs"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "proptest",
  "rayon",
  "serde",
  "serde_json",
