@@ -1,0 +1,9 @@
+# Homer cargo build configuration.
+#
+# target-cpu=native enables AVX2, BMI2, POPCNT, etc. for the build machine's CPU.
+# This improves throughput for computation-heavy paths (centrality, community detection)
+# but means the binary is not portable to machines with older CPUs.
+#
+# This only affects release and bench builds (dev builds use default target-cpu).
+[target.'cfg(not(target_env = "musl"))']
+rustflags = ["-C", "target-cpu=native"]
