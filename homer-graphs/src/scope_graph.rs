@@ -165,7 +165,8 @@ impl ScopeGraph {
         &mut self,
         file_graph: &FileScopeGraph,
     ) -> HashMap<ScopeNodeId, ScopeNodeId> {
-        let mut id_map: HashMap<ScopeNodeId, ScopeNodeId> = HashMap::new();
+        let mut id_map: HashMap<ScopeNodeId, ScopeNodeId> =
+            HashMap::with_capacity(file_graph.nodes.len());
 
         // Allocate new IDs and insert nodes
         for node in &file_graph.nodes {
@@ -274,7 +275,7 @@ impl ScopeGraph {
     /// redundant BFS traversals for references to the same symbol in the same scope.
     pub fn resolve_all(&self) -> Vec<ResolvedReference> {
         let push_nodes: Vec<_> = self.push_nodes();
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(push_nodes.len());
 
         // Cache: (parent_scope, symbol) → definitions found by BFS.
         // Two PushSymbol nodes for the same symbol in the same scope follow identical
