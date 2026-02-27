@@ -6,12 +6,14 @@ mod helpers;
 pub mod java;
 pub mod javascript;
 pub mod kotlin;
+pub mod lean;
 pub mod php;
 pub mod python;
 pub mod ruby;
 pub mod rust;
 pub mod swift;
 pub mod typescript;
+pub mod zig;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -125,6 +127,8 @@ impl LanguageRegistry {
         reg.register(Arc::new(swift::SwiftSupport));
         reg.register(Arc::new(csharp::CSharpSupport));
         reg.register(Arc::new(php::PhpSupport));
+        reg.register(Arc::new(zig::ZigSupport));
+        reg.register(Arc::new(lean::LeanSupport));
         reg.register(Arc::new(fallback::FallbackSupport));
         reg
     }

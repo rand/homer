@@ -1,6 +1,6 @@
 # homer-graphs
 
-Tree-sitter-based source code extraction engine for Homer. Parses 11 languages to build scope graphs, call graphs, and import graphs.
+Tree-sitter-based source code extraction engine for Homer. Parses 13 languages to build scope graphs, call graphs, and import graphs.
 
 ## Supported Languages
 
@@ -17,6 +17,8 @@ Tree-sitter-based source code extraction engine for Homer. Parses 11 languages t
 | Kotlin | `languages/kotlin.rs` | Precise | Classes, objects, companion objects, KDoc |
 | C# | `languages/csharp.rs` | Precise | Namespaces (block + file-scoped), XML docs |
 | PHP | `languages/php.rs` | Precise | Namespaces, traits, PHPDoc |
+| Zig | `languages/zig.rs` | Precise | `pub` export control, structs/enums/unions, `@import` |
+| Lean 4 | `languages/lean.rs` | Precise | Flat namespace/end markers, `private` suppression, `/-- -/` docs |
 
 All languages use `ResolutionTier::Precise` via scope graph construction.
 
@@ -48,6 +50,8 @@ languages/
   kotlin.rs       — Kotlin support
   csharp.rs       — C# support
   php.rs          — PHP support
+  zig.rs          — Zig support
+  lean.rs         — Lean 4 support
   fallback.rs     — Fallback for unsupported languages
   ecma_scope.rs   — Shared ECMAScript scope graph walker (TS + JS)
 ```

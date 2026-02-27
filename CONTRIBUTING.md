@@ -39,7 +39,7 @@ CI runs these on both Linux and macOS.
 
 ```
 homer-core/     Pipeline, extractors, analyzers, renderers, store
-homer-graphs/   Tree-sitter extraction for 11 languages
+homer-graphs/   Tree-sitter extraction for 13 languages
 homer-cli/      The `homer` binary
 homer-mcp/      MCP server for AI agent integration
 homer-test/     Integration tests and fixture repos

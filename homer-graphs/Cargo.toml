@@ -25,6 +25,8 @@ tree-sitter-swift = { workspace = true }
 tree-sitter-kotlin-ng = { workspace = true }
 tree-sitter-c-sharp = { workspace = true }
 tree-sitter-php = { workspace = true }
+tree-sitter-zig = { workspace = true }
+tree-sitter-lean4 = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

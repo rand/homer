@@ -217,6 +217,8 @@ impl Default for StructureExtractionConfig {
                 "**/*.kts".into(),
                 "**/*.cs".into(),
                 "**/*.php".into(),
+                "**/*.zig".into(),
+                "**/*.lean".into(),
             ],
             exclude_patterns: vec![
                 "**/node_modules/**".into(),
@@ -225,6 +227,9 @@ impl Default for StructureExtractionConfig {
                 "**/.git/**".into(),
                 "**/dist/**".into(),
                 "**/.venv/**".into(),
+                "**/zig-cache/**".into(),
+                "**/zig-out/**".into(),
+                "**/.lake/**".into(),
             ],
         }
     }

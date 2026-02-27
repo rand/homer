@@ -359,7 +359,7 @@ async fn analyze_testing(
 fn is_source_file(name: &str) -> bool {
     let ext_list = [
         ".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".rb", ".swift", ".kt", ".kts",
-        ".cs", ".php",
+        ".cs", ".php", ".zig", ".lean",
     ];
     ext_list.iter().any(|ext| name.ends_with(ext))
 }
@@ -445,6 +445,16 @@ fn detect_test_framework(repo_path: &Path) -> Option<String> {
         if content.contains("pest") {
             return Some("pest".to_string());
         }
+    }
+
+    // Zig: build.zig
+    if repo_path.join("build.zig").exists() {
+        return Some("zig test".to_string());
+    }
+
+    // Lean 4: lakefile.lean
+    if repo_path.join("lakefile.lean").exists() {
+        return Some("lake test".to_string());
     }
 
     None
@@ -606,6 +616,30 @@ fn detect_error_patterns(source: &str, lang: &str) -> Vec<(String, u32)> {
             let try_kw = count_pattern(source, "try ");
             if try_kw > 0 {
                 results.push(("try".to_string(), try_kw));
+            }
+        }
+        "zig" => {
+            let try_kw = count_pattern(source, "try ");
+            if try_kw > 0 {
+                results.push(("try".to_string(), try_kw));
+            }
+            let catch_kw = count_pattern(source, "catch ");
+            if catch_kw > 0 {
+                results.push(("catch".to_string(), catch_kw));
+            }
+        }
+        "lean" => {
+            let do_catch = count_pattern(source, "catch ");
+            if do_catch > 0 {
+                results.push(("do/catch".to_string(), do_catch));
+            }
+            let try_kw = count_pattern(source, "try ");
+            if try_kw > 0 {
+                results.push(("try".to_string(), try_kw));
+            }
+            let throw_kw = count_pattern(source, "throw ");
+            if throw_kw > 0 {
+                results.push(("throw".to_string(), throw_kw));
             }
         }
         _ => {}
@@ -1116,6 +1150,29 @@ mod tests {
         let patterns = detect_error_patterns(source, "java");
         assert!(patterns.iter().any(|(p, _)| p == "try/catch"));
         assert!(patterns.iter().any(|(p, _)| p == "throw"));
+    }
+
+    #[test]
+    fn detect_zig_error_patterns() {
+        let source = "const result = try allocator.alloc(u8, 1024);\nif (result) |val| {} else |err| catch {}";
+        let patterns = detect_error_patterns(source, "zig");
+        assert!(patterns.iter().any(|(p, _)| p == "try"));
+        assert!(patterns.iter().any(|(p, _)| p == "catch"));
+    }
+
+    #[test]
+    fn detect_lean_error_patterns() {
+        let source = "do\n  let x <- foo\n  throw MyError\ncatch e =>\n  try bar";
+        let patterns = detect_error_patterns(source, "lean");
+        assert!(patterns.iter().any(|(p, _)| p == "do/catch"));
+        assert!(patterns.iter().any(|(p, _)| p == "throw"));
+        assert!(patterns.iter().any(|(p, _)| p == "try"));
+    }
+
+    #[test]
+    fn source_file_detection_zig_lean() {
+        assert!(is_source_file("main.zig"));
+        assert!(is_source_file("Main.lean"));
     }
 
     #[tokio::test]

@@ -288,6 +288,8 @@ async fn multi_lang_detects_all_languages() {
     assert!(languages.contains(&"kotlin"), "Should detect Kotlin files");
     assert!(languages.contains(&"csharp"), "Should detect C# files");
     assert!(languages.contains(&"php"), "Should detect PHP files");
+    assert!(languages.contains(&"zig"), "Should detect Zig files");
+    assert!(languages.contains(&"lean"), "Should detect Lean files");
 }
 
 #[tokio::test]
@@ -348,6 +350,18 @@ async fn multi_lang_extracts_functions_across_languages() {
     assert!(
         fn_names.iter().any(|n| n.contains("handle")),
         "Should find PHP handle, got: {fn_names:?}"
+    );
+
+    // Zig functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("greet")),
+        "Should find Zig greet, got: {fn_names:?}"
+    );
+
+    // Lean functions
+    assert!(
+        fn_names.iter().any(|n| n.contains("double")),
+        "Should find Lean double, got: {fn_names:?}"
     );
 }
 

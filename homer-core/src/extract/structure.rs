@@ -688,6 +688,7 @@ fn detect_language(path: &Path) -> Option<String> {
         "cs" => "csharp",
         "php" => "php",
         "zig" => "zig",
+        "lean" => "lean",
         _ => return None,
     };
     Some(lang.to_string())

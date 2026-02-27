@@ -12,7 +12,7 @@ Integration tests and fixture utilities for Homer.
 - Empty directory handling
 - Snapshot idempotency
 - Pipeline fault tolerance (git errors don't abort other extractors)
-- Multi-language detection and extraction (all 11 languages)
+- Multi-language detection and extraction (all 13 languages)
 
 ## Test Utilities
 
