@@ -55,4 +55,4 @@ let result = pipeline.run(&store, &config).await?;
 
 ## Tests
 
-246 unit tests including proptest round-trips for all types, store operations, and graph analysis properties.
+265 unit tests including proptest round-trips for all types, store operations, and graph analysis properties.

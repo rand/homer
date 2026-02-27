@@ -236,7 +236,7 @@ Each tool method (`do_query`, `do_graph`, etc.) is separated from the MCP dispat
 - **MCP tests**: In-memory store tests for each MCP tool
 - **Benchmarks**: Criterion benchmarks in `homer-core/benches/` (store, parse, centrality)
 
-Total: 457 tests (246 core + 173 graphs + 9 MCP + 11 CLI + 18 integration).
+Total: 507 tests (265 core + 204 graphs + 9 MCP + 11 CLI + 18 integration).
 
 ## Next Steps
 

@@ -28,7 +28,7 @@ cargo test --workspace
 Before submitting a PR:
 
 ```bash
-cargo test --workspace                        # All 457 tests pass
+cargo test --workspace                        # All 507 tests pass
 cargo clippy --workspace --all-targets -- -D warnings  # Zero warnings (--all-targets catches test code)
 cargo fmt --all -- --check                    # Formatted
 ```

@@ -62,4 +62,4 @@ See [docs/extending.md](../docs/extending.md) for a step-by-step guide.
 
 ## Tests
 
-173 unit tests covering extraction, scope resolution, and cross-language consistency.
+204 unit tests covering extraction, scope resolution, and cross-language consistency.
