@@ -224,6 +224,7 @@ impl Default for StructureExtractionConfig {
                 "**/target/**".into(),
                 "**/.git/**".into(),
                 "**/dist/**".into(),
+                "**/.venv/**".into(),
             ],
         }
     }
@@ -256,7 +257,11 @@ impl Default for DocumentExtractionConfig {
                 "doc/**/*.md".into(),
                 "adr/**/*.md".into(),
             ],
-            exclude_patterns: vec!["**/node_modules/**".into(), "**/vendor/**".into()],
+            exclude_patterns: vec![
+                "**/node_modules/**".into(),
+                "**/vendor/**".into(),
+                "**/.venv/**".into(),
+            ],
         }
     }
 }
