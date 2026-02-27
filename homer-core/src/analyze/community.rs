@@ -29,7 +29,8 @@ use super::AnalyzeStats;
 use super::traits::Analyzer;
 
 /// Adjacency list: node index → list of (neighbor, weight).
-type AdjList = HashMap<usize, Vec<(usize, f64)>>;
+/// Vec-indexed for cache-friendly access (nodes are contiguous 0..n).
+type AdjList = Vec<Vec<(usize, f64)>>;
 
 // ── Community Detection (Louvain) ──────────────────────────────────
 
@@ -65,7 +66,7 @@ pub fn louvain_full(graph: &InMemoryGraph) -> LouvainResult {
     }
 
     // Build undirected adjacency with weights (treat directed as undirected)
-    let mut adj: AdjList = HashMap::new();
+    let mut adj: AdjList = vec![vec![]; n];
     let mut total_weight = 0.0_f64;
 
     for edge_idx in graph.graph.edge_indices() {
@@ -73,12 +74,8 @@ pub fn louvain_full(graph: &InMemoryGraph) -> LouvainResult {
             let w = graph.graph[edge_idx];
             let weight = if w > 0.0 { w } else { 1.0 };
 
-            adj.entry(src.index())
-                .or_default()
-                .push((tgt.index(), weight));
-            adj.entry(tgt.index())
-                .or_default()
-                .push((src.index(), weight));
+            adj[src.index()].push((tgt.index(), weight));
+            adj[tgt.index()].push((src.index(), weight));
             total_weight += weight;
         }
     }
@@ -121,7 +118,6 @@ pub fn louvain_full(graph: &InMemoryGraph) -> LouvainResult {
         levels += 1;
 
         // Map original node memberships through this level's assignments
-        // Each original node's community = community[super_node_it_belongs_to]
         for m in &mut membership {
             *m = community[*m as usize];
         }
@@ -181,18 +177,27 @@ fn louvain_phase1(adj: &AdjList, n: usize, total_weight: f64) -> (Vec<u32>, bool
 
     // Compute node weights (sum of incident edge weights)
     let mut node_weight: Vec<f64> = vec![0.0; n];
-    for (&node, neighbors) in adj {
-        if node < n {
-            for &(_, w) in neighbors {
-                node_weight[node] += w;
-            }
+    for (node, neighbors) in adj.iter().enumerate() {
+        for &(_, w) in neighbors {
+            node_weight[node] += w;
         }
     }
+
+    // Maintain community totals incrementally: comm_totals[c] = sum of node_weight[i]
+    // for all i where community[i] == c. Updated when a node changes community.
+    let mut comm_totals: Vec<f64> = node_weight.clone();
+
+    // Reusable scratch buffers for per-node neighbor community weights.
+    // comm_weight_buf[c] accumulates weight to community c; touched_comms tracks
+    // which entries were written so we can reset only those (avoiding O(n) clear).
+    let mut comm_weight_buf: Vec<f64> = vec![0.0; n];
+    let mut touched_comms: Vec<u32> = Vec::with_capacity(64);
 
     let mut any_improved = false;
     let mut improved = true;
     let mut iterations = 0;
     let max_iterations = 20;
+    let m2 = 2.0 * total_weight;
 
     while improved && iterations < max_iterations {
         improved = false;
@@ -201,38 +206,30 @@ fn louvain_phase1(adj: &AdjList, n: usize, total_weight: f64) -> (Vec<u32>, bool
         for node in 0..n {
             let current_comm = community[node];
 
-            // Compute weights to each neighboring community
-            let mut comm_weights: HashMap<u32, f64> = HashMap::new();
-            if let Some(neighbors) = adj.get(&node) {
-                for &(neighbor, weight) in neighbors {
-                    if neighbor < n {
-                        let neighbor_comm = community[neighbor];
-                        *comm_weights.entry(neighbor_comm).or_default() += weight;
-                    }
+            // Compute weights to each neighboring community using scratch buffer
+            touched_comms.clear();
+            for &(neighbor, weight) in &adj[node] {
+                let nc = community[neighbor];
+                if comm_weight_buf[nc as usize] == 0.0 {
+                    touched_comms.push(nc);
                 }
-            }
-
-            // Compute community totals
-            let mut comm_totals: HashMap<u32, f64> = HashMap::new();
-            for (i, &c) in community.iter().enumerate() {
-                *comm_totals.entry(c).or_default() += node_weight[i];
+                comm_weight_buf[nc as usize] += weight;
             }
 
             let ki = node_weight[node];
-            let m2 = 2.0 * total_weight;
-
-            let ki_in_current = comm_weights.get(&current_comm).copied().unwrap_or(0.0);
-            let sigma_current = comm_totals.get(&current_comm).copied().unwrap_or(0.0);
+            let ki_in_current = comm_weight_buf[current_comm as usize];
+            let sigma_current = comm_totals[current_comm as usize];
 
             let mut best_gain = 0.0_f64;
             let mut best_comm = current_comm;
 
-            for (&target_comm, &ki_in_target) in &comm_weights {
+            for &target_comm in &touched_comms {
                 if target_comm == current_comm {
                     continue;
                 }
 
-                let sigma_target = comm_totals.get(&target_comm).copied().unwrap_or(0.0);
+                let ki_in_target = comm_weight_buf[target_comm as usize];
+                let sigma_target = comm_totals[target_comm as usize];
 
                 // Modularity gain = [ki_in_target/m - sigma_target*ki/m^2]
                 //                  - [ki_in_current/m - (sigma_current - ki)*ki/m^2]
@@ -245,7 +242,15 @@ fn louvain_phase1(adj: &AdjList, n: usize, total_weight: f64) -> (Vec<u32>, bool
                 }
             }
 
+            // Reset scratch buffer (only touched entries)
+            for &c in &touched_comms {
+                comm_weight_buf[c as usize] = 0.0;
+            }
+
             if best_comm != current_comm {
+                // Incrementally update community totals
+                comm_totals[current_comm as usize] -= ki;
+                comm_totals[best_comm as usize] += ki;
                 community[node] = best_comm;
                 improved = true;
                 any_improved = true;
@@ -279,7 +284,7 @@ fn contract_graph(adj: &AdjList, community: &[u32], _n: usize) -> (AdjList, usiz
     // Build super-node adjacency: aggregate edge weights between communities
     let mut super_adj: HashMap<(usize, usize), f64> = HashMap::new();
 
-    for (&node, neighbors) in adj {
+    for (node, neighbors) in adj.iter().enumerate() {
         if node >= community.len() {
             continue;
         }
@@ -296,17 +301,17 @@ fn contract_graph(adj: &AdjList, community: &[u32], _n: usize) -> (AdjList, usiz
     }
 
     // Convert to adjacency list format, including self-loops
-    let mut new_adj: AdjList = HashMap::new();
+    let mut new_adj: AdjList = vec![vec![]; num_communities];
     let mut total_weight = 0.0_f64;
 
     for (&(a, b), &weight) in &super_adj {
         if a == b {
             // Self-loops: add to adjacency (both directions = itself) for node weight calc
-            new_adj.entry(a).or_default().push((a, weight));
+            new_adj[a].push((a, weight));
             total_weight += weight / 2.0;
         } else {
-            new_adj.entry(a).or_default().push((b, weight));
-            new_adj.entry(b).or_default().push((a, weight));
+            new_adj[a].push((b, weight));
+            new_adj[b].push((a, weight));
             total_weight += weight / 2.0;
         }
     }
@@ -324,16 +329,14 @@ fn compute_modularity(community: &[u32], adj: &AdjList, n: usize, total_weight: 
 
     // Node degrees
     let mut degree: Vec<f64> = vec![0.0; n];
-    for (&node, neighbors) in adj {
-        if node < n {
-            for &(_, w) in neighbors {
-                degree[node] += w;
-            }
+    for (node, neighbors) in adj.iter().enumerate() {
+        for &(_, w) in neighbors {
+            degree[node] += w;
         }
     }
 
     let mut q = 0.0_f64;
-    for (&node, neighbors) in adj {
+    for (node, neighbors) in adj.iter().enumerate() {
         if node >= n {
             continue;
         }
@@ -361,19 +364,15 @@ pub fn modularity_contributions<S: BuildHasher>(
     }
 
     // Build adjacency
-    let mut adj: AdjList = HashMap::new();
+    let mut adj: AdjList = vec![vec![]; n];
     let mut total_weight = 0.0_f64;
 
     for edge_idx in graph.graph.edge_indices() {
         if let Some((src, tgt)) = graph.graph.edge_endpoints(edge_idx) {
             let w = graph.graph[edge_idx];
             let weight = if w > 0.0 { w } else { 1.0 };
-            adj.entry(src.index())
-                .or_default()
-                .push((tgt.index(), weight));
-            adj.entry(tgt.index())
-                .or_default()
-                .push((src.index(), weight));
+            adj[src.index()].push((tgt.index(), weight));
+            adj[tgt.index()].push((src.index(), weight));
             total_weight += weight;
         }
     }
@@ -386,11 +385,9 @@ pub fn modularity_contributions<S: BuildHasher>(
 
     // Degree per node
     let mut degree: Vec<f64> = vec![0.0; n];
-    for (&node, neighbors) in &adj {
-        if node < n {
-            for &(_, w) in neighbors {
-                degree[node] += w;
-            }
+    for (node, neighbors) in adj.iter().enumerate() {
+        for &(_, w) in neighbors {
+            degree[node] += w;
         }
     }
 
@@ -408,11 +405,9 @@ pub fn modularity_contributions<S: BuildHasher>(
         let node = idx.index();
         let mut contrib = 0.0_f64;
 
-        if let Some(neighbors) = adj.get(&node) {
-            for &(neighbor, weight) in neighbors {
-                if neighbor < n && comm_vec[node] == comm_vec[neighbor] {
-                    contrib += weight - (degree[node] * degree[neighbor]) / m2;
-                }
+        for &(neighbor, weight) in &adj[node] {
+            if neighbor < n && comm_vec[node] == comm_vec[neighbor] {
+                contrib += weight - (degree[node] * degree[neighbor]) / m2;
             }
         }
 

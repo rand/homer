@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use chrono::Utc;
 use petgraph::graph::{DiGraph, NodeIndex};
+use rayon::prelude::*;
 use tracing::{info, instrument};
 
 use crate::config::HomerConfig;
@@ -199,15 +200,16 @@ fn compute_betweenness(graph: &InMemoryGraph, config: &CentralityConfig) -> Vec<
     brandes_betweenness(&graph.graph, k)
 }
 
-/// Brandes' algorithm for betweenness centrality.
-/// If `k < n`, only `k` randomly-chosen source nodes are used (approximation).
-fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
+/// Brandes' algorithm for betweenness centrality, parallelized with rayon.
+///
+/// Each source BFS + back-propagation is independent, so we process sources
+/// in parallel and sum-reduce per-thread betweenness accumulators.
+/// If `k < n`, only `k` evenly-spaced source nodes are used (approximation).
+pub fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
     let n = graph.node_count();
     if n == 0 {
         return vec![];
     }
-
-    let mut cb = vec![0.0_f64; n];
 
     // Choose source nodes (all for exact, subset for approx)
     let sources: Vec<NodeIndex> = if k >= n {
@@ -218,55 +220,68 @@ fn brandes_betweenness(graph: &DiGraph<NodeId, f64>, k: usize) -> Vec<f64> {
         graph.node_indices().step_by(step.max(1)).take(k).collect()
     };
 
-    for &s in &sources {
-        let s_idx = s.index();
+    // Parallel BFS from each source, each producing a per-source cb vector,
+    // then sum-reduce into the final result.
+    let cb = sources
+        .par_iter()
+        .map(|&s| {
+            let s_idx = s.index();
 
-        // BFS from s
-        let mut stack: Vec<NodeIndex> = Vec::new();
-        let mut predecessors: Vec<Vec<NodeIndex>> = vec![vec![]; n];
-        let mut sigma = vec![0.0_f64; n]; // number of shortest paths
-        sigma[s_idx] = 1.0;
-        let mut dist: Vec<i64> = vec![-1; n];
-        dist[s_idx] = 0;
+            // BFS from s
+            let mut stack: Vec<NodeIndex> = Vec::new();
+            let mut predecessors: Vec<Vec<NodeIndex>> = vec![vec![]; n];
+            let mut sigma = vec![0.0_f64; n];
+            sigma[s_idx] = 1.0;
+            let mut dist: Vec<i64> = vec![-1; n];
+            dist[s_idx] = 0;
 
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(s);
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(s);
 
-        while let Some(v) = queue.pop_front() {
-            stack.push(v);
-            let v_idx = v.index();
-
-            for neighbor in graph.neighbors(v) {
-                let w_idx = neighbor.index();
-
-                // First visit?
-                if dist[w_idx] < 0 {
-                    dist[w_idx] = dist[v_idx] + 1;
-                    queue.push_back(neighbor);
-                }
-
-                // Shortest path via v?
-                if dist[w_idx] == dist[v_idx] + 1 {
-                    sigma[w_idx] += sigma[v_idx];
-                    predecessors[w_idx].push(v);
-                }
-            }
-        }
-
-        // Back-propagation of dependencies
-        let mut delta = vec![0.0_f64; n];
-        while let Some(w) = stack.pop() {
-            let w_idx = w.index();
-            for &v in &predecessors[w_idx] {
+            while let Some(v) = queue.pop_front() {
+                stack.push(v);
                 let v_idx = v.index();
-                let ratio = sigma[v_idx] / sigma[w_idx];
-                delta[v_idx] += ratio * (1.0 + delta[w_idx]);
+
+                for neighbor in graph.neighbors(v) {
+                    let w_idx = neighbor.index();
+
+                    if dist[w_idx] < 0 {
+                        dist[w_idx] = dist[v_idx] + 1;
+                        queue.push_back(neighbor);
+                    }
+
+                    if dist[w_idx] == dist[v_idx] + 1 {
+                        sigma[w_idx] += sigma[v_idx];
+                        predecessors[w_idx].push(v);
+                    }
+                }
             }
-            if w != s {
-                cb[w_idx] += delta[w_idx];
+
+            // Back-propagation of dependencies
+            let mut delta = vec![0.0_f64; n];
+            let mut local_cb = vec![0.0_f64; n];
+            while let Some(w) = stack.pop() {
+                let w_idx = w.index();
+                for &v in &predecessors[w_idx] {
+                    let v_idx = v.index();
+                    let ratio = sigma[v_idx] / sigma[w_idx];
+                    delta[v_idx] += ratio * (1.0 + delta[w_idx]);
+                }
+                if w != s {
+                    local_cb[w_idx] += delta[w_idx];
+                }
             }
-        }
-    }
+            local_cb
+        })
+        .reduce(
+            || vec![0.0_f64; n],
+            |mut a, b| {
+                for (ai, bi) in a.iter_mut().zip(b.iter()) {
+                    *ai += *bi;
+                }
+                a
+            },
+        );
 
     // Normalize: if approximate, scale by n/k
     let scale = if k < n { n as f64 / k as f64 } else { 1.0 };
@@ -293,7 +308,7 @@ fn compute_hits(graph: &InMemoryGraph, config: &CentralityConfig) -> (Vec<f64>, 
 
 /// HITS algorithm via power iteration.
 /// Returns (`hub_scores`, `authority_scores`), both normalized to [0, 1].
-fn hits_power_iteration(graph: &DiGraph<NodeId, f64>, max_iter: usize) -> (Vec<f64>, Vec<f64>) {
+pub fn hits_power_iteration(graph: &DiGraph<NodeId, f64>, max_iter: usize) -> (Vec<f64>, Vec<f64>) {
     let n = graph.node_count();
     if n == 0 {
         return (vec![], vec![]);
@@ -303,19 +318,15 @@ fn hits_power_iteration(graph: &DiGraph<NodeId, f64>, max_iter: usize) -> (Vec<f
     let mut authorities = vec![1.0_f64; n];
 
     for _ in 0..max_iter {
-        // Authority update: auth(v) = sum of hub(u) for all u→v
+        // Single-pass edge traversal: compute both authority and hub updates
+        // auth(v) = sum of hub(u) for all u→v (uses old hubs)
+        // hub(u) = sum of auth(v) for all u→v (uses old authorities)
         let mut new_auth = vec![0.0_f64; n];
-        for edge in graph.edge_indices() {
-            if let Some((src, tgt)) = graph.edge_endpoints(edge) {
-                new_auth[tgt.index()] += hubs[src.index()];
-            }
-        }
-
-        // Hub update: hub(u) = sum of auth(v) for all u→v
         let mut new_hub = vec![0.0_f64; n];
         for edge in graph.edge_indices() {
             if let Some((src, tgt)) = graph.edge_endpoints(edge) {
-                new_hub[src.index()] += new_auth[tgt.index()];
+                new_auth[tgt.index()] += hubs[src.index()];
+                new_hub[src.index()] += authorities[tgt.index()];
             }
         }
 
