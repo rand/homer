@@ -1,9 +1,12 @@
 // Homer MCP server — exposes repository analysis as MCP tools for AI agents.
 //
 // Tools:
-//   homer_query  — look up an entity by name (functions, types, files, modules)
-//   homer_graph  — centrality metrics for top entities
-//   homer_risk   — risk assessment for a file path
+//   homer_query       — look up an entity by name (functions, types, files, modules)
+//   homer_graph       — centrality metrics for top entities
+//   homer_risk        — risk assessment for a file path
+//   homer_diff        — impact analysis for a set of changed files
+//   homer_co_changes  — files that frequently change together
+//   homer_conventions — project coding conventions
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -89,6 +92,13 @@ pub struct ConventionsParams {
     /// Module path or empty for project-wide
     #[schemars(description = "Module path to scope conventions to, or omit for project-wide")]
     pub scope: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DiffParams {
+    /// File paths that changed (relative to repo root)
+    #[schemars(description = "File paths that changed (relative to repo root)")]
+    pub paths: Vec<String>,
 }
 
 // ── Server struct ─────────────────────────────────────────────────
@@ -178,6 +188,17 @@ impl HomerMcpServer {
             Err(e) => format!("Error: {e}"),
         }
     }
+
+    #[tool(
+        name = "homer_diff",
+        description = "Assess architectural impact of changed files. Returns salience, bus factor risk, affected communities and modules. Use before merging to understand risk."
+    )]
+    async fn diff(&self, Parameters(params): Parameters<DiffParams>) -> String {
+        match self.do_diff(params).await {
+            Ok(s) => s,
+            Err(e) => format!("Error: {e}"),
+        }
+    }
 }
 
 impl ServerHandler for HomerMcpServer {
@@ -186,8 +207,9 @@ impl ServerHandler for HomerMcpServer {
             instructions: Some(
                 "Homer MCP server — codebase intelligence tools for AI agents. \
                  Use homer_query to look up entities, homer_graph for centrality metrics, \
-                 homer_risk to assess modification risk, homer_co_changes to find files \
-                 that change together, and homer_conventions to understand project patterns."
+                 homer_risk to assess modification risk, homer_diff to analyze impact of \
+                 changes, homer_co_changes to find files that change together, and \
+                 homer_conventions to understand project patterns."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -505,6 +527,21 @@ impl HomerMcpServer {
         .map_err(|e| format!("JSON error: {e}"))
     }
 
+    async fn do_diff(&self, params: DiffParams) -> Result<String, String> {
+        let impact = query::diff_impact(&*self.store, &params.paths)
+            .await
+            .map_err(|e| format!("Store error: {e}"))?;
+
+        serde_json::to_string_pretty(&serde_json::json!({
+            "files_analyzed": impact.files_analyzed,
+            "high_salience": impact.high_salience,
+            "low_bus_factor": impact.low_bus_factor,
+            "communities_affected": impact.communities_affected,
+            "modules_affected": impact.modules_affected,
+        }))
+        .map_err(|e| format!("JSON error: {e}"))
+    }
+
     async fn do_conventions(&self, params: ConventionsParams) -> Result<String, String> {
         let kinds: Vec<(AnalysisKind, &str)> = match params.category.as_deref() {
             Some("naming") => vec![(AnalysisKind::NamingPattern, "naming")],
@@ -795,6 +832,80 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .contains("Unknown category")
+        );
+    }
+
+    #[tokio::test]
+    async fn server_diff_empty_store() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+
+        let result = server
+            .do_diff(DiffParams {
+                paths: vec!["src/main.rs".to_string()],
+            })
+            .await
+            .unwrap();
+
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["files_analyzed"], 1);
+        assert!(json["high_salience"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn server_diff_returns_impact() {
+        let store = SqliteStore::in_memory().unwrap();
+        let now = Utc::now();
+
+        let nid = store
+            .upsert_node(&Node {
+                id: NodeId(0),
+                kind: NodeKind::File,
+                name: "src/critical.rs".to_string(),
+                content_hash: None,
+                last_extracted: now,
+                metadata: std::collections::HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        store
+            .store_analysis(&AnalysisResult {
+                id: AnalysisResultId(0),
+                node_id: nid,
+                kind: AnalysisKind::CompositeSalience,
+                data: serde_json::json!({"score": 0.85, "classification": "HotCritical"}),
+                input_hash: 0,
+                computed_at: now,
+            })
+            .await
+            .unwrap();
+
+        let server = HomerMcpServer::from_store(store);
+        let result = server
+            .do_diff(DiffParams {
+                paths: vec!["src/critical.rs".to_string()],
+            })
+            .await
+            .unwrap();
+
+        let json: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert_eq!(json["files_analyzed"], 1);
+        let high = json["high_salience"].as_array().unwrap();
+        assert_eq!(high.len(), 1);
+        assert_eq!(high[0]["path"], "src/critical.rs");
+    }
+
+    #[tokio::test]
+    async fn server_exposes_six_tools() {
+        let store = SqliteStore::in_memory().unwrap();
+        let server = HomerMcpServer::from_store(store);
+        let tools = server.tool_router.list_all();
+        assert_eq!(tools.len(), 6, "Should expose 6 tools: {tools:?}");
+        let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+        assert!(
+            names.iter().any(|n| n == "homer_diff"),
+            "Should include homer_diff: {names:?}"
         );
     }
 
