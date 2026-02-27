@@ -210,6 +210,57 @@ impl SqliteStore {
         Ok(members)
     }
 
+    /// Batch-load members for a set of edge headers, replacing the N+1 pattern.
+    ///
+    /// Uses a subquery to fetch all members for all edges at once, then groups
+    /// them in Rust. Reduces N+1 queries to 1 query.
+    fn attach_members_batch(
+        conn: &Connection,
+        edges: Vec<Hyperedge>,
+    ) -> rusqlite::Result<Vec<Hyperedge>> {
+        if edges.is_empty() {
+            return Ok(edges);
+        }
+
+        // Build comma-separated list of edge IDs for IN clause
+        let ids: Vec<i64> = edges.iter().map(|e| e.id.0).collect();
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT hyperedge_id, node_id, role, position FROM hyperedge_members
+             WHERE hyperedge_id IN ({placeholders}) ORDER BY hyperedge_id, position"
+        );
+
+        // Dynamic SQL (placeholder count varies) — use uncached prepare
+        let mut stmt = conn.prepare(&sql)?;
+
+        let mut members_map: HashMap<i64, Vec<HyperedgeMember>> = HashMap::new();
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        let mut rows = stmt.query(params.as_slice())?;
+        while let Some(row) = rows.next()? {
+            let edge_id: i64 = row.get(0)?;
+            let member = HyperedgeMember {
+                node_id: NodeId(row.get(1)?),
+                role: row.get(2)?,
+                position: row.get(3)?,
+            };
+            members_map.entry(edge_id).or_default().push(member);
+        }
+
+        let result = edges
+            .into_iter()
+            .map(|mut edge| {
+                edge.members = members_map.remove(&edge.id.0).unwrap_or_default();
+                edge
+            })
+            .collect();
+
+        Ok(result)
+    }
+
     /// Deterministic semantic identity for a hyperedge.
     ///
     /// Identity is edge kind plus a sorted role/node set. Position is intentionally
@@ -664,7 +715,7 @@ impl HomerStore for SqliteStore {
     async fn get_edges_involving(&self, node_id: NodeId) -> crate::error::Result<Vec<Hyperedge>> {
         let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT DISTINCT e.* FROM hyperedges e
                  JOIN hyperedge_members m ON e.id = m.hyperedge_id
                  WHERE m.node_id = ?1",
@@ -677,19 +728,13 @@ impl HomerStore for SqliteStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(StoreError::Sqlite)?;
 
-        // Load members for each edge
-        let mut result = Vec::with_capacity(edges.len());
-        for mut edge in edges {
-            edge.members = Self::load_members(&conn, edge.id.0).map_err(StoreError::Sqlite)?;
-            result.push(edge);
-        }
-        Ok(result)
+        Ok(Self::attach_members_batch(&conn, edges).map_err(StoreError::Sqlite)?)
     }
 
     async fn get_edges_by_kind(&self, kind: HyperedgeKind) -> crate::error::Result<Vec<Hyperedge>> {
         let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT * FROM hyperedges WHERE kind = ?1")
+            .prepare_cached("SELECT * FROM hyperedges WHERE kind = ?1")
             .map_err(StoreError::Sqlite)?;
 
         let edges: Vec<Hyperedge> = stmt
@@ -698,12 +743,7 @@ impl HomerStore for SqliteStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(StoreError::Sqlite)?;
 
-        let mut result = Vec::with_capacity(edges.len());
-        for mut edge in edges {
-            edge.members = Self::load_members(&conn, edge.id.0).map_err(StoreError::Sqlite)?;
-            result.push(edge);
-        }
-        Ok(result)
+        Ok(Self::attach_members_batch(&conn, edges).map_err(StoreError::Sqlite)?)
     }
 
     async fn get_co_members(
@@ -793,7 +833,7 @@ impl HomerStore for SqliteStore {
     ) -> crate::error::Result<Vec<AnalysisResult>> {
         let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
-            .prepare("SELECT * FROM analysis_results WHERE kind = ?1")
+            .prepare_cached("SELECT * FROM analysis_results WHERE kind = ?1")
             .map_err(StoreError::Sqlite)?;
 
         let results = stmt
@@ -1053,7 +1093,7 @@ impl HomerStore for SqliteStore {
     async fn list_snapshots(&self) -> crate::error::Result<Vec<SnapshotInfo>> {
         let conn = self.conn.lock().expect("homer store mutex poisoned");
         let mut stmt = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT id, label, snapshot_at, node_count, edge_count
                  FROM graph_snapshots ORDER BY snapshot_at ASC",
             )
@@ -1110,7 +1150,7 @@ impl HomerStore for SqliteStore {
 
         // Nodes added: in `to` but not in `from`
         let added_nodes = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT sn.node_id FROM snapshot_nodes sn
                  WHERE sn.snapshot_id = ?1
                    AND sn.node_id NOT IN (SELECT node_id FROM snapshot_nodes WHERE snapshot_id = ?2)",
@@ -1123,7 +1163,7 @@ impl HomerStore for SqliteStore {
 
         // Nodes removed: in `from` but not in `to`
         let removed_nodes = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT sn.node_id FROM snapshot_nodes sn
                  WHERE sn.snapshot_id = ?1
                    AND sn.node_id NOT IN (SELECT node_id FROM snapshot_nodes WHERE snapshot_id = ?2)",
@@ -1136,7 +1176,7 @@ impl HomerStore for SqliteStore {
 
         // Edges added
         let added_edges = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT se.edge_id FROM snapshot_edges se
                  WHERE se.snapshot_id = ?1
                    AND se.edge_id NOT IN (SELECT edge_id FROM snapshot_edges WHERE snapshot_id = ?2)",
@@ -1149,7 +1189,7 @@ impl HomerStore for SqliteStore {
 
         // Edges removed
         let removed_edges = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT se.edge_id FROM snapshot_edges se
                  WHERE se.snapshot_id = ?1
                    AND se.edge_id NOT IN (SELECT edge_id FROM snapshot_edges WHERE snapshot_id = ?2)",
@@ -1225,7 +1265,7 @@ impl HomerStore for SqliteStore {
 
         // Count nodes by kind
         let mut stmt = conn
-            .prepare("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
+            .prepare_cached("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
             .map_err(StoreError::Sqlite)?;
         let nodes_by_kind: HashMap<String, u64> = stmt
             .query_map([], |row| {
@@ -1237,7 +1277,7 @@ impl HomerStore for SqliteStore {
 
         // Count edges by kind
         let mut stmt = conn
-            .prepare("SELECT kind, COUNT(*) FROM hyperedges GROUP BY kind")
+            .prepare_cached("SELECT kind, COUNT(*) FROM hyperedges GROUP BY kind")
             .map_err(StoreError::Sqlite)?;
         let edges_by_kind: HashMap<String, u64> = stmt
             .query_map([], |row| {
