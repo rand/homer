@@ -99,7 +99,7 @@ pub struct HomerSection {
 impl Default for HomerSection {
     fn default() -> Self {
         Self {
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             db_path: None,
         }
     }
@@ -756,7 +756,7 @@ max_load_bearing = 50
     #[test]
     fn homer_section_defaults() {
         let config = HomerConfig::default();
-        assert_eq!(config.homer.version, "0.1.0");
+        assert_eq!(config.homer.version, "0.2.0");
         assert!(config.homer.db_path.is_none());
     }
 
@@ -764,11 +764,11 @@ max_load_bearing = 50
     fn homer_section_with_db_path() {
         let toml_str = r#"
 [homer]
-version = "0.2.0"
+version = "0.3.0"
 db_path = "/custom/path/homer.db"
 "#;
         let config: HomerConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.homer.version, "0.2.0");
+        assert_eq!(config.homer.version, "0.3.0");
         assert_eq!(
             config.homer.db_path.as_deref(),
             Some("/custom/path/homer.db")

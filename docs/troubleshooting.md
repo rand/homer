@@ -20,7 +20,7 @@ rustc --version  # Should show 1.85.0 or later
 ### Build fails with tree-sitter errors
 
 ```
-error: failed to compile `homer-cli v0.1.0`
+error: failed to compile `homer-cli v0.2.0`
 ```
 
 Tree-sitter grammars require a C compiler. Ensure you have one installed:

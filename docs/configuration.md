@@ -16,7 +16,7 @@ Homer stores its configuration in `.homer/config.toml`, created during `homer in
 
 ```toml
 [homer]
-version = "0.1.0"
+version = "0.2.0"
 
 [analysis]
 depth = "standard"
@@ -133,7 +133,7 @@ Top-level metadata.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `version` | string | `"0.1.0"` | Config schema version |
+| `version` | string | `"0.2.0"` | Config schema version |
 | `db_path` | string | none | Custom database location (overrides default `.homer/homer.db`) |
 
 ---

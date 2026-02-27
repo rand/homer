@@ -348,7 +348,7 @@ See [CLI.md](CLI.md) for full configuration specification. The core configuratio
 
 ```toml
 [homer]
-version = "0.1.0"
+version = "0.2.0"
 
 [analysis]
 depth = "standard"                # shallow | standard | deep | full

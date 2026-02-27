@@ -406,7 +406,7 @@ Full specification of `.homer/config.toml`:
 ```toml
 [homer]
 # Schema version (for migration)
-version = "0.1.0"
+version = "0.2.0"
 
 [analysis]
 # Analysis depth: shallow, standard, deep, full
