@@ -834,6 +834,7 @@ mod tests {
 
     #[test]
     fn rate_limit_fields_initialized() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let ext = GitHubExtractor::new("owner".to_string(), "repo".to_string(), None);
         assert_eq!(ext.rate_remaining.get(), u32::MAX);
         assert_eq!(ext.rate_reset.get(), 0);

@@ -67,6 +67,9 @@ fn classify_exit_code(err: &anyhow::Error) -> i32 {
 }
 
 fn main() {
+    // Install rustls crypto provider (aws-lc-rs) before any TLS connections.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let cli = Cli::parse();
 
     // Initialize tracing based on verbosity

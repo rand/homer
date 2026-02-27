@@ -346,8 +346,13 @@ pub fn create_provider(
 mod tests {
     use super::*;
 
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+
     #[test]
     fn anthropic_cost_tiers() {
+        install_crypto_provider();
         let opus = AnthropicProvider::new("key".into(), "claude-opus-4-20250514".into());
         assert!(opus.cost_per_1k_input() > 0.01);
 
@@ -360,6 +365,7 @@ mod tests {
 
     #[test]
     fn openai_cost_tiers() {
+        install_crypto_provider();
         let gpt4o = OpenAiProvider::new("key".into(), "gpt-4o".into());
         assert!(gpt4o.cost_per_1k_input() < 0.01);
 
@@ -369,6 +375,7 @@ mod tests {
 
     #[test]
     fn create_provider_factory() {
+        install_crypto_provider();
         let p = create_provider("anthropic", "test-model", "key", None).unwrap();
         assert_eq!(p.name(), "anthropic");
         assert_eq!(p.model_id(), "test-model");

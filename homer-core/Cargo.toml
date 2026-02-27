@@ -24,6 +24,7 @@ tracing = { workspace = true }
 glob = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
+rustls = { workspace = true }
 indicatif = { workspace = true }
 uuid = { workspace = true }
 similar = { workspace = true }
