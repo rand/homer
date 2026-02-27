@@ -89,7 +89,7 @@ Machine-readable risk annotations in JSON format. Contains per-file risk factors
 Three additional renderers are available but not enabled by default:
 
 - **Skills** (`.claude/skills/*.md`) — Claude Code skill files encoding domain knowledge
-- **Topos Spec** (`spec/*.toml`) — Formal topological specification of the codebase
+- **Topos Spec** (`spec/*.tps`) — Formal topological specification of the codebase
 - **Report** (`homer-report.html`) — Human-readable HTML or Markdown analysis report
 
 Enable them in `.homer/config.toml`:

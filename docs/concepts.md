@@ -229,7 +229,7 @@ Renderers read from the hypergraph (both raw data and analysis results) and prod
 
 **Skills Renderer** — Generates Claude Code skill files (`.claude/skills/*.md`) that encode domain knowledge as reusable skills.
 
-**Topos Spec Renderer** — Generates topological specification files (`spec/*.toml`) capturing the structural relationships of the codebase in a formal format.
+**Topos Spec Renderer** — Generates topological specification files (`spec/*.tps`) capturing the structural relationships of the codebase in a formal format.
 
 **Report Renderer** — Generates a human-readable analysis report (`homer-report.html` or Markdown) summarizing the full analysis.
 

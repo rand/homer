@@ -46,7 +46,7 @@ homer serve --path /path/to/project
 
 ## Tools
 
-Homer's MCP server exposes 5 tools. Each returns JSON.
+Homer's MCP server exposes 6 tools. Each returns JSON.
 
 ### `homer_query`
 
@@ -250,6 +250,42 @@ Get project conventions (naming, testing, error handling, documentation). Use to
       ]
     }
   }
+}
+```
+
+### `homer_diff`
+
+Analyze the impact of a set of changed files. Returns high-salience files, low bus factor files, affected communities, and affected modules.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `paths` | array of strings | Yes | File paths that have been changed (relative to repo root) |
+
+**Example request:**
+
+```json
+{
+  "paths": ["src/store/sqlite.rs", "src/store/schema.rs"]
+}
+```
+
+**Example response:**
+
+```json
+{
+  "changed_files": 2,
+  "high_salience_files": [
+    { "file": "src/store/sqlite.rs", "salience": 0.91, "classification": "FoundationalStable" }
+  ],
+  "low_bus_factor_files": [
+    { "file": "src/store/schema.rs", "bus_factor": 1 }
+  ],
+  "affected_communities": [
+    { "id": 2, "name": "Store Layer", "affected_files": 2 }
+  ],
+  "affected_modules": ["src/store/"]
 }
 ```
 

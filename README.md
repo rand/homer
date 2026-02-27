@@ -41,7 +41,7 @@ Homer creates a `.homer/` directory containing a SQLite database and configurati
 | **Module Context** | `*/.context.md` | AI agents (scoped per directory) |
 | **Risk Map** | `homer-risk.json` | AI agents, CI pipelines |
 | **Skills** | `.claude/skills/*.md` | Claude Code skill system |
-| **Topos Spec** | `spec/*.toml` | Formal specification consumers |
+| **Topos Spec** | `spec/*.tps` | Formal specification consumers |
 | **Report** | `homer-report.html` | Humans (HTML or Markdown) |
 | **Graph Metrics** | In database | `homer query`, `homer graph`, MCP server |
 

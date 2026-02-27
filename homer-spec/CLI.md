@@ -381,6 +381,22 @@ The MCP server exposes Homer's query capabilities as tools for AI agents. Built 
 }
 ```
 
+### Tool: `homer_diff`
+
+```json
+{
+  "name": "homer_diff",
+  "description": "Analyze the impact of a set of changed files. Returns high-salience files, low bus factor files, affected communities, and affected modules.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "paths": { "type": "array", "items": { "type": "string" }, "description": "List of changed file paths to analyze" }
+    },
+    "required": ["paths"]
+  }
+}
+```
+
 ---
 
 ## Configuration File
@@ -400,6 +416,10 @@ llm_salience_threshold = 0.7
 # Max entities to summarize per LLM run
 max_llm_batch_size = 50
 
+[analysis.invalidation]
+global_centrality_on_topology_change = true
+conservative_semantic_invalidation = true
+
 [llm]
 # Provider: anthropic, openai, custom
 provider = "anthropic"
@@ -413,6 +433,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 max_concurrent = 5
 # Cost budget per run (USD, 0 = unlimited)
 cost_budget = 0.0
+# Whether LLM features are enabled (opt-in)
+enabled = false
 
 [extraction]
 # Git history
@@ -433,18 +455,20 @@ include_comments = true            # Fetch MR/issue comments
 include_reviews = true             # Fetch MR approvals
 
 [extraction.structure]
-include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.go", "**/*.java", "**/*.rb", "**/*.swift", "**/*.kt", "**/*.kts", "**/*.cs", "**/*.php"]
-exclude_patterns = ["**/node_modules/**", "**/vendor/**", "**/target/**", "**/.git/**", "**/dist/**"]
+include_patterns = ["**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.go", "**/*.java", "**/*.rb", "**/*.swift", "**/*.kt", "**/*.kts", "**/*.cs", "**/*.php", "**/*.zig", "**/*.lean"]
+exclude_patterns = ["**/node_modules/**", "**/vendor/**", "**/target/**", "**/.git/**", "**/dist/**", "**/.venv/**", "**/venv/**", "**/site-packages/**", "**/__pycache__/**", "**/zig-cache/**", "**/zig-out/**", "**/.lake/**", "**/.build/**"]
 
 [extraction.documents]
 enabled = true
 include_doc_comments = true        # Extract doc comments during graph extraction
 include_patterns = [
     "README*", "CONTRIBUTING*", "ARCHITECTURE*", "CHANGELOG*",
-    "docs/**/*.md", "doc/**/*.md", "adr/**/*.md", "wiki/**/*.md",
-    "*.tps",
+    "docs/**/*.md", "doc/**/*.md", "adr/**/*.md",
 ]
-exclude_patterns = ["**/node_modules/**", "**/vendor/**"]
+exclude_patterns = [
+    "**/node_modules/**", "**/vendor/**",
+    "**/.venv/**", "**/venv/**", "**/site-packages/**",
+]
 
 [extraction.prompts]
 enabled = false                     # Opt-in, not opt-out (privacy-sensitive)
@@ -452,7 +476,6 @@ sources = ["claude-code", "agent-rules"]
 redact_sensitive = true             # Strip API keys, passwords, personal info
 store_full_text = false             # Only store extracted metadata, not raw prompt text
 hash_session_ids = true             # Don't store raw session identifiers
-exclude_contributors = []           # Skip automated agent interactions
 
 [graph]
 # Languages to analyze (auto = detect from file tree)
@@ -486,7 +509,7 @@ per_directory = true
 [renderers.skills]
 output_dir = ".claude/skills/"
 
-[renderers.spec]
+[renderers.topos-spec]
 output_dir = "spec/"
 format = "topos"
 

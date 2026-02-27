@@ -18,7 +18,7 @@ Cargo workspace with 5 crates:
 - **homer-core** — Pipeline, extractors, analyzers, renderers, SQLite store
 - **homer-graphs** — Tree-sitter scope graph extraction (13 languages)
 - **homer-cli** — `homer` binary (clap subcommands: init, update, status, query, graph, diff, render, snapshot, risk-check, serve)
-- **homer-mcp** — MCP server (rmcp, 5 tools)
+- **homer-mcp** — MCP server (rmcp, 6 tools)
 - **homer-test** — Integration test fixtures and helpers
 
 ## Pipeline Flow

@@ -10,7 +10,7 @@ Homer is a Cargo workspace with 5 crates:
 homer-core/     Pipeline orchestration, store, extractors, analyzers, renderers, LLM client
 homer-graphs/   Tree-sitter extraction, scope graphs, language support (13 languages)
 homer-cli/      The `homer` binary (clap-based CLI, 10 commands)
-homer-mcp/      MCP server (rmcp, 5 tools)
+homer-mcp/      MCP server (rmcp, 6 tools)
 homer-test/     Integration tests and fixture repos
 ```
 

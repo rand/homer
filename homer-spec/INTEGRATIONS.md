@@ -195,6 +195,7 @@ When Claude Code has MCP tools configured, Homer's `homer serve` command exposes
 - `homer_risk`: Risk assessment for files being modified
 - `homer_co_changes`: Co-change analysis for completeness checking
 - `homer_conventions`: Convention guidance per-module
+- `homer_diff`: Impact analysis for changed files (high-salience files, low bus factor, affected communities and modules)
 
 Claude Code can call these tools during coding sessions to make informed decisions.
 
@@ -249,7 +250,7 @@ jobs:
       - name: Check risk
         run: |
           # Fail if high-risk files were modified without tests
-          homer risk-check --changed-files "${{ github.event.pull_request.changed_files }}"
+          homer risk-check --diff "${{ github.event.pull_request.changed_files }}"
       
       - name: Upload report
         uses: actions/upload-artifact@v4

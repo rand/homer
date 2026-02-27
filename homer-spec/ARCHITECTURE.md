@@ -106,7 +106,7 @@ homer/
 │       ├── lib.rs                # Public API surface
 │       ├── extract/              # Extractors
 │       │   ├── mod.rs
-│       │   ├── git.rs            # Git history (libgit2 via git2 crate)
+│       │   ├── git.rs            # Git history (gix, pure-Rust git)
 │       │   ├── github.rs         # GitHub API (reqwest + octocrab)
 │       │   ├── structure.rs      # File tree, configs, manifests
 │       │   ├── graph.rs          # Scope graph construction orchestrator
@@ -137,11 +137,7 @@ homer/
 │       │   ├── report.rs         # Human-readable report
 │       │   └── risk_map.rs       # Risk annotations
 │       ├── query/                # Query engine
-│       │   ├── mod.rs
-│       │   ├── entity.rs         # Entity lookup
-│       │   ├── graph.rs          # Graph traversal queries
-│       │   ├── metrics.rs        # Metric queries
-│       │   └── search.rs         # Full-text search
+│       │   └── mod.rs            # Entity lookup, graph traversal, metric queries, full-text search
 │       └── llm/                  # LLM integration
 │           ├── mod.rs
 │           ├── client.rs         # HTTP client (reqwest)
@@ -412,7 +408,7 @@ Summary:
 
 | Phase | Strategy | Rationale |
 |-------|----------|-----------|
-| Git walking | Sequential | libgit2 not threadsafe per repo handle |
+| Git walking | Sequential | gix repo handle is not thread-safe for a single repo |
 | File parsing | Rayon parallel | Each file parse is independent |
 | Scope graph build | Rayon parallel | Each file's subgraph is isolated |
 | Doc comment extraction | Rayon parallel | Piggybacks on file parsing pass |

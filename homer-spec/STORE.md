@@ -122,7 +122,7 @@ pub struct Node {
 
 Renames, file moves, and symbol evolution create discontinuities in longitudinal analysis. Without aliasing, a file moved from `src/lib.rs` to `src/core/lib.rs` loses its entire change history in Homer's view.
 
-**Aliasing model**: Homer tracks identity across renames via `Aliases` hyperedges (see HyperedgeKind below). When a git diff detects a rename (via `libgit2`'s similarity-based rename detection), both the old and new nodes are created, and an `Aliases` edge links them with confidence metadata.
+**Aliasing model**: Homer tracks identity across renames via `Aliases` hyperedges (see HyperedgeKind below). When a git diff detects a rename (via `gix`'s similarity-based rename detection), both the old and new nodes are created, and an `Aliases` edge links them with confidence metadata.
 
 ```rust
 /// Alias metadata stored on Aliases hyperedges

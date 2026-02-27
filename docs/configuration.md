@@ -35,11 +35,14 @@ include_patterns = [
     "**/*.rs", "**/*.py", "**/*.ts", "**/*.tsx",
     "**/*.js", "**/*.jsx", "**/*.go", "**/*.java",
     "**/*.rb", "**/*.swift", "**/*.kt", "**/*.kts",
-    "**/*.cs", "**/*.php",
+    "**/*.cs", "**/*.php", "**/*.zig", "**/*.lean",
 ]
 exclude_patterns = [
     "**/node_modules/**", "**/vendor/**", "**/target/**",
-    "**/.git/**", "**/dist/**",
+    "**/.git/**", "**/dist/**", "**/.venv/**", "**/venv/**",
+    "**/site-packages/**", "**/__pycache__/**",
+    "**/zig-cache/**", "**/zig-out/**",
+    "**/.lake/**", "**/.build/**",
 ]
 
 [extraction.documents]
@@ -49,7 +52,10 @@ include_patterns = [
     "README*", "CONTRIBUTING*", "ARCHITECTURE*", "CHANGELOG*",
     "docs/**/*.md", "doc/**/*.md", "adr/**/*.md",
 ]
-exclude_patterns = ["**/node_modules/**", "**/vendor/**"]
+exclude_patterns = [
+    "**/node_modules/**", "**/vendor/**",
+    "**/.venv/**", "**/venv/**", "**/site-packages/**",
+]
 
 [extraction.prompts]
 enabled = false
@@ -259,7 +265,7 @@ Set to `"auto"` to detect languages from file extensions, or provide an explicit
 languages = ["rust", "python", "typescript"]
 ```
 
-Supported language identifiers: `rust`, `python`, `typescript`, `javascript`, `go`, `java`, `ruby`, `swift`, `kotlin`, `csharp`, `php`.
+Supported language identifiers: `rust`, `python`, `typescript`, `javascript`, `go`, `java`, `ruby`, `swift`, `kotlin`, `csharp`, `php`, `zig`, `lean`.
 
 ### `[graph.snapshots]`
 
@@ -296,7 +302,7 @@ Available renderers:
 | `module-ctx` | `*/.context.md` | Per-directory context files |
 | `risk-map` | `homer-risk.json` | Machine-readable risk annotations |
 | `skills` | `.claude/skills/*.md` | Claude Code skill files |
-| `topos-spec` | `spec/*.toml` | Topological specification files |
+| `topos-spec` | `spec/*.tps` | Topological specification files |
 | `report` | `homer-report.html` | Human-readable analysis report |
 
 Disable specific renderers or enable all 6:

@@ -61,7 +61,7 @@ let subgraphs: Vec<Result<FileGraph>> = parsed_files
 - Rendering: each renderer is independent
 
 **Sequential bottlenecks**:
-- Git history walking (libgit2 repo handle is not thread-safe for a single repo)
+- Git history walking (gix repo handle is not thread-safe for a single repo)
 - Graph merging (subgraphs merge into shared structure)
 - Global centrality metrics (PageRank needs the full graph)
 - Community detection (iterative algorithm)
