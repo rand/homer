@@ -69,7 +69,7 @@ Homer combines four disciplines:
 1. **Behavioral analysis** — Mining git history for change frequency, churn velocity, co-change patterns, contributor concentration (bus factor)
 2. **Structural graph analysis** — Call graphs, import graphs, centrality metrics (PageRank, betweenness, HITS), community detection (Louvain)
 3. **Composite salience** — Combining behavioral and structural signals into a single score that identifies the most important code, including stable high-centrality nodes that behavioral analysis alone would miss
-4. **Tree-sitter extraction** — Scope-graph-based parsing of function definitions, call sites, imports, and doc comments for Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, and PHP
+4. **Tree-sitter extraction** — Scope-graph-based parsing of function definitions, call sites, imports, and doc comments for Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, PHP, Zig, and Lean 4
 
 The pipeline runs in four stages: **Extract** (git history, file structure, call/import graphs, documents, GitHub/GitLab PRs, prompts) -> **Auto Snapshots** (release-triggered and commit-count-triggered graph snapshots) -> **Analyze** (behavioral, centrality, community, temporal, convention, task pattern, semantic) -> **Render** (AGENTS.md, context maps, risk map, skills, topos-spec, report).
 
@@ -110,6 +110,8 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 | Kotlin | Precise (scope graph) |
 | C# | Precise (scope graph) |
 | PHP | Precise (scope graph) |
+| Zig | Precise (scope graph) |
+| Lean 4 | Precise (scope graph) |
 
 ## Architecture
 

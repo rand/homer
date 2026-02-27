@@ -82,7 +82,7 @@ This projection is what enables centrality analysis. The accuracy of the call gr
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResolutionTier {
     /// Full scope graph rules — precise cross-file resolution
-    /// Languages: Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, PHP
+    /// Languages: Rust, Python, TypeScript, JavaScript, Go, Java, Ruby, Swift, Kotlin, C#, PHP, Zig, Lean 4
     Precise,
     /// Tree-sitter heuristic — within-file + import-based guesses
     /// Languages: C, C++, and others with tree-sitter grammars
@@ -196,6 +196,10 @@ impl LanguageRegistry {
 **C#** (Precise): Namespace scoping (both block-scoped and file-scoped) plus class/struct/interface/enum/record model. XML documentation comments (`///`). `public`/`internal` members exported.
 
 **PHP** (Precise): Namespace definitions, class/interface/trait system, and PHPDoc (`/** */`). Tree parsed with `LANGUAGE_PHP` for full PHP files. Class members respect `public`/`private`/`protected` visibility.
+
+**Zig** (Precise): `pub` keyword gates export visibility. Container types (`struct`, `enum`, `union`, `error_set`) create child scopes. `@import("path")` bindings create import scopes. Test declarations (`test "name"`) are never exported. `///` doc comments extracted via `DocStyle::ZigDoc`.
+
+**Lean 4** (Precise): Flat namespace/end marker syntax with `walk_module_children()` for scope construction. Default-exported; `private` modifier (preceding sibling in AST) suppresses export. Structures, classes, and inductive types create child scopes. `/-- ... -/` doc comments. Known limitation: tactics, user-defined notation, and macro expansions are not captured by tree-sitter.
 
 **C/C++** (Heuristic): Too complex for full scope graph rules (macros, headers, include paths, templates, ADL). Heuristic extraction can still identify function definitions, call sites, and `#include` relationships. Confidence scores will be lower.
 
