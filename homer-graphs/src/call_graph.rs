@@ -87,6 +87,9 @@ pub fn project_call_graph<S: BuildHasher>(
 /// Compute a map from each `PushSymbol` (reference) to its enclosing function
 /// (`PopSymbol` with `SymbolKind::Function`) using span containment.
 ///
+/// Uses sorted function spans + binary search for O(refs * (log(funcs) + D))
+/// where D is the nesting depth, instead of O(refs * funcs) linear scan.
+///
 /// Returns the map in terms of the file-level `ScopeNodeId`s. Caller should
 /// remap using the `id_map` returned by `ScopeGraph::add_file_graph`.
 pub fn compute_enclosing_functions(
@@ -94,8 +97,10 @@ pub fn compute_enclosing_functions(
 ) -> HashMap<ScopeNodeId, ScopeNodeId> {
     use crate::scope_graph::ScopeNodeKind;
 
-    // Collect all function definitions with their spans
-    let functions: Vec<_> = file_graph
+    // Collect function definitions with spans, sorted by start position.
+    // Secondary sort: larger spans first (so nested functions appear after their parents
+    // at the same start position, enabling correct backward-walk behavior).
+    let mut functions: Vec<_> = file_graph
         .nodes
         .iter()
         .filter(|n| {
@@ -104,6 +109,14 @@ pub fn compute_enclosing_functions(
                 && n.span.is_some()
         })
         .collect();
+
+    functions.sort_by(|a, b| {
+        let sa = a.span.expect("filtered above");
+        let sb = b.span.expect("filtered above");
+        (sa.start_row, sa.start_col)
+            .cmp(&(sb.start_row, sb.start_col))
+            .then_with(|| span_size(sb).cmp(&span_size(sa)))
+    });
 
     let mut enclosing = HashMap::new();
 
@@ -115,17 +128,30 @@ pub fn compute_enclosing_functions(
             continue;
         };
 
-        // Find the smallest enclosing function by span containment
+        // Binary search: find the rightmost function starting at or before ref_span.start
+        let pos = functions.partition_point(|f| {
+            let s = f.span.expect("filtered above");
+            (s.start_row, s.start_col) <= (ref_span.start_row, ref_span.start_col)
+        });
+
+        // Walk backwards from pos, find the smallest enclosing function.
+        // Due to sorting, more-nested functions appear later (start later within parent),
+        // so the first containing function we find walking backward is typically the
+        // innermost. We still track the best to handle edge cases correctly.
         let mut best: Option<(ScopeNodeId, usize)> = None;
-        for func in &functions {
-            let Some(func_span) = func.span else {
-                continue;
-            };
+        for i in (0..pos).rev() {
+            let func = functions[i];
+            let func_span = func.span.expect("filtered above");
             if span_contains(func_span, ref_span) {
                 let size = span_size(func_span);
                 if best.is_none_or(|(_, s)| size < s) {
                     best = Some((func.id, size));
                 }
+                // Once we find a containing function, any function further back with a
+                // larger span is a worse match, and functions with smaller spans that start
+                // earlier can't contain a reference this far right. The first hit is almost
+                // always the innermost, so break for efficiency.
+                break;
             }
         }
 

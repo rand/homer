@@ -105,6 +105,11 @@ pub struct ResolvedReference {
     pub confidence: f64,
 }
 
+// ── Resolution cache entry ─────────────────────────────────────────────
+
+/// Cached definition data for resolution memoization.
+type CachedResolution = (ScopeNodeId, Option<SymbolKind>, PathBuf, f64);
+
 // ── Partial path (for path-stitching) ─────────────────────────────────
 
 /// A partial path during resolution. Tracks the symbol stack and visited nodes.
@@ -264,12 +269,64 @@ impl ScopeGraph {
     ///
     /// Returns a list of resolved references (reference → definition pairs).
     /// Each reference may resolve to zero, one, or multiple definitions.
+    ///
+    /// Uses a resolution cache keyed by (`parent_scope`, symbol) to avoid
+    /// redundant BFS traversals for references to the same symbol in the same scope.
     pub fn resolve_all(&self) -> Vec<ResolvedReference> {
         let push_nodes: Vec<_> = self.push_nodes();
         let mut results = Vec::new();
 
+        // Cache: (parent_scope, symbol) → definitions found by BFS.
+        // Two PushSymbol nodes for the same symbol in the same scope follow identical
+        // BFS paths, so we cache and replay results with updated reference info.
+        let mut cache: HashMap<(ScopeNodeId, String), Vec<CachedResolution>> = HashMap::new();
+
         for push_node in push_nodes {
+            let ScopeNodeKind::PushSymbol { ref symbol } = push_node.kind else {
+                continue;
+            };
+
+            // The parent scope is the target of the push node's first outgoing edge
+            let parent_scope = self.edges_from(push_node.id).first().map(|e| e.target);
+
+            // Check cache for (parent_scope, symbol)
+            if let Some(scope_id) = parent_scope {
+                let cache_key = (scope_id, symbol.clone());
+                if let Some(cached) = cache.get(&cache_key) {
+                    for (def_node, kind, def_file, confidence) in cached {
+                        results.push(ResolvedReference {
+                            reference_node: push_node.id,
+                            definition_node: *def_node,
+                            symbol: symbol.clone(),
+                            kind: *kind,
+                            reference_file: push_node.file_path.clone(),
+                            definition_file: def_file.clone(),
+                            confidence: *confidence,
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            // BFS resolution (cache miss)
             let resolved = self.resolve_reference(push_node);
+
+            // Store in cache
+            if let Some(scope_id) = parent_scope {
+                let cache_entry: Vec<_> = resolved
+                    .iter()
+                    .map(|r| {
+                        (
+                            r.definition_node,
+                            r.kind,
+                            r.definition_file.clone(),
+                            r.confidence,
+                        )
+                    })
+                    .collect();
+                cache.insert((scope_id, symbol.clone()), cache_entry);
+            }
+
             results.extend(resolved);
         }
 
