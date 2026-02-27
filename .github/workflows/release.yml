@@ -23,8 +23,9 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: homer
+            cross: true
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
             artifact: homer
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -38,16 +39,16 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install cross (Linux aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Install cross
+        if: matrix.cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build (native)
-        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.target }} -p homer-cli
 
       - name: Build (cross)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} -p homer-cli
 
       - name: Package
