@@ -252,17 +252,27 @@ async fn render_architecture_overview(
     let mut sorted_communities: Vec<_> = communities.into_iter().collect();
     sorted_communities.sort_by_key(|(id, _)| *id);
 
+    // First pass: derive labels and collect communities
+    let mut labeled: Vec<(String, Vec<(String, f64)>)> = sorted_communities
+        .into_iter()
+        .map(|(_id, mut members)| {
+            members.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let label = derive_cluster_label(&members);
+            (label, members)
+        })
+        .collect();
+
+    // Deduplicate labels: merge small communities with same label
+    deduplicate_cluster_labels(&mut labeled);
+
     let _ = writeln!(
         out,
         "The codebase organizes into {} architectural clusters:",
-        sorted_communities.len()
+        labeled.len()
     );
     let _ = writeln!(out);
 
-    for (_id, mut members) in sorted_communities {
-        members.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let label = derive_cluster_label(&members);
+    for (label, members) in &labeled {
         let top_files: Vec<_> = members.iter().take(5).map(|(n, _)| n.as_str()).collect();
 
         let _ = writeln!(
@@ -293,6 +303,8 @@ const SEMANTIC_PATTERNS: &[(&str, &str)] = &[
     ("pipeline", "Pipeline"),
     ("query", "Query Engine"),
     ("types", "Type Definitions"),
+    ("bench", "Benchmarks"),
+    ("spec", "Specification"),
 ];
 
 fn derive_cluster_label(members: &[(String, f64)]) -> String {
@@ -352,6 +364,33 @@ fn title_case(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Merge communities that share the same label.
+///
+/// When multiple communities get the same semantic label (e.g., two separate
+/// "Data Extraction" clusters), merge them into a single entry so the output
+/// is not confusing with repeated labels.
+fn deduplicate_cluster_labels(labeled: &mut Vec<(String, Vec<(String, f64)>)>) {
+    let mut merged: Vec<(String, Vec<(String, f64)>)> = Vec::new();
+
+    for (label, members) in labeled.drain(..) {
+        if let Some(existing) = merged.iter_mut().find(|(l, _)| *l == label) {
+            existing.1.extend(members);
+        } else {
+            merged.push((label, members));
+        }
+    }
+
+    // Re-sort members within each merged group by modularity contribution
+    for (_, members) in &mut merged {
+        members.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    }
+
+    // Sort groups by size descending
+    merged.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    *labeled = merged;
 }
 
 // ── Key Documents ────────────────────────────────────────────────
@@ -1918,5 +1957,41 @@ mod tests {
         assert_eq!(title_case("my_module"), "My Module");
         assert_eq!(title_case("foo-bar"), "Foo Bar");
         assert_eq!(title_case("simple"), "Simple");
+    }
+
+    #[test]
+    fn dedup_merges_same_labels() {
+        let mut labeled = vec![
+            (
+                "Data Extraction".to_string(),
+                vec![("src/extract/git.rs".to_string(), 0.5)],
+            ),
+            (
+                "Data Extraction".to_string(),
+                vec![("src/extract/graph.rs".to_string(), 0.3)],
+            ),
+            (
+                "Analysis Engine".to_string(),
+                vec![("src/analyze/centrality.rs".to_string(), 0.4)],
+            ),
+        ];
+        deduplicate_cluster_labels(&mut labeled);
+
+        let labels: Vec<&str> = labeled.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            labels.iter().filter(|l| **l == "Data Extraction").count(),
+            1,
+            "Should merge duplicate labels"
+        );
+
+        let data_extraction = labeled
+            .iter()
+            .find(|(l, _)| l == "Data Extraction")
+            .unwrap();
+        assert_eq!(
+            data_extraction.1.len(),
+            2,
+            "Merged group should have 2 members"
+        );
     }
 }
