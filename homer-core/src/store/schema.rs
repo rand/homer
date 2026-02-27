@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS hyperedge_members (
 );
 CREATE INDEX IF NOT EXISTS idx_hem_node ON hyperedge_members(node_id);
 CREATE INDEX IF NOT EXISTS idx_hem_edge ON hyperedge_members(hyperedge_id);
+CREATE INDEX IF NOT EXISTS idx_hem_edge_node ON hyperedge_members(hyperedge_id, node_id);
 
 -- Analysis results (derived data)
 CREATE TABLE IF NOT EXISTS analysis_results (
@@ -161,6 +162,8 @@ PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000;
 PRAGMA mmap_size = 268435456;
 PRAGMA foreign_keys = ON;
+PRAGMA temp_store = MEMORY;
+PRAGMA cache_spill = 0;
 ";
 
 #[cfg(test)]

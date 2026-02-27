@@ -55,7 +55,9 @@ impl SqliteStore {
         conn.execute_batch(
             "PRAGMA synchronous = NORMAL;
              PRAGMA cache_size = -64000;
-             PRAGMA foreign_keys = ON;",
+             PRAGMA foreign_keys = ON;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA cache_spill = 0;",
         )
         .map_err(StoreError::Sqlite)?;
 
