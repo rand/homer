@@ -255,6 +255,8 @@ fn bench_parse_all_languages(c: &mut Criterion) {
         ("kotlin", generate_kotlin_source(20), "bench.kt"),
         ("csharp", generate_csharp_source(20), "Bench.cs"),
         ("php", generate_php_source(20), "bench.php"),
+        ("zig", generate_zig_source(20), "bench.zig"),
+        ("lean", generate_lean_source(20), "Main.lean"),
     ];
 
     for (lang_id, source, filename) in &languages {
@@ -407,6 +409,33 @@ fn generate_php_source(n: usize) -> String {
             (i + 1) % n
         );
     }
+    s
+}
+
+fn generate_zig_source(n: usize) -> String {
+    use std::fmt::Write;
+    let mut s = String::from("const std = @import(\"std\");\n\n");
+    for i in 0..n {
+        let _ = write!(
+            s,
+            "pub fn func_{i}(x: i32) i32 {{\n    return func_{}(x + 1);\n}}\n\n",
+            (i + 1) % n
+        );
+    }
+    s
+}
+
+fn generate_lean_source(n: usize) -> String {
+    use std::fmt::Write;
+    let mut s = String::from("import Mathlib\n\nnamespace Bench\n\n");
+    for i in 0..n {
+        let _ = write!(
+            s,
+            "/-- Doc for func_{i}. -/\ndef func_{i} (x : Nat) : Nat :=\n  func_{} (x + 1)\n\n",
+            (i + 1) % n
+        );
+    }
+    s.push_str("end Bench\n");
     s
 }
 

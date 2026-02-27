@@ -5,13 +5,19 @@
 //   homer_graph  — centrality metrics for top entities
 //   homer_risk   — risk assessment for a file path
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{ServerCapabilities, ServerInfo};
-use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_router};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams,
+    ServerCapabilities, ServerInfo, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::{RoleServer, ServerHandler, ServiceExt, schemars, tool, tool_router};
 use serde::Deserialize;
 use tracing::info;
 
@@ -187,6 +193,30 @@ impl ServerHandler for HomerMcpServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+
+    fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListToolsResult, rmcp::ErrorData>> + Send + '_ {
+        std::future::ready(Ok(ListToolsResult {
+            tools: self.tool_router.list_all(),
+            ..Default::default()
+        }))
+    }
+
+    fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<CallToolResult, rmcp::ErrorData>> + Send + '_ {
+        let tool_context = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tool_context)
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.tool_router.get(name).cloned()
     }
 }
 
