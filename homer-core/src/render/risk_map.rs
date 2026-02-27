@@ -58,6 +58,7 @@ impl Renderer for RiskMapRenderer {
 pub struct RiskMap {
     pub version: &'static str,
     pub generated_at: String,
+    pub commit: String,
     pub risk_areas: Vec<RiskArea>,
     pub safe_areas: Vec<SafeArea>,
 }
@@ -306,9 +307,17 @@ async fn build_risk_map(db: &dyn HomerStore) -> crate::error::Result<RiskMap> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    let commit = db
+        .get_checkpoint("git_last_sha")
+        .await
+        .ok()
+        .flatten()
+        .map_or_else(|| "unknown".to_string(), |s| s.chars().take(7).collect());
+
     Ok(RiskMap {
         version: "1.0",
         generated_at: Utc::now().to_rfc3339(),
+        commit,
         risk_areas,
         safe_areas,
     })

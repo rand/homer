@@ -3,6 +3,20 @@ use std::path::Path;
 use crate::config::HomerConfig;
 use crate::store::HomerStore;
 
+/// Generate a staleness indicator comment for rendered artifacts.
+///
+/// Format: `<!-- homer:generated at=<ISO-8601> commit=<short-sha> -->`
+pub async fn staleness_header(store: &dyn HomerStore) -> String {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let sha = store
+        .get_checkpoint("git_last_sha")
+        .await
+        .ok()
+        .flatten()
+        .map_or_else(|| "unknown".to_string(), |s| s.chars().take(7).collect());
+    format!("<!-- homer:generated at={now} commit={sha} -->")
+}
+
 /// Common interface for output artifact generators.
 #[async_trait::async_trait]
 pub trait Renderer: Send + Sync {
@@ -147,5 +161,39 @@ mod tests {
         let existing = "# Old\nold content";
         let new_content = "# New\nnew content";
         assert_eq!(merge_with_preserve(existing, new_content), new_content);
+    }
+
+    #[tokio::test]
+    async fn staleness_header_format() {
+        use crate::store::sqlite::SqliteStore;
+
+        let store = SqliteStore::in_memory().unwrap();
+        store
+            .set_checkpoint("git_last_sha", "abcdef1234567890")
+            .await
+            .unwrap();
+
+        let header = staleness_header(&store).await;
+        assert!(
+            header.contains("homer:generated"),
+            "Should contain marker: {header}"
+        );
+        assert!(
+            header.contains("commit=abcdef1"),
+            "Should contain short SHA: {header}"
+        );
+        assert!(header.contains("at="), "Should contain timestamp: {header}");
+    }
+
+    #[tokio::test]
+    async fn staleness_header_without_checkpoint() {
+        use crate::store::sqlite::SqliteStore;
+
+        let store = SqliteStore::in_memory().unwrap();
+        let header = staleness_header(&store).await;
+        assert!(
+            header.contains("commit=unknown"),
+            "Should fallback to unknown: {header}"
+        );
     }
 }

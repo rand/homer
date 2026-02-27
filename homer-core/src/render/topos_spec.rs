@@ -61,6 +61,7 @@ async fn render_spec(
     };
 
     let spec_id = sanitize_identifier(&root_name);
+    let _ = writeln!(out, "# {}", super::traits::staleness_header(db).await);
     let _ = writeln!(out, "spec {spec_id}");
 
     render_principles(out, db).await?;
@@ -554,8 +555,12 @@ mod tests {
         let config = HomerConfig::default();
         let content = renderer.render(&store, &config).await.unwrap();
         assert!(
-            content.starts_with("spec _"),
-            "Should start with spec identifier: {content}"
+            content.contains("homer:generated"),
+            "Should contain staleness header: {content}"
+        );
+        assert!(
+            content.contains("spec _"),
+            "Should contain spec identifier: {content}"
         );
     }
 

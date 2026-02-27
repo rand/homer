@@ -51,6 +51,7 @@ impl Renderer for ReportRenderer {
 // ── Report data model ────────────────────────────────────────────────
 
 struct ReportData {
+    commit: String,
     file_count: u32,
     function_count: u32,
     type_count: u32,
@@ -120,7 +121,15 @@ async fn load_report_data(store: &dyn HomerStore) -> crate::error::Result<Report
     let prompt_hotspots = load_agent_entries(store, AnalysisKind::PromptHotspot).await?;
     let contributor_distribution = load_contributor_distribution(store).await?;
 
+    let commit = store
+        .get_checkpoint("git_last_sha")
+        .await
+        .ok()
+        .flatten()
+        .map_or_else(|| "unknown".to_string(), |s| s.chars().take(7).collect());
+
     Ok(ReportData {
+        commit,
         file_count,
         function_count,
         type_count,
@@ -441,6 +450,11 @@ fn render_html(data: &ReportData) -> String {
     let _ = writeln!(
         h,
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    );
+    let _ = writeln!(
+        h,
+        "<meta name=\"homer:commit\" content=\"{}\">",
+        data.commit
     );
     let _ = writeln!(h, "<title>Homer Report</title>");
     let _ = writeln!(h, "<style>{REPORT_CSS}</style>");

@@ -59,11 +59,12 @@ impl Renderer for SkillsRenderer {
         std::fs::create_dir_all(&skills_dir)
             .map_err(|e| crate::error::HomerError::Extract(crate::error::ExtractError::Io(e)))?;
 
+        let staleness = super::traits::staleness_header(store).await;
         let mut written = 0u32;
         for skill in &skills {
             let filename = skill_filename(&skill.name);
             let path = skills_dir.join(&filename);
-            let content = render_skill(skill);
+            let content = render_skill(skill, &staleness);
             std::fs::write(&path, content).map_err(|e| {
                 crate::error::HomerError::Extract(crate::error::ExtractError::Io(e))
             })?;
@@ -278,7 +279,7 @@ async fn derive_from_co_changes(
 
 // ── Rendering ────────────────────────────────────────────────────────
 
-fn render_skill(skill: &DerivedSkill) -> String {
+fn render_skill(skill: &DerivedSkill, staleness: &str) -> String {
     let mut out = String::with_capacity(1024);
 
     // Frontmatter
@@ -286,6 +287,8 @@ fn render_skill(skill: &DerivedSkill) -> String {
     let _ = writeln!(out, "description: \"{}\"", skill.description);
     let _ = writeln!(out, "---");
     let _ = writeln!(out);
+
+    let _ = writeln!(out, "{staleness}");
 
     // Title
     let _ = writeln!(out, "# {}", skill.name);
@@ -544,7 +547,7 @@ mod tests {
             pitfalls: vec!["`src/routes.rs` has a 30% correction rate".to_string()],
         };
 
-        let content = render_skill(&skill);
+        let content = render_skill(&skill, "<!-- homer:generated at=test commit=test -->");
 
         assert!(content.contains("---\n"), "Should have frontmatter");
         assert!(content.contains("description:"), "Should have description");
